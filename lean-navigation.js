@@ -86,7 +86,7 @@ const Navigation = {
     }
     return true;
   },
-  plan(from, to) {
+  plan(from, to, arrivalRadius = 0) {
     if (!this.scene || (from.regionId | to.regionId) & DUNGEON) return null;
     const start = this.local(from), goal = this.local(to);
     if (!start || !goal || !this.open(start.x, start.z)) return null;
@@ -106,6 +106,7 @@ const Navigation = {
       const p = pop(), k = key(p); if (closed.has(k)) continue; closed.add(k);
       if (h(p) < h(best)) best = p;
       const a = p === first ? start : center(p);
+      if (Math.hypot(a.x - goal.x, a.z - goal.z) <= arrivalRadius) { best = p; reached = true; break; }
       if (h(p) < 2 && this.clear(a, goal)) { best = p; reached = true; break; }
       for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]]) {
         const q = { x: p.x + dx, z: p.z + dz, g: p.g + Math.hypot(dx, dz), parent: p }, b = center(q), qk = key(q);
@@ -117,7 +118,7 @@ const Navigation = {
     const goalCovered = this.scene.grids.has(Math.floor(goal.x / SECTOR) + ',' + Math.floor(goal.z / SECTOR));
     if (!reached && (goalCovered || h(first) - h(best) < 2)) return [];
     const path = []; for (let p = best; p && p !== first; p = p.parent) path.push(center(p)); path.reverse();
-    if (reached) path.push(goal);
+    if (reached && (!arrivalRadius || Math.hypot(center(best).x - goal.x, center(best).z - goal.z) > arrivalRadius)) path.push(goal);
     // Smooth only segments whose terrain and object collision checks both pass.
     const result = []; let anchor = start;
     for (let i = 0; i < path.length;) {
@@ -126,13 +127,14 @@ const Navigation = {
     }
     return result;
   },
-  next(owner, destination, recorded = false) {
+  next(owner, destination, recorded = false, arrivalRadius = 0) {
     const pose = World.pose(), previous = owner.travel;
     if (!this.scene || (pose.regionId & DUNGEON)) {
       return recorded ? { point: destination } : { waiting: true, error: this.error || 'Waiting for game collision data. Reload the game if attached late, or record a walking route.' };
     }
     if (!previous || previous.revision !== this.revision || dist2D(previous.destination, destination) > 1 || previous.index >= previous.route.length) {
-      const route = this.plan(pose, destination);
+      let route = this.plan(pose, destination);
+      if (route && !route.length && arrivalRadius > 0) route = this.plan(pose, destination, arrivalRadius);
       if (!route) return { waiting: true, error: 'Waiting for collision coverage at the current position.' };
       if (!route.length) return { error: 'No walkable route found through the loaded collision map.' };
       owner.travel = { destination: { ...destination }, route, index: 0, revision: this.revision };

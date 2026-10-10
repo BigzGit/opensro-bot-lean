@@ -40,15 +40,17 @@ const Town = {
     this.message = 'Town setup updated.';
     Settings.saveProfile(); UI.toast('Saved town ' + role + '.'); UI.draw();
   },
-  eligible(item) {
+  disposable(item) {
     const c = this.cfg(), name = (item.name || '').toLowerCase(), tf = item.typeFlags;
-    // Missing type metadata must never turn an item into a storage candidate.
+    // Missing type metadata must never turn an item into a disposal candidate.
     if (!Number.isInteger(tf) || ItemType.isPotion(tf) || ItemType.isCure(tf) ||
         (tf & 0x7fc) === 0x1ec || item.refObjId === 24198 ||
         Restock.supplies().some(s => s.refObjId === item.refObjId) ||
         splitList(c.keep).some(s => name.includes(s))) return false;
-    return !!c.store[Loot.category(tf)];
+    return true;
   },
+  eligible(item) { return this.disposable(item) && Loot.category(item.typeFlags) === 'elixirs'; },
+  sellable(item) { return this.disposable(item) && Loot.category(item.typeFlags) !== 'elixirs'; },
   reason() {
     const c = this.cfg(), pet = Loot.pet();
     if (c.petFull && pet && pet.rec.status - pet.rec.inventory.length <= c.petFree) return 'pickup pet nearly full';
@@ -63,7 +65,7 @@ const Town = {
     if (!this.scroll(0x09ec) || !this.scroll(0x19ec)) return 'Carry a return scroll and a reverse return scroll before hunting.';
     if (World.freeBagSlots() < 1) return 'Keep one character bag slot free for pet-to-storage transfers.';
     if (toBigInt(World.gp.progression?.gold ?? 0) <= 0n) return 'Carry gold for potions, storage and repairs.';
-    if (c.petFull && !Loot.pet()?.rec.inventory.some(i => this.eligible(i)) && this.reason() === 'pickup pet nearly full') return 'Pet is full of protected items. Change storage filters or empty it manually.';
+    if (c.petFull && !Loot.pet()?.rec.inventory.some(i => this.disposable(i)) && this.reason() === 'pickup pet nearly full') return 'Pet is full of protected items. Change Keep names or empty it manually.';
     return '';
   },
   fail(reason) {
@@ -104,7 +106,9 @@ const Town = {
   },
   walk(dest) {
     const t = this.trip, pose = World.pose();
-    if (dist2D(pose, dest) <= 12) return true;
+    // Permit a reachable nearby approach, but always stay in service range.
+    const radius = Math.max(0, Math.min(60, 190 - dist2D(dest, dest.npc || dest)));
+    if (dist2D(pose, dest) <= Math.max(12, radius) && dist2D(pose, dest.npc || dest) <= 200) return true;
     if (!Number.isFinite(dist2D(pose, dest))) { this.fail('Town service is in another world.'); return false; }
     if (!t.lastPose || dist2D(t.lastPose, pose) > 3) { t.lastPose = { ...pose }; t.progressAt = now(); }
     if (now() < t.retryAt) return false;
@@ -113,10 +117,10 @@ const Town = {
       this.message = 'Town movement: waiting to retry a blocked route.';
       return false;
     }
-    const step = Navigation.next(t, dest);
+    const step = Navigation.next(t, dest, false, radius);
     if (step.waiting || step.error) {
       t.travel = null; t.retryAt = now() + 5000; t.progressAt = now();
-      this.message = 'Town movement: waiting; retrying collision route. ' + (step.error || 'Waiting for collision coverage.');
+      this.message = 'Town movement to ' + (dest.name || t.phase.slice(5)) + ': waiting; retrying collision route. ' + (step.error || 'Waiting for collision coverage.');
       return false;
     }
     this.message = 'Town cycle: walking to ' + (dest.name || 'service point');
@@ -182,7 +186,6 @@ const Town = {
     if (t.staged && !bagItem) return this.fail('Staged pet item changed unexpectedly.');
     const item = bagItem || pet?.rec.inventory.find(i => this.eligible(i));
     if (!item) {
-      if (this.cfg().petFull && pet && pet.rec.status - pet.rec.inventory.length <= this.cfg().petFree) return this.fail('Protected pet items still fill the bag.');
       this.enter('close-storage'); return;
     }
     const destination = this.free(st.items, 0, st.capacity);
@@ -200,6 +203,24 @@ const Town = {
     if (Cmd.raw(command, 'Town: move selected pet loot')) {
       t.pending = { ...pending, at: now() };
       t.staged = bagItem ? null : { slot: pending.destination, ref: pending.ref };
+    }
+  },
+  sell() {
+    const t = this.trip, gp = World.gp, pet = Loot.pet();
+    if (!Restock.activeShop() || gp.shop.npc !== this.npc('smith')?.gid || gp.shop.error) return this.fail(gp.shop?.error || 'Weapon merchant selection changed.');
+    if (t.petRef && (!pet || pet.rec.refObjId !== t.petRef)) return this.fail('Pickup pet is missing or changed.');
+    if (t.salePetGid && pet?.rec.gid !== t.salePetGid) return this.fail('Pickup pet changed during selling.');
+    if (!this.pendingDone(p => !pet.rec.inventory.some(i => i.slot === p.source && i.refObjId === p.ref)) || !this.trip || gp.inventoryPending) return;
+    const item = pet?.rec.inventory.find(i => this.sellable(i));
+    if (!item) {
+      if (this.cfg().petFull && pet && pet.rec.status - pet.rec.inventory.length <= this.cfg().petFree) return this.fail('Protected pet items still fill the bag.');
+      this.enter('repair'); return;
+    }
+    const quantity = item.quantity ?? 1;
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 65535) return this.fail('Invalid pet item sale quantity.');
+    if (Cmd.raw({ kind: 'cos-shop-sell', gid: pet.rec.gid, slot: item.slot, quantity }, 'Town: sell pet loot at weapon merchant')) {
+      t.salePetGid = pet.rec.gid;
+      t.pending = { source: item.slot, ref: item.refObjId, quantity, at: now() };
     }
   },
   buy() {
@@ -318,9 +339,10 @@ const Town = {
       if (this.walk(c[role]) && this.trip) this.enter('open-' + role);
     } else if (t.phase.startsWith('open-')) {
       const role = t.phase.slice(5), kind = role === 'storage' ? 'storage-open' : role === 'gate' ? 'npc-talk' : 'shop-open';
-      if (this.open(role, kind) && this.trip) this.enter({ storage: 'store', vendor: 'buy', smith: 'repair', gate: 'reverse' }[role]);
+      if (this.open(role, kind) && this.trip) this.enter({ storage: 'store', vendor: 'buy', smith: 'sell', gate: 'reverse' }[role]);
     } else if (t.phase === 'store') this.store();
     else if (t.phase === 'buy') this.buy();
+    else if (t.phase === 'sell') this.sell();
     else if (t.phase === 'repair') this.repair();
     else if (t.phase.startsWith('close-')) {
       if (now() - t.at > 15000) this.fail('NPC window did not close.');

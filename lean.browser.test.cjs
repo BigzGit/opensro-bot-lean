@@ -135,8 +135,8 @@ const server = http.createServer((req, res) => {
     await page.getByLabel('Keep in pet (names)', { exact: true }).fill('favorite, quest');
     await page.getByLabel('Keep in pet (names)', { exact: true }).dispatchEvent('change');
     assert.equal(await page.evaluate(() => SROLean.town.cfg().keep), 'favorite, quest');
-    await page.getByLabel('Store pet: Elixirs', { exact: true }).uncheck();
-    assert.equal(await page.evaluate(() => SROLean.town.cfg().store.elixirs), false);
+    assert.equal(await page.getByLabel('Store pet: Elixirs', { exact: true }).count(), 0);
+    assert.equal(await page.getByText('Pet loot: store elixirs only.', { exact: false }).count(), 1);
     assert.equal(await page.getByLabel('Use beginner +100% speed scroll automatically', { exact: true }).isChecked(), false);
     await page.getByLabel('Use beginner +100% speed scroll automatically', { exact: true }).check();
     assert.equal(await page.evaluate(() => SROLean.settings.profile.potion.speedScroll), true);

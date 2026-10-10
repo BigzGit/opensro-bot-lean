@@ -8,11 +8,11 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.19**.
+- Latest userscript release at this snapshot: **1.2.20**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **109 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest validation: **112 integration tests**, JavaScript syntax check and headless browser checks pass.
 - Latest work: opt-in Hotan recall/storage/refill/repair/reverse cycle. Live-account testing is still outstanding.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
@@ -231,3 +231,9 @@ Expected world reset during recall-wait/reverse-wait now marks travel confirmati
 ## Town movement waits: 1.2.19
 
 User reported slow loading ending with town movement blocked or collision data unavailable and requested waiting. Reproduced cancellation in the collision-wait regression after advancing 16 minutes. Town.walk now waits on missing collision coverage and no-route results, retrying every five seconds without blind movement. After 20 seconds without progress it clears the stale route and waits five seconds before replanning. Removed the two-minute movement leg limit and whole-trip 15-minute cap so they cannot cancel these waits. Individual scroll, service and transaction confirmation timeouts remain. Town.enter clears retry state; manual control, F8, settings changes and unexpected travel still cancel. The updated long-wait regression verifies automatic recovery when collision data arrives; a new test verifies retry spacing, no command flood, no-progress replanning and F8 cancellation. 109 integration tests, syntax and isolated browser checks pass. Live-account navigation remains unverified.
+
+## Elixir storage and weapon-merchant sales: 1.2.20
+
+User reported a no-walkable-route wait after storage, requested storing only elixirs and selling the rest at the weapon store. Town.eligible now selects only unprotected elixirs regardless of legacy store category settings. Town.sellable selects other unprotected pet loot; supplies, travel scrolls, beginner speed item, unknown types and Keep names remain protected. UI replaces category controls with the fixed policy. Weapon/repair shop now enters sell before repair; native cos-shop-sell sells directly from the pet bag. Native command, ownership, shop and payload contract verified read-only in game gameplay.ts, inventory.ts cosTrade and merchant.ts. Full-stack disappearance confirms each sale; no repeat on rejection/partial or missing acknowledgement. Selection and pet identity are checked; original bag items are never sold. Capacity is checked after sales instead of after storage.
+
+Town movement accepts a collision-checked reachable point within up to 60 units of the saved approach, reduced to preserve native 200-unit service range. Navigation.next first attempts the exact goal, then retries A* with a bounded arrival radius only when no exact route exists. Other callers retain exact-goal routing. Waiting status names the service. A blocked saved-tile test verifies recovery and collision clearance; this does not prove the cause of the user screenshot, which does not expose the live collision map. Full-cycle test now confirms elixir-only storage plus non-elixir sales and protected survivors. New tests cover pending/partial sale timeout without duplication, wrong merchant, pet replacement and approach routing. 112 integration tests, syntax and isolated browser checks pass. Live-server selling and the reported Hotan route remain unverified.

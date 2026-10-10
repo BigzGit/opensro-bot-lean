@@ -750,7 +750,7 @@ function townFixture() {
 test('town cycle recalls, confirms pet storage and purchases, repairs, reverses and resumes', () => {
   const f = townFixture(), gp = f.World.gp, commands = f.commands;
   f.UI.mount = f.UI.draw = f.UI.update = f.Ticker.start = () => {}; f.boot();
-  const stored = [], buys = [], phases = [];
+  const stored = [], sold = [], buys = [], phases = [];
   let handled = 0;
   for (let n = 0; n < 140; n++) {
     f.Controller.tick();
@@ -776,6 +776,11 @@ test('town cycle recalls, confirms pet storage and purchases, repairs, reverses 
       } else if (c.kind === 'shop-open') {
         gp.shop = { npc: c.gid, offers: [{ refObjId: 102, name: 'MP', tab: 0, slot: 0, maxStack: 100, price: '10', previews: [{ refObjId: 102, typeFlags: 4332 }] }] };
         gp.shopCompletionRevision++;
+      } else if (c.kind === 'cos-shop-sell') {
+        assert.equal(gp.shop.npc, 62); assert.equal(c.gid, f.pet.gid);
+        const item = f.pet.inventory.find(i => i.slot === c.slot);
+        assert.equal(c.quantity, item.quantity ?? 1); sold.push(item.refObjId);
+        f.pet.inventory = f.pet.inventory.filter(i => i.slot !== c.slot);
       } else if (c.kind === 'shop-buy') { buys.push(c.quantity); gp.inventory.find(i => i.refObjId === 102).quantity += c.quantity; }
       else if (c.kind === 'shop-repair') gp.inventory.find(i => i.slot === 6).durability = 10;
       else if (c.kind === 'npc-close') { gp.target = 0; gp.shop = null; gp.storage = null; }
@@ -789,8 +794,8 @@ test('town cycle recalls, confirms pet storage and purchases, repairs, reverses 
     if (!f.Town.trip && phases.includes('reverse-wait')) break;
   }
   assert.equal(f.Town.trip, null, f.Town.message); assert.equal(f.Hunt.running, true, f.Town.message);
-  assert.deepEqual(stored, [1000, 1001]); assert.deepEqual(buys, [49]);
-  assert.equal(f.pet.inventory.length, 3); assert.equal(gp.inventory.find(i => i.slot === 6).durability, 10);
+  assert.deepEqual(stored, [1000]); assert.deepEqual(sold, [1001, 1003]); assert.deepEqual(buys, [49]);
+  assert.equal(f.pet.inventory.length, 2); assert.equal(gp.inventory.find(i => i.slot === 6).durability, 10);
   assert.equal(commands.filter(c => c.kind === 'item-use').length, 1);
   assert.equal(commands.filter(c => c.kind === 'travel-gate').length, 1);
   assert.match(f.Town.message, /complete/);
@@ -817,7 +822,8 @@ test('pet storage protects supplies, keep names and items with missing metadata'
   for (const item of [...f.World.items(), f.pet.inventory[2], f.pet.inventory[3], { name: 'Unknown', refObjId: 123 }]) assert.equal(f.Town.eligible(item), false);
   assert.equal(f.Town.eligible(f.pet.inventory[0]), true);
   assert.equal(f.Town.eligible({ refObjId: 24198, typeFlags: 3820 }), false);
-  f.Town.cfg().store.elixirs = false; assert.equal(f.Town.eligible(f.pet.inventory[0]), false);
+  f.Town.cfg().store.elixirs = false; assert.equal(f.Town.eligible(f.pet.inventory[0]), true, 'Legacy category switches cannot store other items or sell elixirs');
+  assert.equal(f.Town.eligible(f.pet.inventory[1]), false);
 });
 test('town cycle does not repeat unconfirmed pet transfers and stops on full storage', () => {
   const f = townFixture(); f.Town.begin(); f.Town.enter('store');
@@ -878,6 +884,50 @@ test('town movement retries blocked routes at intervals and remains cancellable'
   f.advance(5000); f.Town.tick();
   assert.equal(f.commands.filter(c => c.kind === 'move').length, moves + 2);
   f.toggleBot(); assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, false);
+});
+
+test('town can use a reachable service approach beside a blocked saved tile without crossing walls', () => {
+  const f = townFixture(), blocked = new Uint8Array(9216);
+  blocked[5 * 96 + 8] = 1;
+  f.Navigation.install(navProduct([], blocked));
+  const dest = f.Town.cfg().vendor;
+  assert.equal(f.Navigation.plan(f.World.pose(), dest).length, 0);
+  f.Town.begin(); f.Town.enter('walk-vendor');
+  f.advance(1000);
+  const from = f.Navigation.local(f.World.pose());
+  f.Town.tick(); const command = f.commands.at(-1);
+  assert.equal(command.kind, 'move');
+  const end = f.Navigation.local(command.destination);
+  assert.equal(f.Navigation.clear(from, end), true);
+  assert.ok(Math.hypot(end.x - dest.x, end.z - dest.z) <= 60);
+  f.World.gp.pose = { ...command.destination }; f.Town.tick();
+  assert.equal(f.Town.trip.phase, 'open-vendor');
+});
+
+test('town sells only unprotected non-elixir pet loot and waits for a full sale acknowledgement', () => {
+  const f = townFixture(), gp = f.World.gp;
+  f.Town.begin(); f.Town.enter('sell'); gp.target = 62; gp.shop = { npc: 62 };
+  for (const item of [f.pet.inventory[0], f.pet.inventory[2], f.pet.inventory[3], ...f.World.items(), { refObjId: 999 }])
+    assert.equal(f.Town.sellable(item), false);
+  assert.equal(f.Town.sellable(f.pet.inventory[1]), true);
+  f.pet.inventory[1].quantity = 3;
+  f.Town.tick(); assert.equal(f.commands.at(-1).kind, 'cos-shop-sell'); assert.equal(f.commands.at(-1).quantity, 3);
+  f.pet.inventory[1].quantity = 1; f.advance(1000); f.Town.tick();
+  assert.ok(f.Town.trip.pending); assert.equal(f.commands.filter(c => c.kind === 'cos-shop-sell').length, 1);
+  f.advance(15000); f.Town.tick();
+  assert.equal(f.Town.trip, null); assert.match(f.Town.message, /not confirmed/);
+  assert.equal(f.commands.filter(c => c.kind === 'cos-shop-sell').length, 1);
+  assert.equal(f.commands.some(c => c.kind === 'shop-sell'), false);
+});
+
+test('town refuses selling at the wrong merchant or after the pet is replaced', () => {
+  const f = townFixture(); f.Town.begin(); f.Town.enter('sell');
+  f.World.gp.target = 61; f.World.gp.shop = { npc: 61 };
+  f.Town.tick(); assert.equal(f.Town.trip, null); assert.equal(f.commands.some(c => c.kind === 'cos-shop-sell'), false);
+  const g = townFixture(); g.Town.begin(); g.Town.enter('sell');
+  g.World.gp.target = 62; g.World.gp.shop = { npc: 62 }; g.Town.tick();
+  g.Town.trip.salePetGid = 999; g.advance(1000); g.Town.tick();
+  assert.equal(g.Town.trip, null); assert.match(g.Town.message, /pet changed/);
 });
 
 test('town purchase requires exact quantity gain and enough gold, without duplicate buys', () => {
@@ -978,7 +1028,7 @@ test('town recognizes the repair service bit and the Hotan teleport statue entit
   assert.equal(f.Town.npc('gate').gid, 63);
   f.Hunt.start(); f.Town.begin(); f.Town.enter('open-smith'); gp.target = 62; gp.targetCapabilities = 9;
   f.Town.tick(); assert.equal(f.commands.at(-1).kind, 'shop-open');
-  gp.shop = { npc: 62 }; gp.shopCompletionRevision++; f.Town.tick(); assert.equal(f.Town.trip.phase, 'repair');
+  gp.shop = { npc: 62 }; gp.shopCompletionRevision++; f.Town.tick(); assert.equal(f.Town.trip.phase, 'sell');
   f.Town.enter('open-gate'); gp.target = 63; gp.targetCapabilities = 0x20000080; gp.npcConversation = { gid: 63, phase: 'closed' };
   f.Town.tick(); assert.equal(f.Town.trip.phase, 'open-gate');
   gp.npcConversation = { gid: 63, phase: 'menu' };
