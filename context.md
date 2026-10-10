@@ -8,11 +8,11 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.24**.
+- Latest userscript release at this snapshot: **1.2.25**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **120 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest validation: **127 integration tests**, JavaScript syntax check and headless browser checks pass.
 - Latest work: opt-in Hotan recall/storage/refill/repair/reverse cycle. Live-account testing is still outstanding.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
@@ -257,3 +257,12 @@ Town.disposable now permits equipment rarity 0 or 1 regardless of plus/magic opt
 ## Editable town stack targets: 1.2.24
 
 User explicitly confirmed they prefer 2 stacks HP and 6 stacks MP, with editable amounts. Added potion.restock.town.stacks {hp:2,mp:6}; existing profiles inherit through deepMerge. Town.supplies now maps those counts to totals at native 50 potions per X-Large stack (100 HP / 300 MP). Buy switches and low thresholds still come from Restock, while old walking-route target quantities no longer control the town cycle. UI adds distinct labelled whole-stack fields (1–200). Preflight rejects fractional/out-of-range stacks and low thresholds not below target. Purchases count current bag stock and buy the difference, retaining gold/space/pending confirmation rules. Trip snapshot and final reverse checks use the computed targets; editing stack config during a trip triggers existing settings-change cancellation. Two tests cover defaults/top-ups and invalid target handling; browser checks exercise editable stack controls. 120 integration tests, syntax and browser checks pass. Live purchase execution remains unverified by the assistant.
+
+
+## Departure and death recovery: 1.2.25
+
+Reproduced return-scroll starvation with repeated potion dispatch in a controller regression: each potion renews the 350 ms hold before Town can send the scroll. Active recall now reserves the next settled item-use window after one emergency potion opportunity; busy cast/inventory states retain potions. Departure timeout is checked before the potion hold. Character bag capacity <=1 now also triggers recall. Full-character/protected-only-pet checks run after town arrival, so they cannot strand the character hunting; unresolved bag space stops in town with explicit instructions. Existing character bag items are still never sold or stored. Final reverse requires at least two free slots to avoid repeat capacity recalls.
+
+Town.revive defaults true (effective only with the town cycle enabled), overriding the old stop-on-death default while allowing opt-out. Controller handles death before town actions, sends native rebirth choice 1, preserves recovery intent through bootstrap, waits for inventory/local-player settlement, and begins services at the saved town arrival area without consuming another return scroll. Reverse still uses gate type 5/target 2. Confirmed prior recall origin is remembered for arrival verification within the session, reset on profile/character changes; saved hunt center is the fallback. Nearby party resurrection resumes in place. Death during a town trip, F8 cancellation, opt-out and same-character bootstrap are tested.
+
+127 integration tests plus syntax and isolated browser checks pass. Live-account death/travel behavior remains unverified.

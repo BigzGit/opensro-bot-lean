@@ -1,7 +1,7 @@
 // Town service owns the whole recall -> warehouse -> shop -> smith -> reverse trip.
 // Native reverse scrolls are spent by travel-gate type 5/choice 2, not item-use.
 const Town = {
-  trip: null, message: 'Town cycle off.',
+  trip: null, lastScrollPoint: null, message: 'Town cycle off.',
   cfg() { return Restock.cfg().town; },
   // Native X-Large HP/MP IDs 8/15, both authored with 50 potions per stack.
   supplies() { return Restock.supplies().map(s => ({ ...s, refObjId: s.kind === 'hp' ? 8 : 15, target: this.cfg().stacks?.[s.kind] * 50 })); },
@@ -10,7 +10,7 @@ const Town = {
     if (!this.cfg().enabled) return 'Town cycle off. The pet-full chime is an alert; enable the scroll town cycle to return automatically.';
     if (!World.inWorld()) return 'Town cycle: waiting for game world.';
     const error = this.validate();
-    return error ? 'Town cycle not ready: ' + error : 'Town cycle ready: waiting for low potions or pet capacity trigger.';
+    return error ? 'Town cycle not ready: ' + error : 'Town cycle ready: waiting for low potions or character/pet bag capacity.';
   },
   scroll(type) { return World.items().find(i => (i.typeFlags & 0xfffc) === type && (i.quantity ?? 1) > 0); },
   free(items, start, end) {
@@ -57,8 +57,10 @@ const Town = {
   },
   eligible(item) { return this.disposable(item) && Loot.category(item.typeFlags) === 'elixirs'; },
   sellable(item) { return this.disposable(item) && Loot.category(item.typeFlags) !== 'elixirs'; },
+  autoRevive() { return this.cfg().enabled && this.cfg().revive; },
   reason() {
     const c = this.cfg(), pet = Loot.pet();
+    if (World.freeBagSlots() <= 1) return 'character bag nearly full';
     if (c.petFull && pet && pet.rec.status - pet.rec.inventory.length <= c.petFree) return 'pickup pet nearly full';
     if (this.supplies().some(s => Restock.count(s.refObjId) <= s.low)) return 'potions running low';
     return '';
@@ -70,9 +72,7 @@ const Town = {
     if (supplies.some(s => !Number.isInteger(c.stacks?.[s.kind]) || c.stacks[s.kind] < 1 || c.stacks[s.kind] > 200)) return 'Set town refill targets to whole stacks from 1 to 200.';
     if (!supplies.length || supplies.some(s => !s.refObjId || !Number.isInteger(s.low) || !Number.isInteger(s.target) || s.low < 0 || s.target <= s.low || s.target > 10000)) return 'Choose potions and valid low-stock/refill quantities.';
     if (!this.scroll(0x09ec) || !this.scroll(0x19ec)) return 'Carry a return scroll and a reverse return scroll before hunting.';
-    if (World.freeBagSlots() < 1) return 'Keep one character bag slot free for pet-to-storage transfers.';
     if (toBigInt(World.gp.progression?.gold ?? 0) <= 0n) return 'Carry gold for potions, storage and repairs.';
-    if (c.petFull && !Loot.pet()?.rec.inventory.some(i => this.disposable(i)) && this.reason() === 'pickup pet nearly full') return 'Pet is full of protected items. Change Keep names or empty it manually.';
     return '';
   },
   fail(reason) {
@@ -92,18 +92,27 @@ const Town = {
     if (phase !== 'world') this.fail('Unexpected travel or disconnect.');
     return false;
   },
-  begin() {
+  begin(revival = false) {
     const error = this.validate();
     if (error) return this.fail(error);
+    const origin = revival ? this.lastScrollPoint || Hunt.cfg().center : World.pose();
+    if (!origin) return this.fail('No saved hunting point for revival return.');
+    if (revival) Hunt.running = true;
     Resurrect.cancelTrip('', true); Resurrect.holdUntil = 0; Loot.suspend();
-    this.trip = { phase: 'recall', at: now(), started: now(), origin: { ...World.pose() },
+    this.trip = { phase: 'recall', at: now(), started: now(), origin: { ...origin }, revival,
       manualAt: Manual.lastAt, character: World.charName, petRef: Loot.pet()?.rec.refObjId,
       config: JSON.stringify(this.cfg()), supplies: this.supplies() };
     Hunt.targetGid = Hunt.lootGid = 0;
     // Stop the worker's repeating attack/movement as well as the bot's next tick.
     // Pending inventory work still settles before item-use is admitted below.
     Cmd.move(World.pose());
-    this.message = 'Using return scroll; recall must be bound to Hotan.';
+    if (revival) this.enter('revive-arrival');
+    else this.message = 'Using return scroll; recall must be bound to Hotan.';
+  },
+  arrived() {
+    if (World.freeBagSlots() < 1) return this.fail('Returned to town; free a character bag slot for storage and refills.');
+    if (this.cfg().petFull && this.reason() === 'pickup pet nearly full' && !Loot.pet()?.rec.inventory.some(i => this.disposable(i))) return this.fail('Returned to town; pet is full of protected items. Empty it manually.');
+    this.enter(this.cfg().storage ? 'walk-storage' : 'walk-vendor');
   },
   enter(phase) {
     const t = this.trip;
@@ -309,13 +318,13 @@ const Town = {
     if (Manual.lastAt !== t.manualAt) { this.fail('Manual control interrupted the trip.'); return true; }
     // Movement may wait indefinitely for collision coverage. Individual service
     // and transaction phases still enforce their own confirmation timeouts.
-    if (['recall-wait', 'reverse-wait'].includes(t.phase) && now() - t.at > 90000) { this.fail('Scroll arrival timed out.'); return true; }
+    if (['recall-wait', 'reverse-wait', 'revive-arrival'].includes(t.phase) && now() - t.at > 90000) { this.fail('Scroll arrival timed out.'); return true; }
     if (!World.inWorld() || !gp?.pose || !World.local()) return true;
     if (World.isDead()) { this.fail('Character died during town service.'); return true; }
+    if (t.phase === 'recall' && now() - t.at > 30000) { this.fail('Combat or inventory did not settle before departure.'); return true; }
     if (now() - Potion.lastUse < 350) return true;
     Hunt.state = 'restock';
     if (t.phase === 'recall') {
-      if (now() - t.at > 30000) { this.fail('Combat or inventory did not settle before departure.'); return true; }
       if (World.isCasting() || gp.inventoryPending) {
         this.message = 'Town departure reserved; waiting for combat or inventory to settle.';
         return true;
@@ -325,13 +334,16 @@ const Town = {
       const scroll = this.scroll(0x09ec);
       if (!scroll) { this.fail('Return scroll missing.'); return true; }
       if (Cmd.itemUse(scroll.slot)) this.enter('recall-wait');
+    } else if (t.phase === 'revive-arrival') {
+      if (!gp.inventoryPending && !gp.returnScroll && dist2D(World.pose(), c.arrival) <= clamp(Number(c.arrivalRadius) || 500, 100, 1500)) this.arrived();
+      else this.message = 'Waiting for revival at the saved town arrival area.';
     } else if (['recall-wait', 'reverse-wait'].includes(t.phase)) {
       const dest = t.phase === 'recall-wait' ? c.arrival : t.origin;
       const radius = t.phase === 'recall-wait' ? clamp(Number(c.arrivalRadius) || 500, 100, 1500) : 120;
       const distance = dist2D(World.pose(), dest);
       // Require a world transition; the old pose can lie next to the expected point.
       if (t.transition && distance <= radius && !gp.inventoryPending && !gp.returnScroll) {
-        if (t.phase === 'recall-wait') this.enter(c.storage ? 'walk-storage' : 'walk-vendor');
+        if (t.phase === 'recall-wait') { this.lastScrollPoint = { ...t.origin }; this.arrived(); }
         else {
           this.trip = null; Hunt.targetGid = Hunt.lootGid = 0; Hunt.state = 'search';
           this.message = 'Town service complete; hunting resumed.'; UI.toast(this.message);
@@ -357,6 +369,7 @@ const Town = {
     } else if (t.phase === 'reverse') {
       if (gp.inventoryPending || World.isCasting()) return true;
       if (t.supplies.some(s => Restock.count(s.refObjId) < s.target) || this.damaged().length || !this.scroll(0x09ec) || !this.scroll(0x19ec)) { this.fail('Final supply, repair or travel-scroll check failed.'); return true; }
+      if (World.freeBagSlots() <= 1) { this.fail('Returned to town; free at least two character bag slots before hunting again.'); return true; }
       const npc = this.npc('gate');
       if (!npc || gp.target !== npc.gid || !(gp.targetCapabilities & 0x20000000)) { this.fail('Reverse-return teleport NPC unavailable.'); return true; }
       if (Cmd.raw({ kind: 'travel-gate', gid: npc.gid, type: 5, target: 2 }, 'Town: reverse to last return-scroll point')) this.enter('reverse-wait');

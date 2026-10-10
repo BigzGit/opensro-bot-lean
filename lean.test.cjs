@@ -828,9 +828,9 @@ test('town cycle recalls, confirms pet storage and purchases, repairs, reverses 
   assert.equal(commands.filter(c => c.kind === 'travel-gate').length, 1);
   assert.match(f.Town.message, /complete/);
 });
-test('town preflight stops before consuming scrolls when setup, scrolls or staging space are missing', () => {
+test('town preflight stops before consuming scrolls when setup, scrolls or gold are missing', () => {
   for (const change of [f => f.Town.cfg().gate = null, f => f.World.gp.inventory = f.World.gp.inventory.filter(i => i.slot !== 14),
-      f => f.World.gp.inventorySlotCount = 16, f => f.World.gp.progression.gold = '0']) {
+      f => f.World.gp.progression.gold = '0']) {
     const f = townFixture(); change(f); f.Town.tick();
     assert.equal(f.Hunt.running, false); assert.equal(f.Town.trip, null);
     assert.equal(f.commands.some(c => c.kind === 'item-use'), false);
@@ -1168,4 +1168,94 @@ test('reverse arrival cannot reuse the earlier recall transition', () => {
   f.Town.tick(); assert.equal(f.Town.trip.phase, 'reverse-wait');
   f.Town.phase('entering-world'); f.Town.tick(); assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, true);
 });
-console.log(`${passed} lean integration tests passed.`);
+
+
+
+test('alternating potion use cannot starve the return scroll', () => {
+  const f = townFixture();
+  // Model potion dispatch at every eligible 400 ms controller tick.
+  let time = 100000;
+  f.Potion.tick = () => { f.Potion.lastUse = time; };
+  f.Controller.tick(); assert.equal(f.Town.trip.phase, 'recall');
+  for (let i = 0; i < 10 && !f.commands.some(c => c.kind === 'item-use'); i++) {
+    f.advance(100); time += 100; f.Controller.tick();
+  }
+  assert.equal(f.commands.filter(c => c.kind === 'item-use' && c.slot === 13).length, 1);
+  assert.equal(f.Town.trip.phase, 'recall-wait');
+});
+
+test('full character bag recalls before requiring space in town', () => {
+  const f = townFixture(); f.pet.inventory = [];
+  f.World.gp.inventory.find(i => i.refObjId === 15).quantity = 50;
+  f.World.gp.inventorySlotCount = 16;
+  f.Settings.profile.hunt.stopInvFull = true;
+  f.Controller.tick(); assert.equal(f.Town.trip.phase, 'recall-wait');
+  assert.equal(f.commands.some(c => c.kind === 'item-use'), true);
+  f.Town.phase('entering-world'); f.World.gp.pose.x = 100;
+  f.advance(1000); f.Controller.tick();
+  assert.equal(f.Hunt.running, false); assert.match(f.Town.message, /Returned to town; free/);
+});
+
+test('protected full pet recalls before asking for manual emptying', () => {
+  const f = townFixture(); f.pet.inventory = [f.pet.inventory[2]]; f.pet.status = 1;
+  f.Controller.tick(); assert.equal(f.Town.trip.phase, 'recall-wait');
+  f.Town.phase('entering-world'); f.World.gp.pose.x = 100;
+  f.advance(1000); f.Controller.tick();
+  assert.equal(f.Hunt.running, false); assert.match(f.Town.message, /Returned to town; pet is full/);
+});
+
+test('town revival overrides stop default and preserves reverse intent through bootstrap', () => {
+  const f = townFixture();
+  f.UI.mount = f.UI.draw = f.UI.update = f.Ticker.start = () => {}; f.boot();
+  f.Settings.profileKey = 'profile:TestHero';
+  f.World.local().appearanceState[0] = 2;
+  f.Controller.tick(); f.advance(5100); f.Controller.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'rebirth' && c.choice === 1).length, 1);
+  f.bus.emit('phase', 'entering-world'); f.bus.emit('reset'); f.bus.emit('character', 'TestHero');
+  assert.equal(f.Controller.resumeAfterRevive, true);
+  f.World.local().appearanceState[0] = 0; f.World.gp.pose.x = 100;
+  f.World.gp.inventoryPending = true; f.Controller.tick(); assert.equal(f.Town.trip, null);
+  f.World.gp.inventoryPending = false; f.Controller.tick();
+  assert.equal(f.Town.trip.phase, 'walk-storage'); assert.equal(f.Town.trip.origin.x, 700);
+  assert.equal(f.Hunt.deathAt, 0); assert.equal(f.WalkBack.active, null);
+  assert.equal(f.commands.some(c => c.kind === 'item-use'), false);
+  f.pet.inventory = [];
+  f.Town.enter('reverse'); f.World.gp.target = 63; f.World.gp.targetCapabilities = 0x20000000;
+  f.World.gp.inventory.find(i => i.refObjId === 15).quantity = 50;
+  f.World.gp.inventory.find(i => i.slot === 6).durability = 10;
+  f.advance(1000); f.Controller.tick();
+  const reverse = f.commands.find(c => c.kind === 'travel-gate');
+  assert.equal(reverse.type, 5); assert.equal(reverse.target, 2);
+  f.bus.emit('phase', 'entering-world'); f.bus.emit('reset'); f.World.gp.pose.x = 700;
+  f.advance(1000); f.Controller.tick();
+  assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, true);
+  f.advance(1000); f.Controller.tick(); assert.equal(f.Town.trip, null);
+});
+
+test('death during departure recovers instead of silently stopping hunting', () => {
+  const f = townFixture(); f.Controller.tick();
+  f.World.local().appearanceState[0] = 2; f.Controller.tick();
+  assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, true);
+  f.advance(5100); f.Controller.tick();
+  assert.equal(f.commands.some(c => c.kind === 'rebirth'), true);
+  f.World.local().appearanceState[0] = 0; f.World.gp.pose.x = 100;
+  f.Controller.tick(); assert.equal(f.Town.trip.phase, 'walk-storage');
+  f.stopAll(); f.Controller.tick(); assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, false);
+});
+
+test('disabling town revival preserves explicit stop on death', () => {
+  const f = townFixture(); f.Town.cfg().revive = false;
+  f.World.local().appearanceState[0] = 2; f.Controller.tick();
+  assert.equal(f.Hunt.running, false); assert.equal(f.commands.some(c => c.kind === 'rebirth'), false);
+});
+
+
+
+test('near-hunt party revival resumes without waiting for town arrival', () => {
+  const f = townFixture(); f.pet.inventory = [];
+  f.World.gp.inventory.find(i => i.refObjId === 15).quantity = 50;
+  f.World.local().appearanceState[0] = 2; f.Controller.tick();
+  f.World.local().appearanceState[0] = 0; f.Controller.tick();
+  assert.equal(f.Hunt.deathAt, 0); assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, true);
+});
+console.log('Total integration tests: ' + passed);

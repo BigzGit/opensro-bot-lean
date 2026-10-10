@@ -123,6 +123,10 @@ const server = http.createServer((req, res) => {
     assert.equal(await townToggle.isChecked(), false);
     await townToggle.check(); assert.equal(await page.evaluate(() => SROLean.town.cfg().enabled), true);
     await townToggle.uncheck();
+    const reviveToggle = page.getByLabel('Revive in town and reverse to last scroll point', { exact: true });
+    assert.equal(await reviveToggle.isChecked(), true);
+    await reviveToggle.uncheck(); assert.equal(await page.evaluate(() => SROLean.town.cfg().revive), false);
+    await reviveToggle.check(); assert.equal(await page.evaluate(() => SROLean.town.cfg().revive), true);
     assert.equal(await page.getByLabel('Town HP refill (stacks of 50)', { exact: true }).inputValue(), '2');
     assert.equal(await page.getByLabel('Town MP refill (stacks of 50)', { exact: true }).inputValue(), '6');
     await page.getByLabel('Town MP refill (stacks of 50)', { exact: true }).fill('7');

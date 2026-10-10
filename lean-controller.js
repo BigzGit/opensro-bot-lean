@@ -10,15 +10,14 @@ Hunt.tick = function () {
     Loot.suspend();
     this.state = 'dead';
     if (!this.deathAt) { this.deathAt = now(); Stats.count('deaths'); }
-    if (H.onDeath === 'revive' && !this.revived && now() - this.deathAt > 5000) {
+    if ((Town.autoRevive() || H.onDeath === 'revive') && !this.revived && now() - this.deathAt > 5000) {
       if (Cmd.rebirth(1)) this.revived = true;
-    } else if (H.onDeath === 'stop') this.stop('character died');
+    } else if (!Town.autoRevive() && H.onDeath === 'stop') this.stop('character died');
     return;
   }
   if (this.deathAt) {
     this.deathAt = 0; this.revived = false; this.targetGid = 0;
-    // Town revival returns along the walking route before hunting can acquire targets.
-    if (H.center && dist2D(World.pose(), H.center) > H.radius) { WalkBack.start(true); return; }
+    if (H.center && dist2D(World.pose(), H.center) > H.radius) { Controller.returnAfterRevive(); return; }
   }
   if (Restock.activeShop() || gp.storage || now() - Manual.lastAt < H.manualPauseS * 1000) {
     Loot.suspend(); this.state = 'manual'; return;
@@ -82,12 +81,32 @@ function stopAll() {
 
 const Controller = {
   mode: 'idle', lastErrorAt: -Infinity, resumeAfterRevive: false,
+  returnAfterRevive() {
+    this.resumeAfterRevive = false;
+    Hunt.deathAt = 0; Hunt.revived = false; Hunt.targetGid = 0;
+    if (Town.autoRevive()) Town.begin(true);
+    else if (Settings.profile.hunt.center) WalkBack.start(true);
+    else Hunt.stop('No saved hunting spot for revival return.');
+  },
   tick() {
     try {
       Restock.sample();
+      if (World.inWorld() && World.isDead() && Hunt.running) {
+        Town.cancel(); Resurrect.cancelTrip(); Resurrect.holdUntil = 0;
+        Hunt.tick(); this.mode = Hunt.state; return;
+      }
+      if (World.inWorld() && !World.isDead() && (this.resumeAfterRevive || Hunt.running && Hunt.deathAt)) {
+        if (World.gp?.inventoryPending || !World.local()) { this.mode = 'waiting'; return; }
+        if (!this.resumeAfterRevive && Hunt.cfg().center && dist2D(World.pose(), Hunt.cfg().center) <= Hunt.cfg().radius) {
+          Hunt.deathAt = 0; Hunt.revived = false; Hunt.targetGid = 0;
+        } else this.returnAfterRevive();
+      }
       if (Town.trip) {
         if (World.inWorld()) Party.tick();
-        Potion.tick();
+        // Reserve the first settled item-use window for departure. Continuing
+        // alternating potions first can perpetually renew the 350 ms hold.
+        if (Town.trip.phase !== 'recall' || !Town.trip.potionWindowReserved || World.isCasting() || World.gp?.inventoryPending) Potion.tick();
+        Town.trip.potionWindowReserved = true;
         if (Town.tick()) { this.mode = 'town service'; return; }
       }
       if (!World.inWorld()) { this.mode = 'waiting'; return; }
@@ -99,12 +118,6 @@ const Controller = {
       if (!WalkBack.active && !Restock.trip && !Restock.recording && !Controller.resumeAfterRevive &&
           !Restock.activeShop() && !World.gp.storage && Resurrect.tick()) {
         this.mode = 'resurrect'; return;
-      }
-      if (this.resumeAfterRevive && !World.isDead()) {
-        if (World.gp?.inventoryPending) { this.mode = 'waiting'; return; }
-        this.resumeAfterRevive = false;
-        if (Settings.profile.hunt.center) WalkBack.start(true);
-        else Hunt.stop('No saved hunting spot for revival return.');
       }
       if (WalkBack.active) { this.mode = 'returning'; WalkBack.tick(); }
       else if (Restock.recording) this.mode = 'recording';
