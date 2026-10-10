@@ -206,4 +206,32 @@ test('all compatible paid avatar skins remain browsable without ownership or equ
   assert.equal(f.Wardrobe.buildAv([])[0].refObjId,102); assert.equal(f.commands.length,0);
   assert.equal(f.Wardrobe.validAv(1,999),null);
 });
+test('elixirs-only preset uses native types, clears include overrides and excludes other drops', () => {
+  const f=fixture(),p=f.Settings.profile.hunt.pickup;
+  p.include='potion'; f.Loot.preset('elixirs');
+  assert.equal(p.include,'');
+  const elixir=f.drop(30,3436); elixir.name='Localized reinforcement item';
+  assert.equal(f.Loot.allowed(elixir),true);
+  for (const tf of [2284,748,3436+2048, (11<<7)|108|(2<<11),44,108]) assert.equal(f.Loot.allowed(f.drop(tf,tf)),false);
+  p.others=true; p.elixirs=false; assert.equal(f.Loot.allowed(elixir),false);
+  f.Loot.preset('elixirs-gold'); assert.equal(f.Loot.allowed(f.drop(40,748)),true);
+  assert.equal(f.Loot.allowed(f.drop(41,2284)),false);
+  f.Loot.preset('all'); assert.equal(f.Loot.allowed(f.drop(42,2284)),true);
+});
+test('elixir filters preserve ownership, exclusions and full-bag stack merging', () => {
+  const f=fixture(),d=f.drop(30,3436); f.Loot.preset('elixirs');
+  d.groundItem.ownerJid=999; assert.equal(f.Loot.allowed(d),false); delete d.groundItem.ownerJid;
+  f.Settings.profile.hunt.pickup.exclude='potion'; assert.equal(f.Loot.allowed(d),false);
+  f.Settings.profile.hunt.pickup.exclude=''; f.World.gp.inventorySlotCount=13; assert.equal(f.Loot.allowed(d),false);
+  f.World.gp.inventory=[{slot:13,refObjId:101,quantity:2,tooltip:{fields:{maxStack:50}}}]; assert.equal(f.Loot.allowed(d),true);
+});
+test('new alchemy category switches inherit old Other items preferences', () => {
+  const f=fixture(); f.storage.set('sroAsistan:v7:profile:default',JSON.stringify({hunt:{pickup:{others:false}}}));
+  f.Settings.importOriginal();
+  for(const key of ['elixirs','powders','alchemy']) assert.equal(f.Settings.profile.hunt.pickup[key],false);
+});
+test('changing loot filters cancels an outstanding pickup before handing back control', () => {
+  const f=fixture(); f.Loot.begin(f.drop()); f.Loot.preset('elixirs'); f.advance(1000);
+  assert.equal(f.Loot.tick(),false); assert.equal(f.Loot.active,null); assert.equal(f.commands.at(-1).kind,'move');
+});
 console.log(`${passed} lean integration tests passed.`);

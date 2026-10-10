@@ -21,7 +21,7 @@ Both scripts must not run together. Lean detects another active assistant and de
 ## Controls
 
 - **Combat:** saved hunting spot, area/chase distances, mob filters and classes, per-class attack rotations, self buffs, imbue and berserk. Empty class rotations can fall back to Normal. Click icons to select skills; gold borders mark selections. Numbered slots show attack order, and row arrows reorder it. Hover or focus an icon for its name, level, MP cost and cooldown. Search filters learned skills.
-- **Loot:** item categories, include/exclude name filters, collection radius, bounded retries, and whether to finish the current fight before collecting. This is enabled by default in a fresh profile and when importing the original profile.
+- **Loot:** independent gold, potions/cures, equipment, elixirs, lucky powders, other alchemy items/stones and miscellaneous-item switches. **Elixirs only**, **Elixirs + gold** and **All items** presets clear the include-name override; exclusions remain respected. Elixirs are identified by native item types, not English names. New alchemy switches inherit the previous Other items setting when loading an old profile. Include/exclude name filters, collection radius, retries and finishing the current fight remain configurable.
 - **Supplies:** HP/MP thresholds, vigor/cure use, and automatic potion buying. To set up buying, open a potion merchant's shop, record a route, close the shop, walk to the hunting spot, then finish the recording. Choose potions and refill quantities and enable buying.
 - **Settings:** rest/recovery, death behaviour, manual-control pause, stop conditions, profile import and export, and recent activity.
 - **Wardrobe:** compatible equipment and avatar skins, pet and mount looks, name/code search, degree/seal filters, weapon/shield glow, matching sets, random outfits, undo and saved outfits. **Avatars / paid skins** shows all compatible avatar hats, dresses, attachments and flags in one paginated list, including items you do not own. You can also filter by avatar slot. Equipment degree/seal filters never hide avatar looks; switching slots clears stale filters and search. Compatible Honor variants previously excluded by the original bot are included. Looks change only your rendered character; real inventory, stats and command data remain unchanged. Available models come from the live game's catalogue; new art cannot appear without corresponding game assets. Previewing a paid skin does not purchase it or grant account ownership.
@@ -30,7 +30,7 @@ Both scripts must not run together. Lean detects another active assistant and de
 
 ## What changed
 
-The full assistant is about 1.16 MB. Lean 1.2.2 is about 264 KB, around 77% smaller by bytes, including the restored wardrobe. It does not include the custom map, radar, character viewer, inspection tools, social/quest panels, bestiary, drop encyclopedia, chat macros or GM panel.
+The full assistant is about 1.16 MB. Lean 1.2.3 is about 266 KB, around 77% smaller by bytes, including the restored wardrobe. It does not include the custom map, radar, character viewer, inspection tools, social/quest panels, bestiary, drop encyclopedia, chat macros or GM panel.
 
 Lean reuses the original bot's Silkroad window, button, tab and checkbox textures. Skill grids, buff and imbue pickers show game icons with names, tooltips and cooldown overlays. Weapon imbue is visible directly under the attack rotation as well as in Buffs & imbue. Thunderdragon Force belongs here. The highest learned level of a group is displayed and resolved automatically after upgrades; unlearned levels are never added.
 
@@ -59,7 +59,7 @@ Lean preserves the reviewed worker-hook and combat code from the supplied bot. N
 Validation completed:
 
 - JavaScript syntax check.
-- 23 integration tests covering the previous loot/combat/restock behaviours plus collision-wall detours, sealed terrain, missing collision coverage, movement away from a destination during a detour, Thunderdragon level 13 selection/casting, compatible Honor skins, all paid-avatar slots independent of ownership/equipment filters, and renderer/inventory isolation.
+- 27 integration tests covering the previous loot/combat/restock behaviours, collision routing, Thunderdragon level 13, wardrobe isolation and paid-avatar browsing, plus elixir presets, native item classification, capacity/ownership/exclusion checks, old-profile migration and cancellation after changing pickup filters.
 - Headless Edge tests covering actual boot, worker-message hooks and captured collision routing; verified gzip/Range-pack image loading; missing Thunderdragon level 13 metadata recovery and selection; lazy wardrobe loading, skins, glow, presets, search and icon bounds; controls, hotkeys, cancellation and desktop/mobile bounds. No page errors were observed. The test uses simulated game state and local mock assets. Wardrobe catalogues are not requested before the wardrobe is opened; the skill catalogue is not requested unless learned metadata is missing.
 - Desktop and narrow-screen screenshots inspected.
 

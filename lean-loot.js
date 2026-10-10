@@ -3,6 +3,24 @@ const Loot = {
   active: null,
   skips: new Map(),
   failureCounts: new Map(),
+  categories: ['gold', 'potions', 'equipment', 'elixirs', 'powders', 'alchemy', 'others'],
+  category(tf) {
+    if (ItemType.isGold(tf)) return 'gold';
+    if (ItemType.isPotion(tf) || ItemType.isCure(tf)) return 'potions';
+    if (ItemType.isEquipment(tf)) return 'equipment';
+    // Native alchemy item words: (TID1,TID2,TID3,TID4), also used by reinforce.go.
+    const consumable = (tf & 126) === 108, t3 = (tf >>> 7) & 15, t4 = (tf >>> 11) & 31;
+    if (consumable && t3 === 10 && t4 === 1) return 'elixirs';
+    if (consumable && t3 === 10 && t4 === 2) return 'powders';
+    if (consumable && (t3 === 10 || t3 === 11)) return 'alchemy';
+    return 'others';
+  },
+  preset(mode) {
+    const p = Hunt.cfg().pickup;
+    for (const key of this.categories) p[key] = mode === 'all' || key === 'elixirs' || (mode === 'elixirs-gold' && key === 'gold');
+    p.enabled = true; p.include = '';
+    Settings.saveProfile();
+  },
   count(ref) { return World.items().filter(i => i.refObjId === ref).reduce((n, i) => n + (i.quantity ?? 1), 0); },
   bagSignature() { return World.items().map(i => `${i.slot}:${i.refObjId}:${i.quantity ?? 1}`).join('|'); },
   owned(e) {
@@ -20,7 +38,7 @@ const Loot = {
     if (splitList(P.exclude).some(s => name.includes(s))) return false;
     const included = splitList(P.include).some(s => name.includes(s));
     const gold = ItemType.isGold(tf);
-    if (!included && !(gold ? P.gold : ItemType.isPotion(tf) || ItemType.isCure(tf) ? P.potions : ItemType.isEquipment(tf) ? P.equipment : P.others)) return false;
+    if (!included && !P[this.category(tf)]) return false;
     if (gold || World.freeBagSlots() > 0) return true;
     // Ground drops omit quantity/stack ceiling. Permit an existing stack to merge;
     // a server capacity refusal suppresses this drop until inventory changes.
@@ -86,7 +104,10 @@ const Loot = {
       this.active = null; Hunt.lootGid = 0;
       return false;
     }
-    if (!this.allowed(e)) { this.active = null; Hunt.lootGid = 0; return false; }
+    if (!this.allowed(e) || !Hunt.cfg().pickup.enabled) {
+      if (!Cmd.move(World.pose())) return true;
+      this.suspend(); return false;
+    }
     const d = dist2D(World.pose(), e);
     if (d < a.best - 2) { a.best = d; a.progressAt = now(); }
     if (World.gp?.inventoryPending) return true;

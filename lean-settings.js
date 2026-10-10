@@ -22,7 +22,7 @@ const DEFAULT_PROFILE = {
     classes: { normal: true, champion: true, giant: true, party: false, elite: false, unique: false, titan: false },
     levelMin: 0, levelMax: 0, include: '', exclude: '', priority: 'attackers', avoidKs: true,
     targetTimeoutS: 25,
-    pickup: { enabled: true, gold: true, potions: true, equipment: true, others: true,
+    pickup: { enabled: true, gold: true, potions: true, equipment: true, elixirs: true, powders: true, alchemy: true, others: true,
       include: '', exclude: '', radius: 300, afterKillOnly: true, retries: 2 },
     sit: { enabled: true, hpBelow: 35, mpBelow: 20, resumeAt: 90 },
     onDeath: 'stop', stopNoHpPotion: false, stopInvFull: false,
@@ -38,6 +38,11 @@ function botProfile(input) {
     for (const field of Object.keys(DEFAULT_PROFILE[key])) {
       if (field in input[key]) result[key][field] = deepMerge(DEFAULT_PROFILE[key][field], input[key][field]);
     }
+  }
+  // New categories inherit the old Other items switch, preserving existing selection.
+  const pickup = input.hunt?.pickup;
+  for (const key of ['elixirs', 'powders', 'alchemy']) {
+    if (pickup && !(key in pickup)) result.hunt.pickup[key] = pickup.others ?? true;
   }
   return result;
 }

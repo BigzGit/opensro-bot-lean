@@ -139,6 +139,16 @@ const server = http.createServer((req, res) => {
     await page.waitForFunction(() => [...document.getElementById('sro-bot-lean').shadowRoot.querySelectorAll('.slot')].every(s => s.dataset.iconLoaded === 'true'));
     await page.screenshot({ path: __dirname + '/lean-buffs-desktop.png', fullPage: true });
     await page.getByRole('button', { name: 'Loot', exact: true }).click();
+    await page.getByLabel('Always include names',{exact:true}).fill('potion');
+    await page.getByLabel('Always include names',{exact:true}).dispatchEvent('change');
+    await page.getByRole('button',{name:'Elixirs only',exact:true}).click();
+    assert.equal(await page.getByLabel('Elixirs',{exact:true}).isChecked(),true);
+    for(const label of ['Gold','Potions and cure pills','Equipment','Lucky powders','Other alchemy items / stones','Other items']) assert.equal(await page.getByLabel(label,{exact:true}).isChecked(),false);
+    assert.equal(await page.getByLabel('Always include names',{exact:true}).inputValue(),'');
+    await page.getByRole('button',{name:'Elixirs + gold',exact:true}).click();
+    assert.equal(await page.getByLabel('Gold',{exact:true}).isChecked(),true);
+    await page.getByRole('button',{name:'All items',exact:true}).click();
+    assert.equal(await page.getByLabel('Lucky powders',{exact:true}).isChecked(),true);
     await page.screenshot({ path: __dirname + '/lean-desktop.png', fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.evaluate(() => {
