@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.4
+// @version      1.2.5
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.4';
+const VERSION = '1.2.5';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -3820,15 +3820,20 @@ const UI = {
     return this.field(title, input);
   },
   group(title, ...children) { const b = el('fieldset'); b.append(el('legend', title), ...children); return b; },
+  toggleVisibility() {
+    const host = this.root?.host;
+    if (host) host.hidden = !host.hidden;
+  },
   mount() {
     const host = el('div'); host.id = 'sro-bot-lean';
     document.documentElement.append(host);
     this.root = host.attachShadow({ mode: 'open' });
     const style = el('style');
-    style.textContent = ':host{' + Object.entries(LEAN_SKIN).map(([key, data]) => `--s-${key}:url("${data}");`).join('') + '}\n' + LEAN_CSS;
+    style.textContent = ':host{' + Object.entries(LEAN_SKIN).map(([key, data]) => `--s-${key}:url("${data}");`).join('') + '}\n' + LEAN_CSS + '\n:host([hidden]){display:none!important}';
     const panel = el('section', null, 'panel'), header = el('header');
     const fold = this.button('−', () => { this.body.hidden = !this.body.hidden; fold.textContent = this.body.hidden ? '+' : '−'; });
     fold.className = 'fold'; fold.setAttribute('aria-label', 'Fold or unfold bot window');
+    header.title = 'Shift+F7 hides or shows the whole window; F7 folds it.';
     header.append(el('strong', 'OpenSRO Bot Lean'), fold);
     this.body = el('div', null, 'body'); this.status = el('div', 'Waiting for game…', 'status'); this.status.setAttribute('role', 'status');
     const controls = this.row(this.button('Start / stop · F8', () => toggleBot()), this.button('Walk back', () => WalkBack.start()), this.button('Return & hunt', () => WalkBack.start(true)), this.button('Stop all', () => stopAll()));
@@ -4096,13 +4101,17 @@ function boot() {
     const target = e.composedPath()[0];
     if (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName || '')) return;
     if (e.code === 'F8') { e.preventDefault(); e.stopImmediatePropagation(); toggleBot(); }
-    else if (e.code === 'F7') { e.preventDefault(); e.stopImmediatePropagation(); UI.body.hidden = !UI.body.hidden; }
+    else if (e.code === 'F7') {
+      e.preventDefault(); e.stopImmediatePropagation();
+      if (e.shiftKey) UI.toggleVisibility();
+      else UI.body.hidden = !UI.body.hidden;
+    }
   }, true);
   Ticker.start(() => Controller.tick(), 100);
   setInterval(() => { Wardrobe.tick(); UI.update(); }, 500);
   W.SROLean = { version: VERSION, world: World, settings: Settings, hunt: Hunt, loot: Loot,
     restock: Restock, walkBack: WalkBack, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, stop: stopAll, log: Log };
-  Log.info('OpenSRO Bot Lean ready. F8 starts/stops; F7 folds the panel.');
+  Log.info('OpenSRO Bot Lean ready. F8 starts/stops; F7 folds; Shift+F7 hides/shows the window.');
 }
 
 installWorkerHook();

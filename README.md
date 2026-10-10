@@ -14,7 +14,7 @@ The full `bot.js` remains unchanged. Lean uses its own per-character settings na
 2. Install `bot.lean.user.js` as a new userscript and reload the game.
 3. Optionally use **Settings → Import original bot settings** to copy your character's combat, potion, hunt, restock and wardrobe settings (including saved outfits). Review the imported settings before starting.
 4. In **Combat → Hunt area**, set your hunting spot. In **Skills**, click learned skill icons to build your attack rotation; use **Buffs & imbue** for self buffs and weapon imbue.
-5. Press **F8** or click **Start / stop**. **F7** folds or unfolds the panel.
+5. Press **F8** or click **Start / stop**. **F7** folds or unfolds the panel. **Shift+F7** hides or shows the entire window, including its header, while the bot keeps running. Press the same shortcut again to bring it back. Shortcuts are ignored while typing in input fields or chat.
 
 Both scripts must not run together. Lean detects another active assistant and declines to start. Reload after disabling the other script.
 
