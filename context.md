@@ -266,3 +266,8 @@ Reproduced return-scroll starvation with repeated potion dispatch in a controlle
 Town.revive defaults true (effective only with the town cycle enabled), overriding the old stop-on-death default while allowing opt-out. Controller handles death before town actions, sends native rebirth choice 1, preserves recovery intent through bootstrap, waits for inventory/local-player settlement, and begins services at the saved town arrival area without consuming another return scroll. Reverse still uses gate type 5/target 2. Confirmed prior recall origin is remembered for arrival verification within the session, reset on profile/character changes; saved hunt center is the fallback. Nearby party resurrection resumes in place. Death during a town trip, F8 cancellation, opt-out and same-character bootstrap are tested.
 
 127 integration tests plus syntax and isolated browser checks pass. Live-account death/travel behavior remains unverified.
+
+
+## Standing publication preference (2026-10-10)
+
+After the 1.2.25 push was blocked by automatic approval review, the user explicitly instructed: "always publish tog github." Publish completed bot updates to https://github.com/nixxane/opensro-bot-lean as part of the release workflow, including the prepared 1.2.25 release. This is standing authorization for this bot repository.
