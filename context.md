@@ -8,11 +8,11 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.18**.
+- Latest userscript release at this snapshot: **1.2.19**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **108 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest validation: **109 integration tests**, JavaScript syntax check and headless browser checks pass.
 - Latest work: opt-in Hotan recall/storage/refill/repair/reverse cycle. Live-account testing is still outstanding.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
@@ -227,3 +227,7 @@ Native selection opens `npcConversation` directly. `npc-talk` requires capabilit
 User reported return-scroll use followed by a stall and explained that landing coordinates vary around the same area. Reproduced a nearby landing stuck in recall-wait with a failing test: the previous fixed 120-unit (12 m) arrival radius was too tight. New `potion.restock.town.arrivalRadius` defaults to 500 units (50 m), adjustable 10–150 m under Supplies. Old profiles inherit the default. Reverse return retains its 120-unit destination radius.
 
 Expected world reset during recall-wait/reverse-wait now marks travel confirmation, and the tick still requires world state, fresh local entity, settled inventory and no return cast before accepting the destination. `Town.enter` clears the transition flag for each phase so reverse arrival cannot reuse recall confirmation. Both reset-only and phase-based transitions are tested. Status reports missing travel confirmation, unsettled scroll state, actual distance versus accepted tolerance, and collision-map waits during town walking. Four new tests bring the suite to 108; syntax and isolated browser tests also passed, including persistence of the tolerance control. Live-account arrival/navigation remains unverified. An asynchronous question requested the user's exact stalled status; no reply at implementation time.
+
+## Town movement waits: 1.2.19
+
+User reported slow loading ending with town movement blocked or collision data unavailable and requested waiting. Reproduced cancellation in the collision-wait regression after advancing 16 minutes. Town.walk now waits on missing collision coverage and no-route results, retrying every five seconds without blind movement. After 20 seconds without progress it clears the stale route and waits five seconds before replanning. Removed the two-minute movement leg limit and whole-trip 15-minute cap so they cannot cancel these waits. Individual scroll, service and transaction confirmation timeouts remain. Town.enter clears retry state; manual control, F8, settings changes and unexpected travel still cancel. The updated long-wait regression verifies automatic recovery when collision data arrives; a new test verifies retry spacing, no command flood, no-progress replanning and F8 cancellation. 109 integration tests, syntax and isolated browser checks pass. Live-account navigation remains unverified.

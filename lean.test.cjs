@@ -849,12 +849,37 @@ test('town scroll wait times out while outside world and wrong arrival never sta
   f.World.phase = 'entering-world'; f.advance(91000); f.Controller.tick();
   assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, false); assert.match(f.Town.message, /timed out/);
 });
-test('town movement needs collision coverage and stops instead of blindly crossing obstacles', () => {
+test('town movement waits for collision coverage without timing out or blindly crossing obstacles', () => {
   const f = townFixture(); f.Town.begin(); f.Town.enter('walk-storage'); f.Navigation.scene = null;
   const moves = f.commands.filter(c => c.kind === 'move').length;
   f.Town.tick(); assert.equal(f.commands.filter(c => c.kind === 'move').length, moves);
-  f.advance(21000); f.Town.tick(); assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, false);
+  f.advance(960000); f.Town.tick(); assert.ok(f.Town.trip); assert.equal(f.Hunt.running, true);
+  assert.equal(f.commands.filter(c => c.kind === 'move').length, moves);
+  f.Navigation.install(navProduct()); f.advance(6000); f.Town.tick();
+  assert.ok(f.commands.filter(c => c.kind === 'move').length > moves);
 });
+test('town movement retries blocked routes at intervals and remains cancellable', () => {
+  const f = townFixture(); f.Town.begin(); f.Town.enter('walk-storage');
+  let plans = 0;
+  f.Navigation.next = () => { plans++; return { error: 'No walkable route found.' }; };
+  const moves = f.commands.filter(c => c.kind === 'move').length;
+  f.Town.tick();
+  for (let i = 0; i < 10; i++) { f.advance(100); f.Town.tick(); }
+  assert.equal(plans, 1); assert.ok(f.Town.trip); assert.match(f.Town.message, /waiting/);
+  assert.equal(f.commands.filter(c => c.kind === 'move').length, moves);
+  f.advance(5000); f.Town.tick(); assert.equal(plans, 2);
+  f.Navigation.next = () => ({ point: f.Town.cfg().storage });
+  f.advance(5000); f.Town.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'move').length, moves + 1);
+  f.Town.trip.travel = { stale: true };
+  f.advance(21000); f.Town.tick();
+  assert.equal(f.Town.trip.travel, null); assert.match(f.Town.message, /blocked route/);
+  assert.equal(f.commands.filter(c => c.kind === 'move').length, moves + 1);
+  f.advance(5000); f.Town.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'move').length, moves + 2);
+  f.toggleBot(); assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, false);
+});
+
 test('town purchase requires exact quantity gain and enough gold, without duplicate buys', () => {
   const f = townFixture(), gp = f.World.gp;
   f.Town.begin(); f.Town.enter('buy'); gp.target = 61;

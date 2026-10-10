@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.18
+// @version      1.2.19
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.18';
+const VERSION = '1.2.19';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -2503,7 +2503,7 @@ const Town = {
   enter(phase) {
     const t = this.trip;
     t.phase = phase; t.at = now(); t.sent = false; t.pending = null; t.transition = false;
-    t.travel = null; t.lastPose = null; t.progressAt = now(); t.movedAt = -Infinity;
+    t.travel = null; t.lastPose = null; t.progressAt = now(); t.movedAt = -Infinity; t.retryAt = 0;
     this.message = 'Town cycle: ' + phase;
   },
   walk(dest) {
@@ -2511,10 +2511,19 @@ const Town = {
     if (dist2D(pose, dest) <= 12) return true;
     if (!Number.isFinite(dist2D(pose, dest))) { this.fail('Town service is in another world.'); return false; }
     if (!t.lastPose || dist2D(t.lastPose, pose) > 3) { t.lastPose = { ...pose }; t.progressAt = now(); }
-    if (now() - t.progressAt > 20000 || now() - t.at > 120000) { this.fail('Town movement blocked or collision data unavailable.'); return false; }
+    if (now() < t.retryAt) return false;
+    if (now() - t.progressAt > 20000) {
+      t.travel = null; t.retryAt = now() + 5000; t.progressAt = now();
+      this.message = 'Town movement: waiting to retry a blocked route.';
+      return false;
+    }
     const step = Navigation.next(t, dest);
-    if (step.error && !step.waiting) { this.fail(step.error); return false; }
-    this.message = step.waiting ? 'Town movement: ' + (step.error || 'Waiting for collision route.') : 'Town cycle: walking to ' + (dest.name || 'service point');
+    if (step.waiting || step.error) {
+      t.travel = null; t.retryAt = now() + 5000; t.progressAt = now();
+      this.message = 'Town movement: waiting; retrying collision route. ' + (step.error || 'Waiting for collision coverage.');
+      return false;
+    }
+    this.message = 'Town cycle: walking to ' + (dest.name || 'service point');
     if (!step.point || now() - t.movedAt < 1000 || World.gp.inventoryPending) return false;
     if (World.isSitting()) { if (Cmd.action(1000)) t.movedAt = now(); }
     else if (Cmd.move(step.point)) t.movedAt = now();
@@ -2674,7 +2683,8 @@ const Town = {
     const t = this.trip, gp = World.gp;
     if (!c.enabled || !Hunt.running || t.character !== World.charName || t.config !== JSON.stringify(c)) { this.fail('Settings or character changed during the trip.'); return true; }
     if (Manual.lastAt !== t.manualAt) { this.fail('Manual control interrupted the trip.'); return true; }
-    if (now() - t.started > 900000) { this.fail('Town cycle exceeded 15 minutes.'); return true; }
+    // Movement may wait indefinitely for collision coverage. Individual service
+    // and transaction phases still enforce their own confirmation timeouts.
     if (['recall-wait', 'reverse-wait'].includes(t.phase) && now() - t.at > 90000) { this.fail('Scroll arrival timed out.'); return true; }
     if (!World.inWorld() || !gp?.pose || !World.local()) return true;
     if (World.isDead()) { this.fail('Character died during town service.'); return true; }
