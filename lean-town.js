@@ -98,7 +98,7 @@ const Town = {
   },
   enter(phase) {
     const t = this.trip;
-    t.phase = phase; t.at = now(); t.sent = false; t.pending = null;
+    t.phase = phase; t.at = now(); t.sent = false; t.pending = null; t.transition = false;
     t.travel = null; t.lastPose = null; t.progressAt = now(); t.movedAt = -Infinity;
     this.message = 'Town cycle: ' + phase;
   },
@@ -110,6 +110,7 @@ const Town = {
     if (now() - t.progressAt > 20000 || now() - t.at > 120000) { this.fail('Town movement blocked or collision data unavailable.'); return false; }
     const step = Navigation.next(t, dest);
     if (step.error && !step.waiting) { this.fail(step.error); return false; }
+    this.message = step.waiting ? 'Town movement: ' + (step.error || 'Waiting for collision route.') : 'Town cycle: walking to ' + (dest.name || 'service point');
     if (!step.point || now() - t.movedAt < 1000 || World.gp.inventoryPending) return false;
     if (World.isSitting()) { if (Cmd.action(1000)) t.movedAt = now(); }
     else if (Cmd.move(step.point)) t.movedAt = now();
@@ -288,14 +289,20 @@ const Town = {
       if (Cmd.itemUse(scroll.slot)) this.enter('recall-wait');
     } else if (['recall-wait', 'reverse-wait'].includes(t.phase)) {
       const dest = t.phase === 'recall-wait' ? c.arrival : t.origin;
+      const radius = t.phase === 'recall-wait' ? clamp(Number(c.arrivalRadius) || 500, 100, 1500) : 120;
+      const distance = dist2D(World.pose(), dest);
       // Require a world transition; the old pose can lie next to the expected point.
-      if (t.transition && dist2D(World.pose(), dest) <= 120 && !gp.inventoryPending && !gp.returnScroll) {
+      if (t.transition && distance <= radius && !gp.inventoryPending && !gp.returnScroll) {
         if (t.phase === 'recall-wait') this.enter(c.storage ? 'walk-storage' : 'walk-vendor');
         else {
           this.trip = null; Hunt.targetGid = Hunt.lootGid = 0; Hunt.state = 'search';
           this.message = 'Town service complete; hunting resumed.'; UI.toast(this.message);
         }
-      } else if (now() - t.at > 90000) this.fail('Scroll arrival not confirmed. Check recall town and scroll restrictions.');
+      } else {
+        this.message = !t.transition ? 'Waiting for scroll travel confirmation.' : gp.inventoryPending || gp.returnScroll
+          ? 'Waiting for scroll arrival state to settle.'
+          : 'Waiting for arrival area: ' + (Number.isFinite(distance) ? Math.round(distance / 10) + ' m from saved point; tolerance ' + Math.round(radius / 10) + ' m.' : 'saved point is in another world.');
+      }
     } else if (t.phase.startsWith('walk-')) {
       const role = t.phase.slice(5);
       if (this.walk(c[role]) && this.trip) this.enter('open-' + role);

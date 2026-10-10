@@ -39,7 +39,10 @@ function boot() {
   });
   bus.on('failure', () => { stopAll(); Restock.cancelRecording(); UI.toast('Game connection failed; bot stopped.', 'warn'); });
   bus.on('reset', () => {
-    if (Town.trip && !['recall-wait', 'reverse-wait'].includes(Town.trip.phase)) Town.fail('Unexpected world reset during town service.');
+    if (Town.trip) {
+      if (['recall-wait', 'reverse-wait'].includes(Town.trip.phase)) Town.trip.transition = true;
+      else Town.fail('Unexpected world reset during town service.');
+    }
     SpeedScroll.reset(); Party.reset(); Resurrect.reset(); Loot.reset(); Navigation.scene = null; Wardrobe.inv = Wardrobe.baseInv = Wardrobe.av = Wardrobe.baseAv = null; Wardrobe.body = '';
   });
   bus.on('attached', ({ late }) => { if (late) UI.toast('Attached after the game started. Reload for complete character data.', 'warn'); });

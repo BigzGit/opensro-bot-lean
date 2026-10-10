@@ -8,11 +8,11 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.17**.
+- Latest userscript release at this snapshot: **1.2.18**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **104 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest validation: **108 integration tests**, JavaScript syntax check and headless browser checks pass.
 - Latest work: opt-in Hotan recall/storage/refill/repair/reverse cycle. Live-account testing is still outstanding.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
@@ -221,3 +221,9 @@ Town.status() reports disabled automation, readiness or missing setup/scrolls be
 User's screenshot showed arrival/warehouse/potion merchant saved, with smith and gate missing. User then reported Hotan's weapon merchant was rejected and the teleport target is a world statue. A new regression test failed before fixing the smith bit: native `NpcTalkFlagRepair` is `0x8`, whereas previous code incorrectly used special-trade `0x800`. Both save and open now require the repair bit. `serviceEntity` admits native `teleport` entities for gate save/lookup, preserving NPC support. The full-cycle fixture now uses an actual teleport-kind gate and smith capability `9`.
 
 Native selection opens `npcConversation` directly. `npc-talk` requires capability `2` and is invalid on a statue that offers teleport/reverse only. Gate opening now waits for confirmed selection, reverse capability and matching menu without dispatching Talk. Evidence: game `npccapability.go`, worker `entities/entities.ts`, `gameplay/npc/npc.ts` and `gameplay.ts` selection/talk handling. UI labels are Repair merchant and World statue / teleport. Validation lists only missing services, and saving a service clears an old failure status. Existing saved points remain compatible. 104 integration tests, syntax and isolated browser checks passed; no live-account validation.
+
+## Variable recall landing area: 1.2.18
+
+User reported return-scroll use followed by a stall and explained that landing coordinates vary around the same area. Reproduced a nearby landing stuck in recall-wait with a failing test: the previous fixed 120-unit (12 m) arrival radius was too tight. New `potion.restock.town.arrivalRadius` defaults to 500 units (50 m), adjustable 10–150 m under Supplies. Old profiles inherit the default. Reverse return retains its 120-unit destination radius.
+
+Expected world reset during recall-wait/reverse-wait now marks travel confirmation, and the tick still requires world state, fresh local entity, settled inventory and no return cast before accepting the destination. `Town.enter` clears the transition flag for each phase so reverse arrival cannot reuse recall confirmation. Both reset-only and phase-based transitions are tested. Status reports missing travel confirmation, unsettled scroll state, actual distance versus accepted tolerance, and collision-map waits during town walking. Four new tests bring the suite to 108; syntax and isolated browser tests also passed, including persistence of the tolerance control. Live-account arrival/navigation remains unverified. An asynchronous question requested the user's exact stalled status; no reply at implementation time.

@@ -123,6 +123,10 @@ const server = http.createServer((req, res) => {
     assert.equal(await townToggle.isChecked(), false);
     await townToggle.check(); assert.equal(await page.evaluate(() => SROLean.town.cfg().enabled), true);
     await townToggle.uncheck();
+    const arrivalTolerance = page.getByLabel('Town arrival tolerance (m)', { exact: true });
+    assert.equal(await arrivalTolerance.inputValue(), '50');
+    await arrivalTolerance.fill('80'); await arrivalTolerance.dispatchEvent('change');
+    assert.equal(await page.evaluate(() => SROLean.town.cfg().arrivalRadius), 800);
     await page.getByRole('button', { name: 'Save arrival point', exact: true }).click();
     assert.equal(await page.evaluate(() => SROLean.town.cfg().arrival.x), 100);
     await page.getByLabel('Pet free slots ≤', { exact: true }).fill('2');

@@ -845,7 +845,7 @@ test('town cycle cancels on manual control, F8, disabled settings and unexpected
 });
 test('town scroll wait times out while outside world and wrong arrival never starts service', () => {
   const f = townFixture(); f.Town.tick(); f.Town.phase('entering-world');
-  f.World.gp.pose.x = 500; f.Town.tick(); assert.equal(f.Town.trip.phase, 'recall-wait');
+  f.World.gp.pose.x = 1000; f.Town.tick(); assert.equal(f.Town.trip.phase, 'recall-wait');
   f.World.phase = 'entering-world'; f.advance(91000); f.Controller.tick();
   assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, false); assert.match(f.Town.message, /timed out/);
 });
@@ -965,5 +965,30 @@ test('town rejects special-trade-only merchants as smiths and names only missing
   gp.target = 62; gp.targetCapabilities = 0x801; f.Town.cfg().smith = null; f.Town.cfg().gate = null;
   f.Town.save('smith'); assert.equal(f.Town.cfg().smith, null);
   assert.equal(f.Town.validate(), 'Save missing town services: repair merchant, world statue / teleport.');
+});
+test('town recall accepts landing variation around the saved arrival area', () => {
+  const f = townFixture(); f.Town.tick(); f.Town.phase('entering-world');
+  f.World.gp.pose = { regionId: 1, x: 350, y: 40, z: 180 }; f.Town.tick();
+  assert.equal(f.Town.trip.phase, 'walk-storage', 'A nearby landing must start town services');
+});
+test('town recognizes a native world reset and waits for the fresh local player before services', () => {
+  const f = townFixture(); f.UI.mount = f.UI.draw = f.UI.update = f.Ticker.start = () => {}; f.boot(); f.Town.tick();
+  f.World.applyEvent({ kind: 'reset', epoch: 2 }); f.World.gp.pose.x = 350;
+  f.Town.tick(); assert.equal(f.Town.trip.phase, 'recall-wait');
+  f.World.applyEvent({ kind: 'spawn', entity: { gid: 1, kind: 'player', regionId: 1, x: 350, y: 0, z: 100, appearanceState: [0], movementMode: 0 } });
+  f.Town.tick(); assert.equal(f.Town.trip.phase, 'walk-storage');
+});
+test('town arrival still needs travel confirmation, settled state and the configured area', () => {
+  const f = townFixture(); f.Town.cfg().arrivalRadius = 100; f.Town.tick(); f.World.gp.pose.x = 100;
+  f.Town.tick(); assert.equal(f.Town.trip.phase, 'recall-wait'); assert.match(f.Town.message, /travel confirmation/);
+  f.Town.phase('entering-world'); f.World.gp.pose.x = 350; f.Town.tick();
+  assert.equal(f.Town.trip.phase, 'recall-wait'); assert.match(f.Town.message, /25 m.*10 m/);
+  f.World.gp.pose.x = 100; f.World.gp.returnScroll = {}; f.Town.tick(); assert.equal(f.Town.trip.phase, 'recall-wait');
+  f.World.gp.returnScroll = null; f.Town.tick(); assert.equal(f.Town.trip.phase, 'walk-storage');
+});
+test('reverse arrival cannot reuse the earlier recall transition', () => {
+  const f = townFixture(); f.Town.tick(); f.Town.phase('entering-world'); f.Town.enter('reverse-wait');
+  f.Town.tick(); assert.equal(f.Town.trip.phase, 'reverse-wait');
+  f.Town.phase('entering-world'); f.Town.tick(); assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, true);
 });
 console.log(`${passed} lean integration tests passed.`);

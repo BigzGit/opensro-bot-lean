@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.17
+// @version      1.2.18
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.17';
+const VERSION = '1.2.18';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -197,7 +197,7 @@ const DEFAULT_PROFILE = {
     prefer: { hp: 0, mp: 0, vigor: 0, cure: 0 }, delayMs: 350,
     restock: {
       enabled: false, vendor: null, route: [], offers: [],
-      town: { enabled: false, petFull: true, petFree: 1, arrival: null, storage: null, vendor: null, smith: null, gate: null,
+      town: { enabled: false, petFull: true, petFree: 1, arrivalRadius: 500, arrival: null, storage: null, vendor: null, smith: null, gate: null,
         keep: '', store: { equipment: true, elixirs: true, powders: true, alchemy: true, others: false } },
       hp: { on: true, refObjId: 0, low: 20, target: 200 },
       mp: { on: true, refObjId: 0, low: 20, target: 200 },
@@ -2502,7 +2502,7 @@ const Town = {
   },
   enter(phase) {
     const t = this.trip;
-    t.phase = phase; t.at = now(); t.sent = false; t.pending = null;
+    t.phase = phase; t.at = now(); t.sent = false; t.pending = null; t.transition = false;
     t.travel = null; t.lastPose = null; t.progressAt = now(); t.movedAt = -Infinity;
     this.message = 'Town cycle: ' + phase;
   },
@@ -2514,6 +2514,7 @@ const Town = {
     if (now() - t.progressAt > 20000 || now() - t.at > 120000) { this.fail('Town movement blocked or collision data unavailable.'); return false; }
     const step = Navigation.next(t, dest);
     if (step.error && !step.waiting) { this.fail(step.error); return false; }
+    this.message = step.waiting ? 'Town movement: ' + (step.error || 'Waiting for collision route.') : 'Town cycle: walking to ' + (dest.name || 'service point');
     if (!step.point || now() - t.movedAt < 1000 || World.gp.inventoryPending) return false;
     if (World.isSitting()) { if (Cmd.action(1000)) t.movedAt = now(); }
     else if (Cmd.move(step.point)) t.movedAt = now();
@@ -2692,14 +2693,20 @@ const Town = {
       if (Cmd.itemUse(scroll.slot)) this.enter('recall-wait');
     } else if (['recall-wait', 'reverse-wait'].includes(t.phase)) {
       const dest = t.phase === 'recall-wait' ? c.arrival : t.origin;
+      const radius = t.phase === 'recall-wait' ? clamp(Number(c.arrivalRadius) || 500, 100, 1500) : 120;
+      const distance = dist2D(World.pose(), dest);
       // Require a world transition; the old pose can lie next to the expected point.
-      if (t.transition && dist2D(World.pose(), dest) <= 120 && !gp.inventoryPending && !gp.returnScroll) {
+      if (t.transition && distance <= radius && !gp.inventoryPending && !gp.returnScroll) {
         if (t.phase === 'recall-wait') this.enter(c.storage ? 'walk-storage' : 'walk-vendor');
         else {
           this.trip = null; Hunt.targetGid = Hunt.lootGid = 0; Hunt.state = 'search';
           this.message = 'Town service complete; hunting resumed.'; UI.toast(this.message);
         }
-      } else if (now() - t.at > 90000) this.fail('Scroll arrival not confirmed. Check recall town and scroll restrictions.');
+      } else {
+        this.message = !t.transition ? 'Waiting for scroll travel confirmation.' : gp.inventoryPending || gp.returnScroll
+          ? 'Waiting for scroll arrival state to settle.'
+          : 'Waiting for arrival area: ' + (Number.isFinite(distance) ? Math.round(distance / 10) + ' m from saved point; tolerance ' + Math.round(radius / 10) + ' m.' : 'saved point is in another world.');
+      }
     } else if (t.phase.startsWith('walk-')) {
       const role = t.phase.slice(5);
       if (this.walk(c[role]) && this.trip) this.enter('open-' + role);
@@ -4696,6 +4703,7 @@ const UI = {
         this.check('Use return scroll → town services → reverse return', () => town().enabled, v => town().enabled = v),
         this.check('Return when pickup pet is nearly full', () => town().petFull, v => town().petFull = v),
         this.number('Pet free slots ≤', () => town().petFree, v => town().petFree = v, 0, 10),
+        this.number('Town arrival tolerance (m)', () => town().arrivalRadius / 10, v => town().arrivalRadius = v * 10, 10, 150),
         el('p', 'Bind your recall to Hotan in the game. While stopped, save the arrival point where a return scroll places you. Stand near, select and save the warehouse, potion merchant, repair merchant and world statue / teleport. Open the potion shop before saving its merchant. Saves your standing position for each approach. Uses collision-aware walking between services. Overrides the recorded walking restock while enabled.', 'muted'));
       for (const [role, label] of [['arrival', 'Arrival point'], ['storage', 'Warehouse'], ['vendor', 'Potion merchant'], ['smith', 'Repair merchant'], ['gate', 'World statue / teleport']]) services.append(
         this.row(this.button('Save ' + label.toLowerCase(), () => Town.save(role)), el('span', town()[role]?.name || (town()[role] ? 'Saved' : 'Not saved'), 'muted')));
@@ -4813,7 +4821,10 @@ function boot() {
   });
   bus.on('failure', () => { stopAll(); Restock.cancelRecording(); UI.toast('Game connection failed; bot stopped.', 'warn'); });
   bus.on('reset', () => {
-    if (Town.trip && !['recall-wait', 'reverse-wait'].includes(Town.trip.phase)) Town.fail('Unexpected world reset during town service.');
+    if (Town.trip) {
+      if (['recall-wait', 'reverse-wait'].includes(Town.trip.phase)) Town.trip.transition = true;
+      else Town.fail('Unexpected world reset during town service.');
+    }
     SpeedScroll.reset(); Party.reset(); Resurrect.reset(); Loot.reset(); Navigation.scene = null; Wardrobe.inv = Wardrobe.baseInv = Wardrobe.av = Wardrobe.baseAv = null; Wardrobe.body = '';
   });
   bus.on('attached', ({ late }) => { if (late) UI.toast('Attached after the game started. Reload for complete character data.', 'warn'); });
