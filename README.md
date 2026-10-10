@@ -31,6 +31,8 @@ Both scripts must not run together. Lean detects another active assistant and de
 
 ## What changed
 
+Version 1.2.10 isolates keyboard input in bot fields from game shortcuts, preserving normal typing, editing and Tab navigation. Focused checkboxes and dropdowns are no longer overwritten by the periodic refresh. Reload the game after updating so the keyboard guard installs before game listeners.
+
 Version 1.2.9 adds **Settings > Party > Auto-recruit**, off by default and independent of hunting. Save a title, level range, purpose and new-party sharing settings. It registers a missing listing while solo (level 5+) or leader, accepts applicants, and restores missing listings when space opens. Existing listings and sharing settings are preserved. Registrations are at least 30 seconds apart; an unconfirmed registration waits for manual review and a toggle to retry. Disable Auto-recruit and the separate auto-accept switch to stop all recruitment automation; existing listings stay in place.
 
 Version 1.2.8 adds **Settings > Party > Auto-accept party-matching joins** (off by default). It accepts applications to your own listing while leading or forming a party, even while hunting is stopped. Turn the switch off to stop accepting. It checks party capacity and request expiry, sends each acceptance once, and does not answer ordinary party, trade or guild invitations.

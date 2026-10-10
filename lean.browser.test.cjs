@@ -132,6 +132,34 @@ const server = http.createServer((req, res) => {
       SROLean.world.gp.social = { self: 0, leader: 0, options: 0, members: [] };
       SROLean.world.gp.progression.level = 30;
     });
+    // Model the game's global keyboard handlers, including preventDefault on bound keys.
+    await page.evaluate(() => {
+      window.gameKeyEvents = [];
+      window.gameKeyTrap = event => {
+        window.gameKeyEvents.push(event.type + ':' + event.code);
+        if (event.type === 'keydown' && /^[a-z0-9 ]$/i.test(event.key)) event.preventDefault();
+      };
+      for (const type of ['keydown', 'keypress', 'keyup']) window.addEventListener(type, window.gameKeyTrap, true);
+    });
+    const partyTitle = page.getByLabel('Party listing title', { exact: true });
+    await partyTitle.fill(''); await partyTitle.pressSequentially('Browser recruitment 123');
+    assert.equal(await partyTitle.inputValue(), 'Browser recruitment 123');
+    await partyTitle.press('Control+A'); await partyTitle.press('Backspace');
+    await partyTitle.pressSequentially('Browser recruitment');
+    await partyTitle.press('F8'); await partyTitle.press('Shift+F7');
+    assert.equal(await page.locator('#sro-bot-lean').isVisible(), true);
+    assert.deepEqual(await page.evaluate(() => window.gameKeyEvents), []);
+    await partyTitle.press('Tab');
+    assert.equal(await page.evaluate(() => SROLean.settings.profile.party.title), 'Browser recruitment');
+    await page.evaluate(() => {
+      const outside = document.createElement('input'); outside.id = 'outside-input'; document.body.append(outside); outside.focus();
+    });
+    await page.keyboard.press('z');
+    assert.equal(await page.evaluate(() => window.gameKeyEvents.includes('keydown:KeyZ')), true);
+    await page.evaluate(() => {
+      for (const type of ['keydown', 'keypress', 'keyup']) window.removeEventListener(type, window.gameKeyTrap, true);
+      document.getElementById('outside-input').remove();
+    });
     await page.getByLabel('Party listing title', { exact: true }).fill('Browser recruitment');
     await page.getByLabel('Party listing title', { exact: true }).dispatchEvent('change');
     await page.getByLabel('Auto-recruit', { exact: true }).check();

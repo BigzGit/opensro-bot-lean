@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.9
+// @version      1.2.10
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.9';
+const VERSION = '1.2.10';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -3910,7 +3910,7 @@ const UI = {
   check(title, get, set) {
     const input = el('input'); input.type = 'checkbox'; input.checked = !!get();
     input.addEventListener('change', () => { set(input.checked); Settings.saveProfile(); });
-    this.refreshers.push(() => { if (document.activeElement !== input) input.checked = !!get(); });
+    this.refreshers.push(() => { if (this.root?.activeElement !== input) input.checked = !!get(); });
     return this.field(title, input);
   },
   number(title, get, set, min, max, step = 1) {
@@ -3931,6 +3931,7 @@ const UI = {
   select(title, options, get, set) {
     const input = el('select');
     const refresh = () => {
+      if (this.root?.activeElement === input) return;
       const rows = typeof options === 'function' ? options() : options;
       const signature = JSON.stringify(rows);
       if (input.dataset.options !== signature) {
@@ -4224,6 +4225,15 @@ function boot() {
   };
   W.addEventListener('pointerdown', unlockSound, true);
   W.addEventListener('keydown', unlockSound, true);
+  // The game listens globally and prevents bound keys even when a shadow-DOM
+  // field owns focus. Stop propagation early, but retain native editing defaults.
+  const protectEditing = e => {
+    const path = e.composedPath(), target = path[0];
+    if (path.includes(UI.root?.host) && (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName || ''))) {
+      e.stopImmediatePropagation();
+    }
+  };
+  for (const type of ['keydown', 'keypress', 'keyup']) W.addEventListener(type, protectEditing, true);
   Combat.init(); Loot.init();
   bus.on('character', name => {
     const key = name ? 'profile:' + name : 'profile:default';

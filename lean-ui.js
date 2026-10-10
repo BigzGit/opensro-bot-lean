@@ -26,7 +26,7 @@ const UI = {
   check(title, get, set) {
     const input = el('input'); input.type = 'checkbox'; input.checked = !!get();
     input.addEventListener('change', () => { set(input.checked); Settings.saveProfile(); });
-    this.refreshers.push(() => { if (document.activeElement !== input) input.checked = !!get(); });
+    this.refreshers.push(() => { if (this.root?.activeElement !== input) input.checked = !!get(); });
     return this.field(title, input);
   },
   number(title, get, set, min, max, step = 1) {
@@ -47,6 +47,7 @@ const UI = {
   select(title, options, get, set) {
     const input = el('select');
     const refresh = () => {
+      if (this.root?.activeElement === input) return;
       const rows = typeof options === 'function' ? options() : options;
       const signature = JSON.stringify(rows);
       if (input.dataset.options !== signature) {

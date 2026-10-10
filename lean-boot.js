@@ -11,6 +11,15 @@ function boot() {
   };
   W.addEventListener('pointerdown', unlockSound, true);
   W.addEventListener('keydown', unlockSound, true);
+  // The game listens globally and prevents bound keys even when a shadow-DOM
+  // field owns focus. Stop propagation early, but retain native editing defaults.
+  const protectEditing = e => {
+    const path = e.composedPath(), target = path[0];
+    if (path.includes(UI.root?.host) && (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName || ''))) {
+      e.stopImmediatePropagation();
+    }
+  };
+  for (const type of ['keydown', 'keypress', 'keyup']) W.addEventListener(type, protectEditing, true);
   Combat.init(); Loot.init();
   bus.on('character', name => {
     const key = name ? 'profile:' + name : 'profile:default';
