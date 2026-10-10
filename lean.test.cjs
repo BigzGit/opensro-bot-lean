@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, bus, Manual, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, bus, Manual, Resurrect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [];
@@ -490,6 +490,78 @@ test('auto-recruit validates listing purpose against job suit', () => {
   f.Controller.tick(); assert.equal(f.commands.length, 0);
   f.World.gp.inventory = [{ slot: 8, typeFlags: (1 << 11) | 0x3ac }];
   f.Controller.tick(); assert.equal(f.commands[0].registration.purpose, 2);
+});
+function resurrection(f) {
+  f.Settings.profile.party.autoRes = true;
+  f.World.gp.social = { localName: 'Me', self: 10, leader: 10, options: 1, members: [{ id: 10, name: 'Me' }, { id: 11, name: 'Mate', status: 0 }] };
+  f.World.gp.skills = [10067];
+  f.World.rebuildCatalog([{ id: 10067, group: 638, level: 1, name: 'Rebirth', targetRequired: true, targets: 178, masteries: [{ ID: 518, Level: 10 }] }]);
+  f.World.ents.set(50, { gid: 50, kind: 'player', name: 'Mate', regionId: 1, x: 110, y: 0, z: 100, appearanceState: [2, 0, 0] });
+  return f.World.gp.social.members[1];
+}
+test('auto-resurrect is opt-in and selects the corpse before offering the rebirth', () => {
+  const f = fixture(); resurrection(f);
+  f.Settings.profile.party.autoRes = false; f.Controller.tick(); assert.equal(f.commands.length, 0);
+  f.Settings.profile.party.autoRes = true; f.Controller.tick();
+  assert.deepEqual(JSON.parse(JSON.stringify(f.commands)), [
+    { kind: 'select', gid: 50 },
+    { kind: 'skill', skillId: 10067, gid: 50 },
+  ]);
+  assert.ok(f.notices.some(n => /Resurrection offered: Mate/.test(n)));
+  assert.equal(f.Hunt.running, false);
+});
+test('auto-resurrect offers once per answer window and rearms after the member revives', () => {
+  const f = fixture(), mate = resurrection(f);
+  f.Controller.tick(); assert.equal(f.commands.length, 2);
+  f.advance(2000); f.Controller.tick(); assert.equal(f.commands.length, 2);
+  f.advance(30000); f.Controller.tick(); assert.equal(f.commands.length, 4);
+  mate.status = 10; f.advance(800); f.Controller.tick(); assert.equal(f.commands.length, 4);
+  mate.status = 0; f.advance(800); f.Controller.tick(); assert.equal(f.commands.length, 6);
+});
+test('auto-resurrect needs a fallen party member whose corpse is in view', () => {
+  const f = fixture(), mate = resurrection(f);
+  f.World.ents.delete(50); f.Controller.tick(); assert.equal(f.commands.length, 0);
+  f.World.ents.set(50, { gid: 50, kind: 'player', name: 'Mate', regionId: 1, x: 110, y: 0, z: 100, appearanceState: [0] });
+  f.Controller.tick(); assert.equal(f.commands.length, 0);
+  f.World.ents.get(50).appearanceState = [2]; f.advance(800); f.Controller.tick();
+  assert.equal(f.commands.length, 2);
+  mate.status = 10; f.advance(800); f.Controller.tick(); mate.status = 0;
+  f.World.ents.get(50).name = 'Stranger'; f.advance(800); f.Controller.tick(); assert.equal(f.commands.length, 2);
+  f.World.ents.get(50).name = 'Mate'; f.advance(800); f.Controller.tick(); assert.equal(f.commands.length, 4);
+});
+test('auto-resurrect idles without a learned corpse-targeted skill', () => {
+  const f = fixture(); resurrection(f);
+  f.World.gp.skills = []; f.Controller.tick(); assert.equal(f.commands.length, 0);
+  assert.match(f.Resurrect.message, /No learned/);
+  f.World.gp.skills = [10256];
+  f.World.rebuildCatalog([{ id: 10256, group: 658, level: 1, name: 'Group Rebirth', targetRequired: false, targets: 0, masteries: [] }]);
+  f.Controller.tick(); assert.equal(f.commands.length, 0);
+});
+test('auto-resurrect prefers the highest-tier corpse-targeted row', () => {
+  const f = fixture(); resurrection(f);
+  f.World.gp.skills = [10067, 10072];
+  f.World.rebuildCatalog([
+    { id: 10067, group: 638, level: 1, name: 'Rebirth A', targetRequired: true, targets: 178, masteries: [{ ID: 518, Level: 10 }] },
+    { id: 10072, group: 639, level: 1, name: 'Rebirth B', targetRequired: true, targets: 178, masteries: [{ ID: 518, Level: 60 }] },
+  ]);
+  f.Controller.tick(); assert.equal(f.commands.at(-1).skillId, 10072);
+});
+test('corpse-targeted rows may press on a corpse; ordinary rows still refuse one', () => {
+  const f = fixture(); resurrection(f);
+  assert.equal(f.Cmd.skill(10067, 50), true);
+  f.advance(300);
+  f.World.rebuildCatalog([{ id: 10067, group: 638, level: 1, name: 'Rebirth', targetRequired: true, targets: 6, masteries: [] }]);
+  assert.equal(f.Cmd.skill(10067, 50), false);
+});
+test('auto-resurrect waits for a pending target selection', () => {
+  const f = fixture(); resurrection(f);
+  f.World.gp.targetPending = 30; f.Controller.tick(); assert.equal(f.commands.length, 0);
+  f.World.gp.targetPending = 0; f.advance(300); f.Controller.tick(); assert.equal(f.commands.length, 2);
+});
+test('auto-resurrect yields to fresh manual control', () => {
+  const f = fixture(); resurrection(f);
+  f.Manual.lastAt = 99000; f.Controller.tick(); assert.equal(f.commands.length, 0);
+  f.advance(7000); f.Controller.tick(); assert.equal(f.commands.length, 2);
 });
 function petFight(f) {
   const pet = pickupPet(f); f.Hunt.start();

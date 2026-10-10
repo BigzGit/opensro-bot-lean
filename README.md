@@ -31,6 +31,8 @@ Both scripts must not run together. Lean detects another active assistant and de
 
 ## What changed
 
+Version 1.2.12 adds **Settings > Party > Auto-resurrect party members** (off by default, independent of hunting). It casts your learned Rebirth skill on a fallen party member whose body is in view, picks the highest-tier corpse-targeted skill you know, and re-offers the revival every 30 seconds while the member stays dead. The dead member still has to accept the revival, and fresh manual control briefly pauses new offers. Works while hunting is stopped; turn the switch off to stop offering.
+
 Version 1.2.11 lets pickup pets collect during combat, including while the character is casting or under attack. Pending pet pickups and retries no longer hold up combat. The finish-fight option applies only to character pickup. Inventory transaction and potion-priority checks remain in place.
 
 Version 1.2.10 isolates keyboard input in bot fields from game shortcuts, preserving normal typing, editing and Tab navigation. Focused checkboxes and dropdowns are no longer overwritten by the periodic refresh. Reload the game after updating so the keyboard guard installs before game listeners.

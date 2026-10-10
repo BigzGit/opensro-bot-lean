@@ -39,6 +39,9 @@ b = commands.index('  rebirth(choice)', a)
 commands = commands[:a] + commands[b:]
 commands = commands.replace("  chat: 1200,\n  'gm-command': 600,\n", '')
 commands = commands.replace('return now() - (this.last[kind] || 0) >= gap;', 'return now() - (this.last[kind] ?? -Infinity) >= gap;')
+# A corpse-targeted row (DeadBody bit 128) may press on a dead target: the worker
+# replaces the press gid with the selection intent the caster just set.
+commands = commands.replace('if (!e || !World.isAlive(e)) return false;', 'if (!e || !World.isAlive(e) && !(info?.targets & 128)) return false;')
 ticker = section('const Ticker =', '// ---- Potion ')
 potion = section('const Potion =', '// Same rule as the client')
 combat = section('const Combat =', '// ---- Assist:')
@@ -86,7 +89,7 @@ skin += '\nconst LEAN_CSS = ' + __import__('json').dumps((base / 'lean-skin.css'
 header = '''// ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.11
+// @version      1.2.12
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -106,7 +109,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.11';
+const VERSION = '1.2.12';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -117,6 +120,7 @@ parts = [header, utils, (base / 'lean-settings.js').read_text(encoding='utf-8'),
          (base / 'lean-navigation.js').read_text(encoding='utf-8'), walkback,
          (base / 'lean-loot.js').read_text(encoding='utf-8'),
          (base / 'lean-party.js').read_text(encoding='utf-8'),
+         (base / 'lean-resurrect.js').read_text(encoding='utf-8'),
          (base / 'lean-controller.js').read_text(encoding='utf-8'),
          skin, icon_loader, (base / 'lean-icons.js').read_text(encoding='utf-8'),
          (base / 'lean-skills.js').read_text(encoding='utf-8'),

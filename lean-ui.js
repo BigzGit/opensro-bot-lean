@@ -294,7 +294,9 @@ const UI = {
         this.partyNote,
         el('p', 'Auto-recruit registers your saved listing and accepts applicants whenever enabled, even with hunting stopped. Restores missing listings when space opens. Existing listings and party sharing settings are preserved; edits apply to the next new listing. Turning this off leaves the current listing in place.', 'muted'),
         this.check('Auto-accept party-matching joins', () => Settings.profile.party.autoAcceptMatching, v => Settings.profile.party.autoAcceptMatching = v),
-        el('p', 'Accepts applications to your own listing while you are the leader or forming a new party. Works while hunting is stopped; turn this switch off to stop accepting. Ordinary invitations are left to you.', 'muted')));
+        el('p', 'Accepts applications to your own listing while you are the leader or forming a new party. Works while hunting is stopped; turn this switch off to stop accepting. Ordinary invitations are left to you.', 'muted'),
+        this.check('Auto-resurrect party members', () => party().autoRes, v => { party().autoRes = v; Resurrect.reset(); }),
+        el('p', 'Casts your learned Rebirth skill on a fallen party member whose body is in view, and re-offers it every 30 seconds while the member stays dead. Works while hunting is stopped; the dead member still has to accept the revival.', 'muted')));
       this.pane.append(this.group('Profiles', el('p', 'Settings are saved separately for each character. Import copies only bot settings from the original assistant.', 'muted'),
         this.button('Import original bot settings', () => Settings.importOriginal()),
         this.button('Export Lean settings', () => {
@@ -309,7 +311,11 @@ const UI = {
     return (World.gp?.skills || []).map(id => { const s = World.skill(id); return `${id}:${s?.name}:${s?.icon}:${s?.level}`; }).join('|');
   },
   update() {
-    if (this.current === 'Settings' && this.partyNote) this.partyNote.textContent = Settings.profile.party.autoRecruit ? Party.message : 'Auto-recruit off.';
+    if (this.current === 'Settings' && this.partyNote) {
+      const notes = [Settings.profile.party.autoRecruit ? Party.message : 'Auto-recruit off.'];
+      if (Settings.profile.party.autoRes) notes.push(Resurrect.message);
+      this.partyNote.textContent = notes.join(' ');
+    }
     if (!this.status) return;
     if (this.current === 'Loot' && this.petNote) { this.petNote.hidden = !Loot.petMode(); this.petNote.textContent = Loot.petStatus(); }
     Learned.repair();

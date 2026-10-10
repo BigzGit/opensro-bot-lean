@@ -1,6 +1,6 @@
 const CLASS_KEYS = ['normal', 'champion', 'giant', 'party', 'elite', 'unique'];
 const DEFAULT_PROFILE = {
-  party: { autoAcceptMatching: false, autoRecruit: false, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true },
+  party: { autoAcceptMatching: false, autoRecruit: false, autoRes: false, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true },
   wardrobe: { on: true, phantom: true, realAnim: true, hideAvatars: false,
     eq: {}, av: {}, pet: { atk: 0, pick: 0, mount: 0 }, presets: {}, undo: null },
   macro: {

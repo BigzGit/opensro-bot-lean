@@ -36,6 +36,7 @@ The panel lives inside an open shadow root on `#sro-bot-lean`. Runtime diagnosti
 | `lean-controller.js` | Coordinates hunting, restocking, return, loot and independent services. |
 | `lean-loot.js` | Drop eligibility, categories, pet selection/setup, pickup confirmation/retries and full-bag alert. |
 | `lean-party.js` | Party-matching acceptance and saved-listing auto-recruit. |
+| `lean-resurrect.js` | Auto-resurrect fallen party members with a learned corpse-targeted skill. |
 | `lean-walkback.js` | Saved-spot return and optional hunting resume. |
 | `lean-navigation.js` | Collision-data capture and waypoint planning. |
 | `restock.js` | Merchant route recording, buying and return; build uses its logic before the original UI section. |
@@ -48,7 +49,7 @@ The panel lives inside an open shadow root on `#sro-bot-lean`. Runtime diagnosti
 | `lean.browser.test.cjs` | Headless Edge/Playwright tests using an isolated mock game and local assets. |
 | `bot.lean.user.js`, `bot.lean.meta.js` | Generated installable script and update header; commit both for releases. |
 
-Important runtime objects: `World` mirrors observed game state; `Cmd` submits native gameplay commands; `Hunt` drives combat; `Loot`, `Restock`, `WalkBack` and `Party` own their state machines. `Controller.tick()` runs every 100 ms. UI/wardrobe updates run every 500 ms. A local command dispatch is not proof of server success: wait for matching state changes where required.
+Important runtime objects: `World` mirrors observed game state; `Cmd` submits native gameplay commands; `Hunt` drives combat; `Loot`, `Restock`, `WalkBack`, `Party` and `Resurrect` own their state machines. `Controller.tick()` runs every 100 ms. UI/wardrobe updates run every 500 ms. A local command dispatch is not proof of server success: wait for matching state changes where required.
 
 ## Features and behaviour to preserve
 
@@ -68,7 +69,7 @@ Important runtime objects: `World` mirrors observed game state; `Cmd` submits na
 
 ### Party automation
 
-Both party switches default off and are saved per character. They operate whenever enabled, **even while hunting is stopped**. This was explicitly requested by the user.
+The party switches default off and are saved per character. They operate whenever enabled, **even while hunting is stopped**. This was explicitly requested by the user.
 
 - **Auto-accept party-matching joins** accepts applications to the local player's own matching listing when solo/forming or party leader, with capacity and expiry checks.
 - Ordinary party invitations, guild invitations and trade requests are not automatically answered.
@@ -77,6 +78,8 @@ Both party switches default off and are saved per character. They operate whenev
 - Registration requires solo level 5+ or leadership with room. Capacity is 4 without shared EXP or 8 with it. Current client listing range is 1-90; title length is 1-50 characters. Job-suit restrictions determine allowed purposes.
 - Missing listings can be restored when space opens, with at least 30 seconds between registrations.
 - Unconfirmed registration does not blindly repeat. A status message asks the user to check the game and toggle Auto-recruit to retry.
+- **Auto-resurrect** casts a learned corpse-targeted row (DeadBody target bit 128 of the client catalogue, the Rebirth family) on a fallen party member whose corpse entity is in view, preferring the highest mastery requirement. The sim worker replaces a press gid with the newest selection intent (`core.ts`), so the corpse is selected immediately before the press; the server walks the caster into reach and proposes the revival. The dead member still has to accept; refusals and timeouts are invisible to the caster.
+- Offers repeat per member only after the server's 30 second answer window (31 s here) and clear when the member revives or leaves the party. A fresh manual-control command pauses offers for `manualPauseS`. Dead targets stay refused for every other targeted skill.
 - Turning off Auto-recruit leaves an existing listing in place. The separate auto-accept switch may still be on; disable both to stop all party automation.
 - Native acceptance command: `{ kind: 'party-match-answer', a, b, answer: 1 }`. IDs come from the current request, and expiry uses simulation time.
 - Native registration command: `{ kind: 'party-match-register', registration: { party: 0, type, purpose, min, max, title } }`.
@@ -169,6 +172,7 @@ This was stale public metadata delivery, not a missing local version bump. Do no
 | 1.2.9 | `599c5a8` | Saved listing and independent auto-recruit. |
 | 1.2.10 | `b585a53` | Isolate field typing from game shortcuts; preserve focused controls during refresh. |
 | 1.2.11 | `1b91c56` | Pet collection runs alongside combat; finish-fight is character-only. |
+| 1.2.12 | `pending` | Auto-resurrect: Rebirth cast on fallen party members, opt-in and independent of hunting. |
 
 ## Remaining practical limitations
 
