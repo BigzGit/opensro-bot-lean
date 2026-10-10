@@ -3,6 +3,13 @@
 const Town = {
   trip: null, message: 'Town cycle off.',
   cfg() { return Restock.cfg().town; },
+  status() {
+    if (this.trip || this.message.startsWith('Town cycle stopped:')) return this.message;
+    if (!this.cfg().enabled) return 'Town cycle off. The pet-full chime is an alert; enable the scroll town cycle to return automatically.';
+    if (!World.inWorld()) return 'Town cycle: waiting for game world.';
+    const error = this.validate();
+    return error ? 'Town cycle not ready: ' + error : 'Town cycle ready: waiting for low potions or pet capacity trigger.';
+  },
   scroll(type) { return World.items().find(i => (i.typeFlags & 0xfffc) === type && (i.quantity ?? 1) > 0); },
   free(items, start, end) {
     const used = new Set(items.map(i => i.slot));
@@ -82,6 +89,9 @@ const Town = {
       manualAt: Manual.lastAt, character: World.charName, petRef: Loot.pet()?.rec.refObjId,
       config: JSON.stringify(this.cfg()), supplies: Restock.supplies().map(s => ({ ...s })) };
     Hunt.targetGid = Hunt.lootGid = 0;
+    // Stop the worker's repeating attack/movement as well as the bot's next tick.
+    // Pending inventory work still settles before item-use is admitted below.
+    Cmd.move(World.pose());
     this.message = 'Using return scroll; recall must be bound to Hotan.';
   },
   enter(phase) {
@@ -246,7 +256,7 @@ const Town = {
   tick() {
     const c = this.cfg();
     if (!this.trip) {
-      if (!c.enabled || !Hunt.running || !World.inWorld() || World.isDead() || World.gp.inventoryPending || World.isCasting() || Resurrect.holdUntil > now() ||
+      if (!c.enabled || !Hunt.running || !World.inWorld() || World.isDead() ||
           WalkBack.active || Restock.trip || Restock.recording || Restock.activeShop() || World.gp.storage || now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000 || !this.reason()) return false;
       this.begin();
       if (!this.trip) return true;
@@ -261,7 +271,11 @@ const Town = {
     if (now() - Potion.lastUse < 350) return true;
     Hunt.state = 'restock';
     if (t.phase === 'recall') {
-      if (World.isCasting() || gp.inventoryPending) return true;
+      if (now() - t.at > 30000) { this.fail('Combat or inventory did not settle before departure.'); return true; }
+      if (World.isCasting() || gp.inventoryPending) {
+        this.message = 'Town departure reserved; waiting for combat or inventory to settle.';
+        return true;
+      }
       if (World.isSitting()) { if (Cmd.spaced('action')) Cmd.action(1000); return true; }
       if (World.local()?.mountedOn) { this.fail('Dismount before starting town service.'); return true; }
       const scroll = this.scroll(0x09ec);

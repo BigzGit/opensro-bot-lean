@@ -31,6 +31,8 @@ Both scripts must not run together. Lean detects another active assistant and de
 
 ## What changed
 
+Version **1.2.16** fixes a town-departure scheduling bug during active combat or pet pickups. The capacity/supply trigger now reserves the controller immediately, stops repeating combat movement, and waits for the current cast/inventory operation to settle before using the return scroll. Hunting cannot start another action while departure is reserved. A 30-second settlement timeout stops the bot with a reason. Supplies now shows town readiness and missing prerequisites; the full-pet alert explicitly says when the scroll cycle is disabled. The chime remains independent of automatic return.
+
 Version **1.2.15** adds an opt-in **Supplies → Hotan scroll town cycle**: low selected potion stock or a nearly full pickup pet triggers a return scroll, filtered pet-to-storage transfers, potion refills, equipment repair, then a reverse return to the last return-scroll point. The saved hunting state resumes only after arrival is confirmed. Recorded walking restock remains available when the town cycle is off.
 
 ### Set up the Hotan town cycle
@@ -97,7 +99,7 @@ Lean preserves the reviewed worker-hook and combat code from the supplied bot. N
 Validation completed:
 
 - JavaScript syntax check.
-- 99 integration tests covering the previous loot/combat/restock behaviours, collision routing, Thunderdragon level 13, wardrobe isolation and paid-avatar browsing, plus elixir presets, native item classification, capacity/ownership/exclusion checks, old-profile migration and cancellation after changing pickup filters. Pet tests cover acknowledged auto-grab setup, selective commands, pet bag capacity and gains, missing/foreign/dead/distant pets, potion priority, bounded setting retries, stop behaviour and controller integration. Regression tests also cover idle/manual/walk-back pet settings, deferred revival return, cancellation while waiting and repeated walk-back commands.
+- 102 integration tests covering the previous loot/combat/restock behaviours, collision routing, Thunderdragon level 13, wardrobe isolation and paid-avatar browsing, plus elixir presets, native item classification, capacity/ownership/exclusion checks, old-profile migration and cancellation after changing pickup filters. Pet tests cover acknowledged auto-grab setup, selective commands, pet bag capacity and gains, missing/foreign/dead/distant pets, potion priority, bounded setting retries, stop behaviour and controller integration. Regression tests also cover idle/manual/walk-back pet settings, deferred revival return, cancellation while waiting and repeated walk-back commands.
 - Headless Edge tests covering actual boot, worker-message hooks and captured collision routing; verified gzip/Range-pack image loading; missing Thunderdragon level 13 metadata recovery and selection; lazy wardrobe loading, skins, glow, presets, search and icon bounds; controls, hotkeys, cancellation and desktop/mobile bounds. No page errors were observed. The test uses simulated game state and local mock assets. Wardrobe catalogues are not requested before the wardrobe is opened; the skill catalogue is not requested unless learned metadata is missing.
 - Desktop and narrow-screen screenshots inspected.
 

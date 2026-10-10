@@ -284,7 +284,7 @@ const UI = {
         this.check('Store pet: ' + label, () => town().store[key], v => town().store[key] = v));
       services.append(this.text('Keep in pet (names)', () => town().keep, v => town().keep = v),
         el('p', 'Uses the potion selections and refill thresholds above. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. Does not buy Item Mall scrolls. Failures stop the bot in place. F8 cancels.', 'muted'));
-      this.townNote = el('p', Town.message, 'muted'); services.append(this.townNote); this.pane.append(services);
+      this.townNote = el('p', Town.status(), 'muted'); services.append(this.townNote); this.pane.append(services);
     } else if (this.current === 'Wardrobe') {
       LeanWardrobe.draw(this.pane);
     } else {
@@ -328,7 +328,7 @@ const UI = {
     return (World.gp?.skills || []).map(id => { const s = World.skill(id); return `${id}:${s?.name}:${s?.icon}:${s?.level}`; }).join('|');
   },
   update() {
-    if (this.townNote) this.townNote.textContent = Town.message;
+    if (this.townNote) this.townNote.textContent = Town.status();
     if (this.current === 'Settings' && this.partyNote) {
       const notes = [Settings.profile.party.autoRecruit ? Party.message : 'Auto-recruit off.'];
       if (Settings.profile.party.autoRes) notes.push(Resurrect.message);

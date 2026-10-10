@@ -14,7 +14,7 @@ const Loot = {
     let alert = this.fullAlert;
     if (!alert || alert.gid !== pet.rec.gid) {
       alert = this.fullAlert = { gid: pet.rec.gid, sounded: false };
-      UI.toast('Pickup pet bag is full. Free a slot; existing stacks may still accept items.', 'warn', 6000);
+      UI.toast('Pickup pet bag is full. ' + (Town.cfg().enabled ? 'Town service will take priority over hunting.' : 'Scroll town cycle is off; enable it in Supplies for automatic return.'), 'warn', 6000);
     }
     if (!alert.sounded && now() - this.lastFullChimeAt >= 30000) {
       this.lastFullChimeAt = now();

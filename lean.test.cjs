@@ -850,7 +850,8 @@ test('town scroll wait times out while outside world and wrong arrival never sta
 });
 test('town movement needs collision coverage and stops instead of blindly crossing obstacles', () => {
   const f = townFixture(); f.Town.begin(); f.Town.enter('walk-storage'); f.Navigation.scene = null;
-  f.Town.tick(); assert.equal(f.commands.some(c => c.kind === 'move'), false);
+  const moves = f.commands.filter(c => c.kind === 'move').length;
+  f.Town.tick(); assert.equal(f.commands.filter(c => c.kind === 'move').length, moves);
   f.advance(21000); f.Town.tick(); assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, false);
 });
 test('town purchase requires exact quantity gain and enough gold, without duplicate buys', () => {
@@ -916,5 +917,30 @@ test('unexpected world reset cancels service and independent party work continue
   g.Town.begin(); g.Town.enter('walk-storage'); g.bus.emit('reset'); assert.equal(g.Town.trip, null); assert.equal(g.Hunt.running, false);
   f.Town.tick(); f.bus.emit('reset'); assert.ok(f.Town.trip); assert.equal(f.Hunt.running, true);
   f.Controller.tick(); assert.equal(calls, 1);
+});
+test('full pet latches town departure during combat and pending pickup without starting another fight', () => {
+  for (const busy of ['cast', 'inventory']) {
+    const f = townFixture(); f.World.gp.inventory.find(i => i.refObjId === 102).quantity = 50;
+    let fights = 0; f.Hunt.tick = () => fights++;
+    let casting = busy === 'cast'; f.World.isCasting = () => casting;
+    f.World.gp.inventoryPending = busy === 'inventory';
+    f.Controller.tick();
+    assert.ok(f.Town.trip, 'Full pet must own the controller while ' + busy + ' settles');
+    assert.equal(fights, 0); assert.equal(f.commands.some(c => c.kind === 'item-use'), false);
+    f.Controller.tick(); assert.equal(fights, 0);
+    casting = false; f.World.gp.inventoryPending = false; f.advance(600); f.Controller.tick();
+    assert.equal(f.Town.trip.phase, 'recall-wait'); assert.equal(f.commands.filter(c => c.kind === 'item-use').length, 1);
+  }
+});
+test('reserved town departure times out instead of returning to combat or repeating scrolls', () => {
+  const f = townFixture(); f.World.gp.inventoryPending = true; f.Controller.tick();
+  assert.ok(f.Town.trip); f.advance(31000); f.Controller.tick();
+  assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, false);
+  assert.match(f.Town.message, /did not settle/); assert.equal(f.commands.some(c => c.kind === 'item-use'), false);
+});
+test('town readiness explains disabled automation and missing prerequisites before the pet fills', () => {
+  const f = townFixture(); f.Town.cfg().enabled = false; assert.match(f.Town.status(), /chime is an alert/);
+  f.Town.cfg().enabled = true; f.Town.cfg().gate = null; assert.match(f.Town.status(), /not ready:.*teleport NPC/);
+  f.Town.cfg().gate = { regionId: 1, x: 100, y: 0, z: 100 }; assert.match(f.Town.status(), /ready:/);
 });
 console.log(`${passed} lean integration tests passed.`);

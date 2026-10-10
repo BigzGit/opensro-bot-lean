@@ -8,11 +8,11 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.15**.
+- Latest userscript release at this snapshot: **1.2.16**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **99 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest validation: **102 integration tests**, JavaScript syntax check and headless browser checks pass.
 - Latest work: opt-in Hotan recall/storage/refill/repair/reverse cycle. Live-account testing is still outstanding.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
@@ -209,3 +209,9 @@ Pet storage requires `cos-transfer {gid,toCos:false,source,destination}` into on
 `Controller` gives town service priority while retaining independent Party and emergency Potion ticks. It suspends combat, loot, auto-res and speed-scroll activation during the trip. Expected entering-world/reset transitions during recall/reverse waits preserve the trip; disconnects, unexpected resets, manual control, settings/profile changes and F8 cancel. Scroll arrival has a 90-second timeout even outside world, town legs 20-second no-progress/120-second total bounds, inventory operations 15-second confirmation limits with no repeat sends, and the whole trip a 15-minute cap. Stop requests `return-cancel` for an observed owned scroll cast. Final supplies, spare travel scrolls and durability must be valid before returning. No unfinished trip survives a full page reload.
 
 99 integration tests, JavaScript syntax and isolated headless Edge checks passed. Sixteen new tests cover the full cycle, storage filters/protections, setup capture, bounded failures, fresh shop acknowledgement, exact quantity confirmation, scroll replenishment, repair confirmation, phase/reset persistence, manual/F8 cancellation and independent services. Browser tests exercise the actual toggle, saved arrival point, pet threshold and storage/Keep controls. Live-account travel, transfer fees and scroll/repair timing have not been tested. Update README/source/tests/build/artifacts in the development mirror and back up the Downloads install artifacts per the normal release workflow.
+
+## Pet-full departure fix: 1.2.16
+
+User reported the pet-full chime without a return. Reproduced a controller starvation bug with a failing regression test: Town.tick returned false before creating a trip whenever World.isCasting or inventoryPending was true, handing control back to hunting and allowing it to perpetuate those busy states. Town now latches a trip immediately on the enabled trigger, stops worker attack/movement with a move to current pose, then waits in recall phase for cast/inventory settlement. No more combat/loot ticks run during that wait. A 30-second settlement timeout fails safely. Existing opt-in, manual/travel exclusions and preflight prerequisites remain. This confirms a code defect, not the user's exact live settings; an asynchronous question requested their town-toggle state/status.
+
+Town.status() reports disabled automation, readiness or missing setup/scrolls before triggering. Full-pet toast explains that the chime alone does not enable automatic return. Three new tests cover full-pet latching during casts/pending pickups, settlement timeout and readiness messages. Total 102 integration tests plus syntax and isolated browser checks pass. Live return remains unverified.

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.15
+// @version      1.2.16
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.15';
+const VERSION = '1.2.16';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -1959,7 +1959,7 @@ const Loot = {
     let alert = this.fullAlert;
     if (!alert || alert.gid !== pet.rec.gid) {
       alert = this.fullAlert = { gid: pet.rec.gid, sounded: false };
-      UI.toast('Pickup pet bag is full. Free a slot; existing stacks may still accept items.', 'warn', 6000);
+      UI.toast('Pickup pet bag is full. ' + (Town.cfg().enabled ? 'Town service will take priority over hunting.' : 'Scroll town cycle is off; enable it in Supplies for automatic return.'), 'warn', 6000);
     }
     if (!alert.sounded && now() - this.lastFullChimeAt >= 30000) {
       this.lastFullChimeAt = now();
@@ -2407,6 +2407,13 @@ const SpeedScroll = {
 const Town = {
   trip: null, message: 'Town cycle off.',
   cfg() { return Restock.cfg().town; },
+  status() {
+    if (this.trip || this.message.startsWith('Town cycle stopped:')) return this.message;
+    if (!this.cfg().enabled) return 'Town cycle off. The pet-full chime is an alert; enable the scroll town cycle to return automatically.';
+    if (!World.inWorld()) return 'Town cycle: waiting for game world.';
+    const error = this.validate();
+    return error ? 'Town cycle not ready: ' + error : 'Town cycle ready: waiting for low potions or pet capacity trigger.';
+  },
   scroll(type) { return World.items().find(i => (i.typeFlags & 0xfffc) === type && (i.quantity ?? 1) > 0); },
   free(items, start, end) {
     const used = new Set(items.map(i => i.slot));
@@ -2486,6 +2493,9 @@ const Town = {
       manualAt: Manual.lastAt, character: World.charName, petRef: Loot.pet()?.rec.refObjId,
       config: JSON.stringify(this.cfg()), supplies: Restock.supplies().map(s => ({ ...s })) };
     Hunt.targetGid = Hunt.lootGid = 0;
+    // Stop the worker's repeating attack/movement as well as the bot's next tick.
+    // Pending inventory work still settles before item-use is admitted below.
+    Cmd.move(World.pose());
     this.message = 'Using return scroll; recall must be bound to Hotan.';
   },
   enter(phase) {
@@ -2650,7 +2660,7 @@ const Town = {
   tick() {
     const c = this.cfg();
     if (!this.trip) {
-      if (!c.enabled || !Hunt.running || !World.inWorld() || World.isDead() || World.gp.inventoryPending || World.isCasting() || Resurrect.holdUntil > now() ||
+      if (!c.enabled || !Hunt.running || !World.inWorld() || World.isDead() ||
           WalkBack.active || Restock.trip || Restock.recording || Restock.activeShop() || World.gp.storage || now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000 || !this.reason()) return false;
       this.begin();
       if (!this.trip) return true;
@@ -2665,7 +2675,11 @@ const Town = {
     if (now() - Potion.lastUse < 350) return true;
     Hunt.state = 'restock';
     if (t.phase === 'recall') {
-      if (World.isCasting() || gp.inventoryPending) return true;
+      if (now() - t.at > 30000) { this.fail('Combat or inventory did not settle before departure.'); return true; }
+      if (World.isCasting() || gp.inventoryPending) {
+        this.message = 'Town departure reserved; waiting for combat or inventory to settle.';
+        return true;
+      }
       if (World.isSitting()) { if (Cmd.spaced('action')) Cmd.action(1000); return true; }
       if (World.local()?.mountedOn) { this.fail('Dismount before starting town service.'); return true; }
       const scroll = this.scroll(0x09ec);
@@ -4684,7 +4698,7 @@ const UI = {
         this.check('Store pet: ' + label, () => town().store[key], v => town().store[key] = v));
       services.append(this.text('Keep in pet (names)', () => town().keep, v => town().keep = v),
         el('p', 'Uses the potion selections and refill thresholds above. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. Does not buy Item Mall scrolls. Failures stop the bot in place. F8 cancels.', 'muted'));
-      this.townNote = el('p', Town.message, 'muted'); services.append(this.townNote); this.pane.append(services);
+      this.townNote = el('p', Town.status(), 'muted'); services.append(this.townNote); this.pane.append(services);
     } else if (this.current === 'Wardrobe') {
       LeanWardrobe.draw(this.pane);
     } else {
@@ -4728,7 +4742,7 @@ const UI = {
     return (World.gp?.skills || []).map(id => { const s = World.skill(id); return `${id}:${s?.name}:${s?.icon}:${s?.level}`; }).join('|');
   },
   update() {
-    if (this.townNote) this.townNote.textContent = Town.message;
+    if (this.townNote) this.townNote.textContent = Town.status();
     if (this.current === 'Settings' && this.partyNote) {
       const notes = [Settings.profile.party.autoRecruit ? Party.message : 'Auto-recruit off.'];
       if (Settings.profile.party.autoRes) notes.push(Resurrect.message);
