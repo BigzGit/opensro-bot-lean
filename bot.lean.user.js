@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.3
+// @version      1.2.4
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.3';
+const VERSION = '1.2.4';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -206,7 +206,7 @@ const DEFAULT_PROFILE = {
     levelMin: 0, levelMax: 0, include: '', exclude: '', priority: 'attackers', avoidKs: true,
     targetTimeoutS: 25,
     pickup: { enabled: true, gold: true, potions: true, equipment: true, elixirs: true, powders: true, alchemy: true, others: true,
-      include: '', exclude: '', radius: 300, afterKillOnly: true, retries: 2 },
+      collector: 'character', include: '', exclude: '', radius: 300, afterKillOnly: true, retries: 2 },
     sit: { enabled: true, hpBelow: 35, mpBelow: 20, resumeAt: 90 },
     onDeath: 'stop', stopNoHpPotion: false, stopInvFull: false,
     playerAlert: { enabled: false, radius: 250, pause: false }, manualPauseS: 6,
@@ -1910,6 +1910,47 @@ const Loot = {
   active: null,
   skips: new Map(),
   failureCounts: new Map(),
+  petSetup: null,
+  pet() {
+    for (const rec of World.gp?.cosRecords || []) {
+      const ent = World.ents.get(rec.gid);
+      if (rec.band === 4 && !rec.dead && rec.hp > 0 && rec.status > 0 && Array.isArray(rec.inventory) &&
+          ent?.kind === 'cos' && ent.ownerGid === World.localGid() && ent.refObjId === rec.refObjId) return { rec, ent };
+    }
+    return null;
+  },
+  petMode() { return Hunt.cfg().pickup.collector === 'pet'; },
+  preparePet() {
+    if (!this.petMode() || !Hunt.cfg().pickup.enabled || World.isDead()) return false;
+    const pet = this.pet();
+    if (!pet || !Number.isInteger(pet.rec.commandMode)) return false;
+    if (!(pet.rec.commandMode & 128)) { this.petSetup = null; return true; }
+    // Native auto-grab has only gold/equipment/other categories. Disable it and
+    // wait for the live server-confirmed mode before submitting selective requests.
+    let setup = this.petSetup;
+    if (!setup || setup.gid !== pet.rec.gid) setup = this.petSetup = { gid: pet.rec.gid, attempts: 0, at: -Infinity };
+    if (setup.attempts < 3 && now() - setup.at >= 5000 && !World.gp.inventoryPending && Cmd.spaced('cos-behavior') &&
+        Cmd.raw({ kind: 'cos-behavior', gid: pet.rec.gid, mode: (pet.rec.commandMode & ~128) >>> 0 }, 'Disable broad pet auto-grab')) {
+      setup.attempts++; setup.at = now();
+    }
+    return false;
+  },
+  petStatus() {
+    const pet = this.pet();
+    if (!pet) return 'Summon a pickup pet to collect into its bag.';
+    if (!Number.isInteger(pet.rec.commandMode)) return 'Waiting for pet settings.';
+    if (pet.rec.commandMode & 128) return this.petSetup?.attempts >= 3 && now() - this.petSetup.at >= 5000
+      ? 'Auto-grab was not disabled. Turn it off in the game pet settings, then retry.' : 'Waiting for broad auto-grab to turn off.';
+    return `Pet ready: ${Math.max(0, pet.rec.status - pet.rec.inventory.length)} empty slots. Collects while hunting; auto-grab stays off when stopped.`;
+  },
+  items(petGid = 0) { return petGid ? World.gp?.cosRecords?.find(r => r.gid === petGid)?.inventory || [] : World.items(); },
+  pickup(gid, petGid = 0) {
+    return petGid ? Cmd.spaced('cos-pickup') && Cmd.raw({ kind: 'cos-pickup', gid: petGid, target: gid }, 'Pet pickup') : Cmd.pickup(gid);
+  },
+  pressed() {
+    const me = World.me(), p = Settings.profile.potion;
+    return Hunt.underAttack() || p.enabled && ((p.hp.on && me.hpPct <= p.hp.pct + 10) || (p.mp.on && me.mpPct <= p.mp.pct + 10));
+  },
   categories: ['gold', 'potions', 'equipment', 'elixirs', 'powders', 'alchemy', 'others'],
   category(tf) {
     if (ItemType.isGold(tf)) return 'gold';
@@ -1928,8 +1969,8 @@ const Loot = {
     p.enabled = true; p.include = '';
     Settings.saveProfile();
   },
-  count(ref) { return World.items().filter(i => i.refObjId === ref).reduce((n, i) => n + (i.quantity ?? 1), 0); },
-  bagSignature() { return World.items().map(i => `${i.slot}:${i.refObjId}:${i.quantity ?? 1}`).join('|'); },
+  count(ref, petGid = 0) { return this.items(petGid).filter(i => i.refObjId === ref).reduce((n, i) => n + (i.quantity ?? 1), 0); },
+  bagSignature() { const pet = this.petMode() && this.pet(); return `${pet ? pet.rec.gid : 0}:` + this.items(pet ? pet.rec.gid : 0).map(i => `${i.slot}:${i.refObjId}:${i.quantity ?? 1}`).join('|'); },
   owned(e) {
     const gi = e.groundItem;
     if (!gi) return false;
@@ -1946,11 +1987,13 @@ const Loot = {
     const included = splitList(P.include).some(s => name.includes(s));
     const gold = ItemType.isGold(tf);
     if (!included && !P[this.category(tf)]) return false;
-    if (gold || World.freeBagSlots() > 0) return true;
+    const pet = this.petMode() ? this.pet() : null;
+    if (this.petMode() && (!pet || !Number.isInteger(pet.rec.commandMode) || (pet.rec.commandMode & 128) || dist2D(pet.ent, e) > 500)) return false;
+    if (gold || (pet ? pet.rec.status > pet.rec.inventory.length : World.freeBagSlots() > 0)) return true;
     // Ground drops omit quantity/stack ceiling. Permit an existing stack to merge;
     // a server capacity refusal suppresses this drop until inventory changes.
     if (!ItemType.isStackable(tf)) return false;
-    return World.items().some(i => i.refObjId === e.refObjId &&
+    return this.items(pet ? pet.rec.gid : 0).some(i => i.refObjId === e.refObjId &&
       (!i.tooltip?.fields?.maxStack || (i.quantity ?? 1) < i.tooltip.fields.maxStack));
   },
   skip(e, reason, inventoryBound = false) {
@@ -1979,21 +2022,24 @@ const Loot = {
     return chosen;
   },
   begin(e) {
-    if (World.gp?.inventoryPending || World.isCasting() || !Cmd.pickup(e.gid)) return false;
+    if (!this.allowed(e) || World.gp?.inventoryPending || World.isCasting()) return false;
+    const petGid = this.petMode() ? this.pet()?.rec.gid : 0;
+    if (this.petMode() && (!petGid || this.pressed()) || !this.pickup(e.gid, petGid)) return false;
     const gold = ItemType.isGold(e.groundItem.typeFlags);
-    this.active = { gid: e.gid, ref: e.refObjId, name: e.name, gold,
-      before: gold ? toBigInt(World.gp?.progression?.gold) : this.count(e.refObjId),
-      at: now(), progressAt: now(), best: dist2D(World.pose(), e), attempts: 1,
+    this.active = { gid: e.gid, ref: e.refObjId, name: e.name, gold, petGid,
+      before: gold ? toBigInt(World.gp?.progression?.gold) : this.count(e.refObjId, petGid),
+      at: now(), progressAt: now(), best: dist2D(petGid ? this.pet().ent : World.pose(), e), attempts: 1,
       retryAt: 0, goneAt: null, failure: '' };
     Hunt.lootGid = e.gid;
     return true;
   },
   gained(a) {
-    return a.gold ? toBigInt(World.gp?.progression?.gold) > a.before : this.count(a.ref) > a.before;
+    return a.gold ? toBigInt(World.gp?.progression?.gold) > a.before : this.count(a.ref, a.petGid) > a.before;
   },
   tick() {
     const a = this.active;
     if (!a) return false;
+    if (!!a.petGid !== this.petMode() || a.petGid && this.pet()?.rec.gid !== a.petGid) { this.suspend(); return false; }
     Hunt.state = 'loot';
     const e = World.ents.get(a.gid);
     if (this.gained(a)) {
@@ -2012,15 +2058,16 @@ const Loot = {
       return false;
     }
     if (!this.allowed(e) || !Hunt.cfg().pickup.enabled) {
-      if (!Cmd.move(World.pose())) return true;
+      if (!a.petGid && !Cmd.move(World.pose())) return true;
       this.suspend(); return false;
     }
-    const d = dist2D(World.pose(), e);
+    const d = dist2D(a.petGid ? this.pet().ent : World.pose(), e);
     if (d < a.best - 2) { a.best = d; a.progressAt = now(); }
     if (World.gp?.inventoryPending) return true;
     if (a.retryAt) {
       if (now() < a.retryAt) return true;
-      if (Cmd.pickup(a.gid)) {
+      if (a.petGid && this.pressed()) return true;
+      if (this.pickup(a.gid, a.petGid)) {
         a.attempts++; a.retryAt = 0; a.at = now(); a.progressAt = now(); a.best = d; a.failure = '';
       }
       return true;
@@ -2031,11 +2078,11 @@ const Loot = {
     const capacity = /inventory|space|full|capacity|envanter/i.test(reason);
     if (capacity || a.attempts > Hunt.cfg().pickup.retries) { this.skip(e, reason, capacity); return false; }
     // Movement cancels the outstanding worker pickup intent. Resubmit on a later tick.
-    if (Cmd.move(World.pose())) { a.retryAt = now() + 700; a.failure = ''; }
+    if (a.petGid || Cmd.move(World.pose())) { a.retryAt = now() + 700; a.failure = ''; }
     return true;
   },
   suspend() { this.active = null; Hunt.lootGid = 0; },
-  reset() { this.suspend(); this.skips.clear(); this.failureCounts.clear(); },
+  reset() { this.suspend(); this.skips.clear(); this.failureCounts.clear(); this.petSetup = null; },
   init() {
     bus.on('game-error', message => { if (this.active) this.active.failure = String(message); });
     bus.on('despawn', e => {
@@ -2120,6 +2167,7 @@ const Controller = {
       Restock.sample();
       if (!World.inWorld()) { this.mode = 'waiting'; return; }
       Potion.tick();
+      Loot.preparePet();
       if (this.resumeAfterRevive && !World.isDead()) {
         this.resumeAfterRevive = false;
         if (Settings.profile.hunt.center) WalkBack.start(true);
@@ -3951,6 +3999,9 @@ const UI = {
     } else if (this.current === 'Loot') {
       const L = () => H().pickup;
       const options = this.group('Collection');
+      options.append(this.select('Collector', [['character', 'Character'], ['pet', 'Pickup pet']], () => L().collector, v => { L().collector = v; Loot.reset(); }),
+        this.button('Pet: elixirs only', () => { L().collector = 'pet'; Loot.reset(); Loot.preset('elixirs'); this.draw(); }));
+      this.petNote = el('p', '', 'muted'); options.append(this.petNote);
       options.append(this.row(...[['Elixirs only','elixirs'],['Elixirs + gold','elixirs-gold'],['All items','all']].map(([label,mode]) => this.button(label, () => { Loot.preset(mode); this.draw(); }))));
       for (const [key, label] of [['enabled', 'Collect drops'], ['gold', 'Gold'], ['potions', 'Potions and cure pills'], ['equipment', 'Equipment'], ['elixirs', 'Elixirs'], ['powders', 'Lucky powders'], ['alchemy', 'Other alchemy items / stones'], ['others', 'Other items'], ['afterKillOnly', 'Finish current fight before collecting']]) options.append(this.check(label, () => L()[key], v => L()[key] = v));
       options.append(this.number('Pickup radius (m)', () => L().radius / 10, v => L().radius = v * 10, 3, 100),
@@ -3998,6 +4049,7 @@ const UI = {
   },
   update() {
     if (!this.status) return;
+    if (this.current === 'Loot' && this.petNote) { this.petNote.hidden = !Loot.petMode(); this.petNote.textContent = Loot.petStatus(); }
     Learned.repair();
     if (this.current === 'Combat' && this.lastSkillKey !== this.skillKey()) { this.draw(); return; }
     const me = World.me(), center = Settings.profile.hunt.center;

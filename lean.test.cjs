@@ -31,6 +31,79 @@ function fixture() {
   return { ...b, commands, notices, storage, drop, advance: ms => { time += ms; } };
 }
 let passed = 0;
+function pickupPet(f, commandMode = 7) {
+  const rec = { gid: 50, refObjId: 500, band: 4, hp: 100, status: 5, inventory: [], commandMode };
+  f.World.gp.cosRecords = [rec];
+  f.World.ents.set(50, { gid: 50, kind: 'cos', refObjId: 500, ownerGid: 1, regionId: 1, x: 100, y: 0, z: 100 });
+  f.Settings.profile.hunt.pickup.collector = 'pet'; f.Loot.preset('elixirs');
+  return rec;
+}
+test('pet disables only native auto-grab bit and waits for server confirmation', () => {
+  const f = fixture(), pet = pickupPet(f, 0x1c7), d = f.drop(20, 3436);
+  assert.equal(f.Loot.preparePet(), false);
+  assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'cos-behavior', gid: 50, mode: 0x147 });
+  assert.equal(pet.commandMode, 0x1c7); assert.equal(f.Loot.begin(d), false);
+  f.advance(1000); f.Loot.preparePet(); assert.equal(f.commands.length, 1);
+  pet.commandMode = 0x147; assert.equal(f.Loot.preparePet(), true);
+  assert.equal(f.Loot.begin(d), true); assert.equal(f.commands.at(-1).kind, 'cos-pickup');
+});
+test('pet collects only elixirs into its own inventory and confirms its gain', () => {
+  const f = fixture(), pet = pickupPet(f), d = f.drop(20, 3436);
+  f.drop(21, 5484); f.drop(22, 2284); f.drop(23, 748);
+  assert.equal(f.Loot.choose().gid, d.gid); assert.equal(f.Loot.begin(d), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'cos-pickup', gid: 50, target: 20 });
+  f.World.gp.inventory.push({ slot: 13, refObjId: 101, quantity: 5 });
+  f.Loot.tick(); assert.equal(f.Stats.values.loot, 0);
+  pet.inventory.push({ slot: 0, refObjId: 101, quantity: 1 });
+  f.Loot.tick(); assert.equal(f.Stats.values.loot, 1); assert.equal(f.Loot.active, null);
+  assert.equal(f.commands.some(c => c.kind === 'pickup'), false);
+});
+test('pet capacity is independent of the player bag and existing stacks merge', () => {
+  const f = fixture(), pet = pickupPet(f), d = f.drop(20, 3436);
+  f.World.gp.inventorySlotCount = 13; assert.equal(f.Loot.allowed(d), true);
+  pet.status = 1; pet.inventory = [{ slot: 0, refObjId: 200, quantity: 1 }]; assert.equal(f.Loot.allowed(d), false);
+  pet.inventory[0] = { slot: 0, refObjId: 101, quantity: 1, tooltip: { fields: { maxStack: 100 } } };
+  assert.equal(f.Loot.allowed(d), true); pet.inventory[0].quantity = 100; assert.equal(f.Loot.allowed(d), false);
+});
+test('missing, foreign, dead or distant pet never falls back to character collection', () => {
+  const f = fixture(), pet = pickupPet(f), d = f.drop(20, 3436);
+  const ent = f.World.ents.get(50);
+  ent.ownerGid = 2; assert.equal(f.Loot.begin(d), false);
+  ent.ownerGid = 1; pet.dead = true; assert.equal(f.Loot.choose(), null);
+  pet.dead = false; ent.x = 900; assert.equal(f.Loot.choose(), null);
+  ent.x = 100; f.World.gp.cosRecords = []; assert.equal(f.Loot.begin(d), false);
+  assert.equal(f.commands.length, 0);
+});
+test('pet pickup yields to busy inventory, attacks and low potion thresholds', () => {
+  const f = fixture(); pickupPet(f); const d = f.drop(20, 3436);
+  f.World.gp.inventoryPending = true; assert.equal(f.Loot.begin(d), false);
+  f.World.gp.inventoryPending = false; f.World.ents.set(30, { gid: 30, kind: 'monster', appearanceState: [0] });
+  f.World.attackers.set(30, 100000); assert.equal(f.Loot.begin(d), false);
+  f.World.attackers.clear(); f.World.gp.vitals = [{ gid: 1, hp: 65, mp: 100, maxHp: 100, maxMp: 100 }];
+  assert.equal(f.Loot.begin(d), false); assert.equal(f.commands.length, 0);
+});
+test('pet configuration retries are bounded and resummoning resets setup', () => {
+  const f = fixture(), pet = pickupPet(f, 135);
+  for (let i = 0; i < 8; i++) { f.Loot.preparePet(); f.advance(6000); }
+  assert.equal(f.commands.length, 3); assert.match(f.Loot.petStatus(), /not disabled/);
+  pet.commandMode = 7; assert.equal(f.Loot.preparePet(), true); assert.equal(f.Loot.petSetup, null);
+});
+test('pet retries retain pet recipient and stop prevents further pickups', () => {
+  const f = fixture(); pickupPet(f); const d = f.drop(20, 3436); f.Loot.begin(d);
+  f.advance(9000); f.Loot.tick(); f.advance(800); f.Loot.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'cos-pickup').length, 2);
+  assert.equal(f.commands.some(c => c.kind === 'pickup'), false);
+  f.stopAll(); f.advance(1000); f.Controller.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'cos-pickup').length, 2);
+});
+test('hunt controller waits for pet settings, then collects with the pet only', () => {
+  const f = fixture(), pet = pickupPet(f, 135); f.drop(20, 3436); f.Hunt.start();
+  f.Controller.tick(); assert.equal(f.commands.at(-1).kind, 'cos-behavior');
+  assert.equal(f.commands.some(c => c.kind === 'cos-pickup'), false);
+  pet.commandMode = 7; f.advance(500); f.Controller.tick();
+  assert.equal(f.Controller.mode, 'loot'); assert.equal(f.commands.at(-1).kind, 'cos-pickup');
+  assert.equal(f.commands.some(c => c.kind === 'pickup'), false);
+});
 function navProduct(objects = [], blocked = new Uint8Array(9216)) {
   return { regionId: 1, complete: true, objects,
     navmesh: { regionSize: 1920, tileSize: 20, tilesPerAxis: 96,

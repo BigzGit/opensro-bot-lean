@@ -139,6 +139,11 @@ const server = http.createServer((req, res) => {
     await page.waitForFunction(() => [...document.getElementById('sro-bot-lean').shadowRoot.querySelectorAll('.slot')].every(s => s.dataset.iconLoaded === 'true'));
     await page.screenshot({ path: __dirname + '/lean-buffs-desktop.png', fullPage: true });
     await page.getByRole('button', { name: 'Loot', exact: true }).click();
+    await page.getByRole('button', { name: 'Pet: elixirs only', exact: true }).click();
+    assert.equal(await page.getByLabel('Collector', { exact:true }).inputValue(), 'pet');
+    assert.equal(await page.getByLabel('Elixirs', { exact:true }).isChecked(), true);
+    assert.equal(await page.getByLabel('Gold', { exact:true }).isChecked(), false);
+    await page.getByLabel('Collector', { exact:true }).selectOption('character');
     await page.getByLabel('Always include names',{exact:true}).fill('potion');
     await page.getByLabel('Always include names',{exact:true}).dispatchEvent('change');
     await page.getByRole('button',{name:'Elixirs only',exact:true}).click();

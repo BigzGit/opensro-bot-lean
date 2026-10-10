@@ -239,6 +239,9 @@ const UI = {
     } else if (this.current === 'Loot') {
       const L = () => H().pickup;
       const options = this.group('Collection');
+      options.append(this.select('Collector', [['character', 'Character'], ['pet', 'Pickup pet']], () => L().collector, v => { L().collector = v; Loot.reset(); }),
+        this.button('Pet: elixirs only', () => { L().collector = 'pet'; Loot.reset(); Loot.preset('elixirs'); this.draw(); }));
+      this.petNote = el('p', '', 'muted'); options.append(this.petNote);
       options.append(this.row(...[['Elixirs only','elixirs'],['Elixirs + gold','elixirs-gold'],['All items','all']].map(([label,mode]) => this.button(label, () => { Loot.preset(mode); this.draw(); }))));
       for (const [key, label] of [['enabled', 'Collect drops'], ['gold', 'Gold'], ['potions', 'Potions and cure pills'], ['equipment', 'Equipment'], ['elixirs', 'Elixirs'], ['powders', 'Lucky powders'], ['alchemy', 'Other alchemy items / stones'], ['others', 'Other items'], ['afterKillOnly', 'Finish current fight before collecting']]) options.append(this.check(label, () => L()[key], v => L()[key] = v));
       options.append(this.number('Pickup radius (m)', () => L().radius / 10, v => L().radius = v * 10, 3, 100),
@@ -286,6 +289,7 @@ const UI = {
   },
   update() {
     if (!this.status) return;
+    if (this.current === 'Loot' && this.petNote) { this.petNote.hidden = !Loot.petMode(); this.petNote.textContent = Loot.petStatus(); }
     Learned.repair();
     if (this.current === 'Combat' && this.lastSkillKey !== this.skillKey()) { this.draw(); return; }
     const me = World.me(), center = Settings.profile.hunt.center;

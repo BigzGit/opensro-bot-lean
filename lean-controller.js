@@ -73,6 +73,7 @@ const Controller = {
       Restock.sample();
       if (!World.inWorld()) { this.mode = 'waiting'; return; }
       Potion.tick();
+      Loot.preparePet();
       if (this.resumeAfterRevive && !World.isDead()) {
         this.resumeAfterRevive = false;
         if (Settings.profile.hunt.center) WalkBack.start(true);
