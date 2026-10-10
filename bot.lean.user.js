@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.23
+// @version      1.2.24
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.23';
+const VERSION = '1.2.24';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -198,6 +198,7 @@ const DEFAULT_PROFILE = {
     restock: {
       enabled: false, vendor: null, route: [], offers: [],
       town: { enabled: false, petFull: true, petFree: 1, arrivalRadius: 500, arrival: null, storage: null, vendor: null, smith: null, gate: null,
+        stacks: { hp: 2, mp: 6 },
         keep: '', store: { equipment: true, elixirs: true, powders: true, alchemy: true, others: false } },
       hp: { on: true, refObjId: 0, low: 20, target: 200 },
       mp: { on: true, refObjId: 0, low: 20, target: 200 },
@@ -2427,8 +2428,8 @@ const SpeedScroll = {
 const Town = {
   trip: null, message: 'Town cycle off.',
   cfg() { return Restock.cfg().town; },
-  // Native v1.150 ITEM_ETC_HP_POTION_05 / ITEM_ETC_MP_POTION_05.
-  supplies() { return Restock.supplies().map(s => ({ ...s, refObjId: s.kind === 'hp' ? 8 : 15 })); },
+  // Native X-Large HP/MP IDs 8/15, both authored with 50 potions per stack.
+  supplies() { return Restock.supplies().map(s => ({ ...s, refObjId: s.kind === 'hp' ? 8 : 15, target: this.cfg().stacks?.[s.kind] * 50 })); },
   status() {
     if (this.trip || this.message.startsWith('Town cycle stopped:')) return this.message;
     if (!this.cfg().enabled) return 'Town cycle off. The pet-full chime is an alert; enable the scroll town cycle to return automatically.';
@@ -2491,6 +2492,7 @@ const Town = {
     const c = this.cfg(), supplies = this.supplies();
     const missing = [['arrival', 'arrival point'], ['vendor', 'potion merchant'], ['smith', 'repair merchant'], ['gate', 'world statue / teleport'], ...(c.petFull ? [['storage', 'warehouse']] : [])].filter(([key]) => !c[key]).map(([, label]) => label);
     if (missing.length) return 'Save missing town services: ' + missing.join(', ') + '.';
+    if (supplies.some(s => !Number.isInteger(c.stacks?.[s.kind]) || c.stacks[s.kind] < 1 || c.stacks[s.kind] > 200)) return 'Set town refill targets to whole stacks from 1 to 200.';
     if (!supplies.length || supplies.some(s => !s.refObjId || !Number.isInteger(s.low) || !Number.isInteger(s.target) || s.low < 0 || s.target <= s.low || s.target > 10000)) return 'Choose potions and valid low-stock/refill quantities.';
     if (!this.scroll(0x09ec) || !this.scroll(0x19ec)) return 'Carry a return scroll and a reverse return scroll before hunting.';
     if (World.freeBagSlots() < 1) return 'Keep one character bag slot free for pet-to-storage transfers.';
@@ -4762,12 +4764,14 @@ const UI = {
         this.check('Return when pickup pet is nearly full', () => town().petFull, v => town().petFull = v),
         this.number('Pet free slots ≤', () => town().petFree, v => town().petFree = v, 0, 10),
         this.number('Town arrival tolerance (m)', () => town().arrivalRadius / 10, v => town().arrivalRadius = v * 10, 10, 150),
+        this.number('Town HP refill (stacks of 50)', () => town().stacks.hp, v => town().stacks.hp = v, 1, 200),
+        this.number('Town MP refill (stacks of 50)', () => town().stacks.mp, v => town().stacks.mp = v, 1, 200),
         el('p', 'Bind your recall to Hotan in the game. While stopped, save the arrival point where a return scroll places you. Stand near, select and save the warehouse, potion merchant, repair merchant and world statue / teleport. Open the potion shop before saving its merchant. Saves your standing position for each approach. Uses collision-aware walking between services. Overrides the recorded walking restock while enabled.', 'muted'));
       for (const [role, label] of [['arrival', 'Arrival point'], ['storage', 'Warehouse'], ['vendor', 'Potion merchant'], ['smith', 'Repair merchant'], ['gate', 'World statue / teleport']]) services.append(
         this.row(this.button('Save ' + label.toLowerCase(), () => Town.save(role)), el('span', town()[role]?.name || (town()[role] ? 'Saved' : 'Not saved'), 'muted')));
       services.append(el('p', 'Pet loot: store elixirs only. Sell other unprotected pet items at the saved weapon / repair merchant before repairing. Keep seal/rare equipment and equipment with unknown rarity in the pet. Ordinary equipment is sold regardless of + or blue options. Existing character bag items are never sold.', 'muted'));
       services.append(this.text('Keep in pet (names)', () => town().keep, v => town().keep = v),
-        el('p', 'Town buys X-Large HP/MP potions using the enable switches and refill thresholds above, regardless of the walking-route potion selections. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. Does not buy Item Mall scrolls. Failures stop the bot in place. F8 cancels.', 'muted'));
+        el('p', 'Town tops up X-Large potions to the stack targets here (default: 2 HP / 6 MP), counting potions already in your bag. Uses the Buy HP/MP switches and low-stock thresholds above; keep each threshold below its stack target. The earlier potion selections and Refill to fields apply to walking-route restock. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. F8 cancels.', 'muted'));
       this.townNote = el('p', Town.status(), 'muted'); services.append(this.townNote); this.pane.append(services);
     } else if (this.current === 'Wardrobe') {
       LeanWardrobe.draw(this.pane);

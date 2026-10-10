@@ -750,6 +750,7 @@ test('pet waits for inventory and potion priority without holding up combat', ()
 });
 function townFixture() {
   const f = fixture(), c = f.Town.cfg(), r = f.Restock.cfg(), gp = f.World.gp;
+  c.stacks.mp = 1;
   c.enabled = true; c.arrival = { regionId: 1, x: 100, y: 0, z: 100 }; c.keep = 'favorite';
   for (const [index, role] of ['storage', 'vendor', 'smith', 'gate'].entries()) {
     const npc = { gid: 60 + index, refObjId: 600 + index, kind: role === 'gate' ? 'teleport' : 'npc', name: role, regionId: 1, x: 130 + index * 40, y: 0, z: 100 };
@@ -986,15 +987,41 @@ test('town refuses selling at the wrong merchant or after the pet is replaced', 
 test('town buys X-Large HP and MP even when the saved potion selections are small', () => {
   const f = townFixture(), r = f.Restock.cfg(), gp = f.World.gp;
   r.hp.on = true; r.hp.refObjId = 101; r.hp.low = 5; r.hp.target = 30; r.mp.refObjId = 102;
+  f.Town.cfg().stacks.hp = 1;
   f.Town.begin(); f.Town.enter('buy'); gp.target = 61;
   gp.shop = { npc: 61, offers: [101,8,102,15].map((refObjId, slot) => ({ refObjId, slot, tab: 0, maxStack: 100, price: '10', previews: [{ refObjId, typeFlags: slot < 2 ? 2284 : 4332 }] })) };
-  f.Town.buy(); assert.equal(f.commands.at(-1).slot, 1); assert.equal(f.commands.at(-1).quantity, 30);
-  gp.inventory.push({ slot: 16, refObjId: 8, typeFlags: 2284, quantity: 30 });
+  f.Town.buy(); assert.equal(f.commands.at(-1).slot, 1); assert.equal(f.commands.at(-1).quantity, 50);
+  gp.inventory.push({ slot: 16, refObjId: 8, typeFlags: 2284, quantity: 50 });
   f.advance(1000); f.Town.buy(); assert.equal(f.commands.at(-1).slot, 3); assert.equal(f.commands.at(-1).quantity, 49);
   gp.inventory.find(i => i.refObjId === 15).quantity = 50;
   f.advance(1000); f.Town.buy(); assert.equal(f.Town.trip.phase, 'close-vendor');
   assert.equal(f.commands.filter(c => c.kind === 'shop-buy').length, 2);
   assert.equal(f.commands.some(c => c.kind === 'shop-buy' && [0,2].includes(c.slot)), false);
+});
+
+test('town stack defaults are two HP and six MP and purchases only the missing potions', () => {
+  const defaults = fixture().Town.supplies();
+  assert.deepEqual(Array.from(defaults, s => s.target), [100, 300]);
+  const f = townFixture(), gp = f.World.gp;
+  f.Restock.cfg().hp.on = true; f.Town.cfg().stacks = { hp: 2, mp: 6 };
+  gp.inventory.push({ slot: 16, refObjId: 8, typeFlags: 2284, quantity: 72 });
+  gp.inventory.find(i => i.refObjId === 15).quantity = 275;
+  f.Town.begin(); f.Town.enter('buy'); gp.target = 61;
+  gp.shop = { npc: 61, offers: [8,15].map((refObjId, slot) => ({ refObjId, slot, tab: 0, maxStack: 50, price: '10', previews: [{ refObjId, typeFlags: slot ? 4332 : 2284 }] })) };
+  f.Town.buy(); assert.equal(f.commands.at(-1).quantity, 28); assert.equal(f.commands.at(-1).slot, 0);
+  gp.inventory.find(i => i.refObjId === 8).quantity = 100;
+  f.advance(1000); f.Town.buy(); assert.equal(f.commands.at(-1).quantity, 25); assert.equal(f.commands.at(-1).slot, 1);
+  gp.inventory.find(i => i.refObjId === 15).quantity = 300;
+  f.advance(1000); f.Town.buy(); assert.equal(f.Town.trip.phase, 'close-vendor');
+});
+
+test('town rejects invalid stack targets and low-stock thresholds at the refill target', () => {
+  for (const value of [0, 1.5, 201, NaN]) {
+    const f = townFixture(); f.Town.cfg().stacks.mp = value;
+    f.Town.begin(); assert.equal(f.Town.trip, null); assert.match(f.Town.message, /whole stacks/);
+  }
+  const f = townFixture(); f.Restock.cfg().mp.low = 50;
+  f.Town.begin(); assert.equal(f.Town.trip, null); assert.match(f.Town.message, /low-stock/);
 });
 
 test('town never substitutes small potions if X-Large is unavailable', () => {

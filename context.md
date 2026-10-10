@@ -8,11 +8,11 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.23**.
+- Latest userscript release at this snapshot: **1.2.24**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **118 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest validation: **120 integration tests**, JavaScript syntax check and headless browser checks pass.
 - Latest work: opt-in Hotan recall/storage/refill/repair/reverse cycle. Live-account testing is still outstanding.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
@@ -253,3 +253,7 @@ Added lean.navigation.native.test.mjs (optional game-root argument, read-only li
 User confirmed the collision fix works, withdrawing the preceding route-failure report. They requested X-Large purchases and selling all ordinary equipment regardless of plus. Town.supplies forces native ITEM_ETC_HP_POTION_05 ref 8 and ITEM_ETC_MP_POTION_05 ref 15, verified against local native itemdata/textdataname. It preserves enabled kinds/thresholds/targets from Restock and is used for trigger, validation and trip snapshot; buy/final checks use that snapshot. Offers still need matching native potion type and single-item gold semantics. Missing X-Large stock stops instead of substituting small. Walking-route buyer remains selectable; UI explicitly describes the town override.
 
 Town.disposable now permits equipment rarity 0 or 1 regardless of plus/magic options; rarity 2 (all seals), rare/magic/legend/myth codenames, other/unknown rarity and Keep names remain protected. Missing plus/magic alone no longer protects ordinary gear. Updated actual-sale regression sells +12 blue ordinary gear while retaining sealed gear. Two new tests verify both X-Large purchases despite old small selections and no small substitution. 118 integration tests plus syntax/browser checks pass. No navigation changes were made following the withdrawn screenshot. Live purchases and sales remain unverified by the assistant.
+
+## Editable town stack targets: 1.2.24
+
+User explicitly confirmed they prefer 2 stacks HP and 6 stacks MP, with editable amounts. Added potion.restock.town.stacks {hp:2,mp:6}; existing profiles inherit through deepMerge. Town.supplies now maps those counts to totals at native 50 potions per X-Large stack (100 HP / 300 MP). Buy switches and low thresholds still come from Restock, while old walking-route target quantities no longer control the town cycle. UI adds distinct labelled whole-stack fields (1–200). Preflight rejects fractional/out-of-range stacks and low thresholds not below target. Purchases count current bag stock and buy the difference, retaining gold/space/pending confirmation rules. Trip snapshot and final reverse checks use the computed targets; editing stack config during a trip triggers existing settings-change cancellation. Two tests cover defaults/top-ups and invalid target handling; browser checks exercise editable stack controls. 120 integration tests, syntax and browser checks pass. Live purchase execution remains unverified by the assistant.

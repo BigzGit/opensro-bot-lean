@@ -123,6 +123,13 @@ const server = http.createServer((req, res) => {
     assert.equal(await townToggle.isChecked(), false);
     await townToggle.check(); assert.equal(await page.evaluate(() => SROLean.town.cfg().enabled), true);
     await townToggle.uncheck();
+    assert.equal(await page.getByLabel('Town HP refill (stacks of 50)', { exact: true }).inputValue(), '2');
+    assert.equal(await page.getByLabel('Town MP refill (stacks of 50)', { exact: true }).inputValue(), '6');
+    await page.getByLabel('Town MP refill (stacks of 50)', { exact: true }).fill('7');
+    await page.getByLabel('Town MP refill (stacks of 50)', { exact: true }).dispatchEvent('change');
+    assert.equal(await page.evaluate(() => SROLean.town.cfg().stacks.mp), 7);
+    await page.getByLabel('Town MP refill (stacks of 50)', { exact: true }).fill('6');
+    await page.getByLabel('Town MP refill (stacks of 50)', { exact: true }).dispatchEvent('change');
     const arrivalTolerance = page.getByLabel('Town arrival tolerance (m)', { exact: true });
     assert.equal(await arrivalTolerance.inputValue(), '50');
     await arrivalTolerance.fill('80'); await arrivalTolerance.dispatchEvent('change');

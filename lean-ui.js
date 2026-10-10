@@ -278,12 +278,14 @@ const UI = {
         this.check('Return when pickup pet is nearly full', () => town().petFull, v => town().petFull = v),
         this.number('Pet free slots ≤', () => town().petFree, v => town().petFree = v, 0, 10),
         this.number('Town arrival tolerance (m)', () => town().arrivalRadius / 10, v => town().arrivalRadius = v * 10, 10, 150),
+        this.number('Town HP refill (stacks of 50)', () => town().stacks.hp, v => town().stacks.hp = v, 1, 200),
+        this.number('Town MP refill (stacks of 50)', () => town().stacks.mp, v => town().stacks.mp = v, 1, 200),
         el('p', 'Bind your recall to Hotan in the game. While stopped, save the arrival point where a return scroll places you. Stand near, select and save the warehouse, potion merchant, repair merchant and world statue / teleport. Open the potion shop before saving its merchant. Saves your standing position for each approach. Uses collision-aware walking between services. Overrides the recorded walking restock while enabled.', 'muted'));
       for (const [role, label] of [['arrival', 'Arrival point'], ['storage', 'Warehouse'], ['vendor', 'Potion merchant'], ['smith', 'Repair merchant'], ['gate', 'World statue / teleport']]) services.append(
         this.row(this.button('Save ' + label.toLowerCase(), () => Town.save(role)), el('span', town()[role]?.name || (town()[role] ? 'Saved' : 'Not saved'), 'muted')));
       services.append(el('p', 'Pet loot: store elixirs only. Sell other unprotected pet items at the saved weapon / repair merchant before repairing. Keep seal/rare equipment and equipment with unknown rarity in the pet. Ordinary equipment is sold regardless of + or blue options. Existing character bag items are never sold.', 'muted'));
       services.append(this.text('Keep in pet (names)', () => town().keep, v => town().keep = v),
-        el('p', 'Town buys X-Large HP/MP potions using the enable switches and refill thresholds above, regardless of the walking-route potion selections. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. Does not buy Item Mall scrolls. Failures stop the bot in place. F8 cancels.', 'muted'));
+        el('p', 'Town tops up X-Large potions to the stack targets here (default: 2 HP / 6 MP), counting potions already in your bag. Uses the Buy HP/MP switches and low-stock thresholds above; keep each threshold below its stack target. The earlier potion selections and Refill to fields apply to walking-route restock. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. F8 cancels.', 'muted'));
       this.townNote = el('p', Town.status(), 'muted'); services.append(this.townNote); this.pane.append(services);
     } else if (this.current === 'Wardrobe') {
       LeanWardrobe.draw(this.pane);

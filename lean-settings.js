@@ -15,6 +15,7 @@ const DEFAULT_PROFILE = {
     restock: {
       enabled: false, vendor: null, route: [], offers: [],
       town: { enabled: false, petFull: true, petFree: 1, arrivalRadius: 500, arrival: null, storage: null, vendor: null, smith: null, gate: null,
+        stacks: { hp: 2, mp: 6 },
         keep: '', store: { equipment: true, elixirs: true, powders: true, alchemy: true, others: false } },
       hp: { on: true, refObjId: 0, low: 20, target: 200 },
       mp: { on: true, refObjId: 0, low: 20, target: 200 },
