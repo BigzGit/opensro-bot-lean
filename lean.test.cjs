@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, bus, Manual, stopAll, boot, Ticker};\n})();';
+  'globalThis.bot = {World, Settings, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, bus, Manual, stopAll, toggleBot, boot, Ticker};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [];
@@ -306,5 +306,38 @@ test('new alchemy category switches inherit old Other items preferences', () => 
 test('changing loot filters cancels an outstanding pickup before handing back control', () => {
   const f=fixture(); f.Loot.begin(f.drop()); f.Loot.preset('elixirs'); f.advance(1000);
   assert.equal(f.Loot.tick(),false); assert.equal(f.Loot.active,null); assert.equal(f.commands.at(-1).kind,'move');
+});
+test('idle, manual pause and walk-back do not change pet auto-grab settings', () => {
+  const f = fixture(); pickupPet(f, 135);
+  f.Controller.tick();
+  assert.equal(f.commands.some(c => c.kind === 'cos-behavior'), false);
+  f.Hunt.start(); f.Manual.lastAt = 100000; f.Controller.tick();
+  assert.equal(f.commands.some(c => c.kind === 'cos-behavior'), false);
+  f.Settings.profile.hunt.center.x = 400; f.WalkBack.start(true); f.advance(1000); f.Controller.tick();
+  assert.equal(f.commands.some(c => c.kind === 'cos-behavior'), false);
+});
+
+test('revival return waits for inventory settlement without losing resume intent', () => {
+  const f = fixture(); f.Controller.resumeAfterRevive = true;
+  f.World.gp.pose.x = 300; f.World.gp.inventoryPending = true;
+  f.Controller.tick(); f.advance(500); f.Controller.tick();
+  assert.equal(f.Controller.resumeAfterRevive, true);
+  assert.equal(f.WalkBack.active, null); assert.equal(f.notices.length, 0);
+  f.World.gp.inventoryPending = false; f.Controller.tick();
+  assert.equal(f.Controller.resumeAfterRevive, false);
+  assert.equal(f.WalkBack.active.resume, true);
+});
+
+test('stop cancels a revival return waiting for inventory settlement', () => {
+  const f = fixture(); f.Controller.resumeAfterRevive = true; f.World.gp.inventoryPending = true;
+  f.Controller.tick(); f.toggleBot(); f.World.gp.inventoryPending = false; f.Controller.tick();
+  assert.equal(f.Controller.resumeAfterRevive, false); assert.equal(f.WalkBack.active, null);
+});
+
+test('restarting walk-back preserves hunting on arrival', () => {
+  const f = fixture(); f.Settings.profile.hunt.center.x = 400;
+  f.Hunt.start(); f.WalkBack.start(); assert.equal(f.WalkBack.active.resume, true);
+  f.advance(1000); f.WalkBack.start(); assert.equal(f.WalkBack.active.resume, true);
+  f.World.gp.pose.x = 400; f.WalkBack.tick(); assert.equal(f.Hunt.running, true);
 });
 console.log(`${passed} lean integration tests passed.`);

@@ -1,5 +1,5 @@
 function toggleBot() {
-  if (Hunt.running || WalkBack.active || Restock.trip) stopAll();
+  if (Hunt.running || WalkBack.active || Restock.trip || Controller.resumeAfterRevive) stopAll();
   else if (Restock.recording) UI.toast('Finish or cancel route recording before starting the bot.', 'warn');
   else Hunt.start();
 }

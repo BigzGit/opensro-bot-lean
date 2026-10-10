@@ -31,6 +31,8 @@ Both scripts must not run together. Lean detects another active assistant and de
 
 ## What changed
 
+Version 1.2.6 fixes three control-flow bugs: pet auto-grab setup now runs only during active hunting (after manual-pause checks); revival return waits for pending inventory transactions and can be cancelled with F8; restarting walk-back preserves the request to resume hunting on arrival.
+
 The full assistant is about 1.16 MB. Lean 1.2.4 is about 270 KB, around 77% smaller by bytes, including the restored wardrobe. It does not include the custom map, radar, character viewer, inspection tools, social/quest panels, bestiary, drop encyclopedia, chat macros or GM panel.
 
 Lean reuses the original bot's Silkroad window, button, tab and checkbox textures. Skill grids, buff and imbue pickers show game icons with names, tooltips and cooldown overlays. Weapon imbue is visible directly under the attack rotation as well as in Buffs & imbue. Thunderdragon Force belongs here. The highest learned level of a group is displayed and resolved automatically after upgrades; unlearned levels are never added.
@@ -61,7 +63,7 @@ Lean preserves the reviewed worker-hook and combat code from the supplied bot. N
 Validation completed:
 
 - JavaScript syntax check.
-- 35 integration tests covering the previous loot/combat/restock behaviours, collision routing, Thunderdragon level 13, wardrobe isolation and paid-avatar browsing, plus elixir presets, native item classification, capacity/ownership/exclusion checks, old-profile migration and cancellation after changing pickup filters. Pet tests cover acknowledged auto-grab setup, selective commands, pet bag capacity and gains, missing/foreign/dead/distant pets, potion priority, bounded setting retries, stop behaviour and controller integration.
+- 39 integration tests covering the previous loot/combat/restock behaviours, collision routing, Thunderdragon level 13, wardrobe isolation and paid-avatar browsing, plus elixir presets, native item classification, capacity/ownership/exclusion checks, old-profile migration and cancellation after changing pickup filters. Pet tests cover acknowledged auto-grab setup, selective commands, pet bag capacity and gains, missing/foreign/dead/distant pets, potion priority, bounded setting retries, stop behaviour and controller integration. Regression tests also cover idle/manual/walk-back pet settings, deferred revival return, cancellation while waiting and repeated walk-back commands.
 - Headless Edge tests covering actual boot, worker-message hooks and captured collision routing; verified gzip/Range-pack image loading; missing Thunderdragon level 13 metadata recovery and selection; lazy wardrobe loading, skins, glow, presets, search and icon bounds; controls, hotkeys, cancellation and desktop/mobile bounds. No page errors were observed. The test uses simulated game state and local mock assets. Wardrobe catalogues are not requested before the wardrobe is opened; the skill catalogue is not requested unless learned metadata is missing.
 - Desktop and narrow-screen screenshots inspected.
 

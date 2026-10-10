@@ -26,6 +26,7 @@ Hunt.tick = function () {
   if (this.playerCheck()) { Loot.suspend(); this.state = 'player'; return; }
   if (H.stopNoHpPotion && Potion.count('hp') + Potion.count('vigor') === 0) return this.stop('out of HP potions');
   if (H.stopInvFull && World.freeBagSlots() === 0) return this.stop('inventory full');
+  Loot.preparePet();
   const attacked = this.underAttack(), current = this.currentTarget();
   if (attacked) Loot.suspend();
   // An active pickup owns the tick until done, failed or interrupted by an attacker.
@@ -73,8 +74,8 @@ const Controller = {
       Restock.sample();
       if (!World.inWorld()) { this.mode = 'waiting'; return; }
       Potion.tick();
-      Loot.preparePet();
       if (this.resumeAfterRevive && !World.isDead()) {
+        if (World.gp?.inventoryPending) { this.mode = 'waiting'; return; }
         this.resumeAfterRevive = false;
         if (Settings.profile.hunt.center) WalkBack.start(true);
         else Hunt.stop('No saved hunting spot for revival return.');

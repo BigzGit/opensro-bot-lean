@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.5
+// @version      1.2.6
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.5';
+const VERSION = '1.2.6';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -1853,9 +1853,9 @@ const WalkBack = {
     if (!dest || !pose) return UI.toast(T('Önce av merkezini kaydedin.', 'Save a hunting spot first using Set here in Hunt → Area.'), 'warn');
     if (!Number.isFinite(dist2D(pose, dest))) return UI.toast(T('Önce aynı bölgeye dönün.', 'Return to the same world or dungeon before walking back.'), 'warn');
     if (World.gp?.inventoryPending) return UI.toast(T('Envanter işlemini bekleyin.', 'Wait for the inventory transaction to finish.'), 'warn');
+    const shouldResume = resume || Hunt.running || !!this.active?.resume;
     this.cancel();
     Restock.cancelRecording();
-    const shouldResume = resume || Hunt.running;
     if (Hunt.running) Hunt.stop();
     if (Restock.activeShop() || World.gp?.storage) Cmd.raw({ kind: 'npc-close' }, 'Walk back: close merchant');
     const recorded = Restock.cfg().route;
@@ -2120,6 +2120,7 @@ Hunt.tick = function () {
   if (this.playerCheck()) { Loot.suspend(); this.state = 'player'; return; }
   if (H.stopNoHpPotion && Potion.count('hp') + Potion.count('vigor') === 0) return this.stop('out of HP potions');
   if (H.stopInvFull && World.freeBagSlots() === 0) return this.stop('inventory full');
+  Loot.preparePet();
   const attacked = this.underAttack(), current = this.currentTarget();
   if (attacked) Loot.suspend();
   // An active pickup owns the tick until done, failed or interrupted by an attacker.
@@ -2167,8 +2168,8 @@ const Controller = {
       Restock.sample();
       if (!World.inWorld()) { this.mode = 'waiting'; return; }
       Potion.tick();
-      Loot.preparePet();
       if (this.resumeAfterRevive && !World.isDead()) {
+        if (World.gp?.inventoryPending) { this.mode = 'waiting'; return; }
         this.resumeAfterRevive = false;
         if (Settings.profile.hunt.center) WalkBack.start(true);
         else Hunt.stop('No saved hunting spot for revival return.');
@@ -4072,7 +4073,7 @@ const UI = {
 
 
 function toggleBot() {
-  if (Hunt.running || WalkBack.active || Restock.trip) stopAll();
+  if (Hunt.running || WalkBack.active || Restock.trip || Controller.resumeAfterRevive) stopAll();
   else if (Restock.recording) UI.toast('Finish or cancel route recording before starting the bot.', 'warn');
   else Hunt.start();
 }

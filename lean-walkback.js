@@ -7,9 +7,9 @@ const WalkBack = {
     if (!dest || !pose) return UI.toast(T('Önce av merkezini kaydedin.', 'Save a hunting spot first using Set here in Hunt → Area.'), 'warn');
     if (!Number.isFinite(dist2D(pose, dest))) return UI.toast(T('Önce aynı bölgeye dönün.', 'Return to the same world or dungeon before walking back.'), 'warn');
     if (World.gp?.inventoryPending) return UI.toast(T('Envanter işlemini bekleyin.', 'Wait for the inventory transaction to finish.'), 'warn');
+    const shouldResume = resume || Hunt.running || !!this.active?.resume;
     this.cancel();
     Restock.cancelRecording();
-    const shouldResume = resume || Hunt.running;
     if (Hunt.running) Hunt.stop();
     if (Restock.activeShop() || World.gp?.storage) Cmd.raw({ kind: 'npc-close' }, 'Walk back: close merchant');
     const recorded = Restock.cfg().route;
