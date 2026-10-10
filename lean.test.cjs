@@ -755,19 +755,19 @@ function townFixture() {
     const npc = { gid: 60 + index, refObjId: 600 + index, kind: role === 'gate' ? 'teleport' : 'npc', name: role, regionId: 1, x: 130 + index * 40, y: 0, z: 100 };
     c[role] = { ...npc }; f.World.ents.set(npc.gid, npc);
   }
-  r.hp.on = false; r.mp.refObjId = 102; r.mp.low = 5; r.mp.target = 50;
+  r.hp.on = false; r.mp.refObjId = 15; r.mp.low = 5; r.mp.target = 50;
   gp.inventory = [
     { slot: 6, refObjId: 900, typeFlags: 44 | (6 << 7), durability: 5, variance: '0', magic: [], tooltip: { fields: { canRepair: 1, varianceIntMin1c0: 10, varianceIntMax1c4: 10 } } },
     { slot: 13, refObjId: 200, typeFlags: 0x09ec, quantity: 3 },
     { slot: 14, refObjId: 201, typeFlags: 0x19ec, quantity: 2 },
-    { slot: 15, refObjId: 102, typeFlags: 4332, quantity: 1 },
+    { slot: 15, refObjId: 15, typeFlags: 4332, quantity: 1 },
   ];
   const pet = pickupPet(f);
   pet.inventory = [
     { slot: 0, refObjId: 1000, typeFlags: 3436, quantity: 2, name: 'Elixir' },
     { slot: 1, refObjId: 1001, typeFlags: 5484, quantity: 1, name: 'Powder' },
     { slot: 2, refObjId: 1002, typeFlags: 44 | (6 << 7), quantity: 1, name: 'Favorite sword' },
-    { slot: 3, refObjId: 102, typeFlags: 4332, quantity: 5, name: 'MP potion' },
+    { slot: 3, refObjId: 15, typeFlags: 4332, quantity: 5, name: 'MP potion' },
     { slot: 4, refObjId: 1003, typeFlags: 108, quantity: 1, name: 'Other item' },
   ];
   gp.pose.x = 700; f.Settings.profile.hunt.center.x = 700;
@@ -801,14 +801,14 @@ test('town cycle recalls, confirms pet storage and purchases, repairs, reverses 
         stored.push(i.refObjId); gp.storage.items.push({ ...i, slot: c.move.destination });
         gp.inventory = gp.inventory.filter(i => i.slot !== c.move.source);
       } else if (c.kind === 'shop-open') {
-        gp.shop = { npc: c.gid, offers: [{ refObjId: 102, name: 'MP', tab: 0, slot: 0, maxStack: 100, price: '10', previews: [{ refObjId: 102, typeFlags: 4332 }] }] };
+        gp.shop = { npc: c.gid, offers: [{ refObjId: 15, name: 'MP', tab: 0, slot: 0, maxStack: 100, price: '10', previews: [{ refObjId: 15, typeFlags: 4332 }] }] };
         gp.shopCompletionRevision++;
       } else if (c.kind === 'cos-shop-sell') {
         assert.equal(gp.shop.npc, 62); assert.equal(c.gid, f.pet.gid);
         const item = f.pet.inventory.find(i => i.slot === c.slot);
         assert.equal(c.quantity, item.quantity ?? 1); sold.push(item.refObjId);
         f.pet.inventory = f.pet.inventory.filter(i => i.slot !== c.slot);
-      } else if (c.kind === 'shop-buy') { buys.push(c.quantity); gp.inventory.find(i => i.refObjId === 102).quantity += c.quantity; }
+      } else if (c.kind === 'shop-buy') { buys.push(c.quantity); gp.inventory.find(i => i.refObjId === 15).quantity += c.quantity; }
       else if (c.kind === 'shop-repair') gp.inventory.find(i => i.slot === 6).durability = 10;
       else if (c.kind === 'npc-close') { gp.target = 0; gp.shop = null; gp.storage = null; }
       else if (c.kind === 'npc-talk') gp.npcConversation = { gid: gp.target, phase: 'menu' };
@@ -839,9 +839,9 @@ test('town cycle is opt-in, hunting-only and overrides walking restock without r
   const f = townFixture(); f.Restock.cfg().enabled = true;
   f.Town.cfg().enabled = false; assert.equal(f.Town.tick(), false);
   f.Town.cfg().enabled = true; f.Hunt.stop(); assert.equal(f.Town.tick(), false);
-  f.Hunt.start(); f.World.gp.inventory.find(i => i.refObjId === 102).quantity = 50;
+  f.Hunt.start(); f.World.gp.inventory.find(i => i.refObjId === 15).quantity = 50;
   f.pet.inventory = []; f.Hunt.tick(); assert.equal(f.Restock.trip, null); assert.equal(f.Hunt.running, true);
-  f.World.gp.inventory.find(i => i.refObjId === 102).quantity = 5;
+  f.World.gp.inventory.find(i => i.refObjId === 15).quantity = 5;
   f.Town.tick(); assert.equal(f.Town.trip.phase, 'recall-wait');
 });
 test('pet storage protects supplies, keep names and items with missing metadata', () => {
@@ -947,15 +947,13 @@ test('town sells only unprotected non-elixir pet loot and waits for a full sale 
   assert.equal(f.commands.some(c => c.kind === 'shop-sell'), false);
 });
 
-test('town never sells sealed, enhanced or blue equipment and keeps incomplete metadata', () => {
+test('town keeps sealed equipment and unknown rarity while allowing plus and blue gear', () => {
   const f = townFixture(), normal = { refObjId: 1100, typeFlags: 44 | (6 << 7), name: 'Sword', plus: 0, magic: [], tooltip: { fields: { rarity: 0 } } };
   assert.equal(f.Town.sellable(normal), true);
+  for (const item of [{ ...normal, plus: 12 }, { ...normal, magic: ['123'] }, { ...normal, plus: undefined, magic: undefined }, { ...normal, tooltip: { fields: { rarity: 1 } } }]) assert.equal(f.Town.sellable(item), true);
   for (const item of [
     ...[1, 2, 3].map(itemClass => ({ ...normal, tooltip: { fields: { rarity: 2, itemClass } } })),
-    { ...normal, plus: 1 }, { ...normal, plus: 12 }, { ...normal, magic: ['123'] },
-    { ...normal, tooltip: { fields: { rarity: 1 } } },
     { ...normal, tooltip: undefined }, { ...normal, tooltip: { fields: {} } },
-    { ...normal, plus: undefined }, { ...normal, magic: undefined },
     { ...normal, codename: 'ITEM_CH_SWORD_01_A_RARE' },
   ]) {
     assert.equal(f.Town.sellable(item), false, JSON.stringify(item));
@@ -965,7 +963,7 @@ test('town never sells sealed, enhanced or blue equipment and keeps incomplete m
 
 test('town sells ordinary pet equipment while leaving valuable equipment in the pet bag', () => {
   const f = townFixture(), gp = f.World.gp;
-  const normal = { slot: 5, refObjId: 1100, typeFlags: 44 | (6 << 7), quantity: 1, plus: 0, magic: [], tooltip: { fields: { rarity: 0 } } };
+  const normal = { slot: 5, refObjId: 1100, typeFlags: 44 | (6 << 7), quantity: 1, plus: 12, magic: ['123'], tooltip: { fields: { rarity: 0 } } };
   const rare = { ...normal, slot: 6, refObjId: 1101, tooltip: { fields: { rarity: 2, itemClass: 3 } } };
   f.pet.status = 20; f.pet.inventory = [rare, normal];
   f.Town.begin(); f.Town.enter('sell'); gp.target = 62; gp.shop = { npc: 62 };
@@ -985,12 +983,34 @@ test('town refuses selling at the wrong merchant or after the pet is replaced', 
   assert.equal(g.Town.trip, null); assert.match(g.Town.message, /pet changed/);
 });
 
+test('town buys X-Large HP and MP even when the saved potion selections are small', () => {
+  const f = townFixture(), r = f.Restock.cfg(), gp = f.World.gp;
+  r.hp.on = true; r.hp.refObjId = 101; r.hp.low = 5; r.hp.target = 30; r.mp.refObjId = 102;
+  f.Town.begin(); f.Town.enter('buy'); gp.target = 61;
+  gp.shop = { npc: 61, offers: [101,8,102,15].map((refObjId, slot) => ({ refObjId, slot, tab: 0, maxStack: 100, price: '10', previews: [{ refObjId, typeFlags: slot < 2 ? 2284 : 4332 }] })) };
+  f.Town.buy(); assert.equal(f.commands.at(-1).slot, 1); assert.equal(f.commands.at(-1).quantity, 30);
+  gp.inventory.push({ slot: 16, refObjId: 8, typeFlags: 2284, quantity: 30 });
+  f.advance(1000); f.Town.buy(); assert.equal(f.commands.at(-1).slot, 3); assert.equal(f.commands.at(-1).quantity, 49);
+  gp.inventory.find(i => i.refObjId === 15).quantity = 50;
+  f.advance(1000); f.Town.buy(); assert.equal(f.Town.trip.phase, 'close-vendor');
+  assert.equal(f.commands.filter(c => c.kind === 'shop-buy').length, 2);
+  assert.equal(f.commands.some(c => c.kind === 'shop-buy' && [0,2].includes(c.slot)), false);
+});
+
+test('town never substitutes small potions if X-Large is unavailable', () => {
+  const f = townFixture(), gp = f.World.gp;
+  f.Restock.cfg().mp.refObjId = 102; f.Town.begin(); f.Town.enter('buy'); gp.target = 61;
+  gp.shop = { npc: 61, offers: [{ refObjId: 102, tab: 0, slot: 0, maxStack: 100, price: '10', previews: [{ refObjId: 102, typeFlags: 4332 }] }] };
+  f.Town.buy(); assert.equal(f.Town.trip, null); assert.match(f.Town.message, /X-Large MP/);
+  assert.equal(f.commands.some(c => c.kind === 'shop-buy'), false);
+});
+
 test('town purchase requires exact quantity gain and enough gold, without duplicate buys', () => {
   const f = townFixture(), gp = f.World.gp;
   f.Town.begin(); f.Town.enter('buy'); gp.target = 61;
-  gp.shop = { npc: 61, offers: [{ refObjId: 102, tab: 0, slot: 0, maxStack: 100, price: '10', previews: [{ refObjId: 102, typeFlags: 4332 }] }] };
+  gp.shop = { npc: 61, offers: [{ refObjId: 15, tab: 0, slot: 0, maxStack: 100, price: '10', previews: [{ refObjId: 15, typeFlags: 4332 }] }] };
   f.Town.buy(); assert.equal(f.commands.at(-1).quantity, 49);
-  gp.inventory.find(i => i.refObjId === 102).quantity++; f.advance(1000); f.Town.buy();
+  gp.inventory.find(i => i.refObjId === 15).quantity++; f.advance(1000); f.Town.buy();
   assert.ok(f.Town.trip.pending); assert.equal(f.commands.filter(c => c.kind === 'shop-buy').length, 1);
   f.advance(15000); f.Town.buy(); assert.equal(f.Town.trip, null);
   const g = townFixture(); g.Town.begin(); g.Town.enter('buy'); g.World.gp.target = 61; g.World.gp.shop = gp.shop; g.World.gp.progression.gold = '1';
@@ -1013,14 +1033,14 @@ test('town service keeps emergency potions active and prevents scroll actions in
 });
 test('town scroll refill uses gold offers, rejects packages and requires a spare return scroll', () => {
   const f = townFixture(), gp = f.World.gp;
-  gp.inventory.find(i => i.refObjId === 102).quantity = 50; gp.inventory = gp.inventory.filter(i => i.slot !== 13);
+  gp.inventory.find(i => i.refObjId === 15).quantity = 50; gp.inventory = gp.inventory.filter(i => i.slot !== 13);
   // A missing return scroll is detected before leaving a shop, rather than returning unprepared.
   gp.inventory.push({ slot: 13, refObjId: 200, typeFlags: 0x09ec, quantity: 1 });
   f.Town.begin(); f.Town.enter('buy'); gp.inventory = gp.inventory.filter(i => i.slot !== 13); gp.target = 61;
   const offer = { refObjId: 200, tab: 0, slot: 3, maxStack: 50, price: '50', currency: 1, previews: [{ refObjId: 200, typeFlags: 0x09ec }] };
   gp.shop = { npc: 61, offers: [offer] }; f.Town.buy(); assert.equal(f.commands.at(-1).quantity, 2); assert.equal(f.commands.at(-1).slot, 3);
   gp.inventory.push({ slot: 13, refObjId: 200, typeFlags: 0x09ec, quantity: 2 }); f.advance(600); f.Town.buy(); assert.equal(f.Town.trip.phase, 'close-vendor');
-  const g = townFixture(); g.Town.begin(); g.Town.enter('buy'); g.World.gp.inventory.find(i => i.refObjId === 102).quantity = 50;
+  const g = townFixture(); g.Town.begin(); g.Town.enter('buy'); g.World.gp.inventory.find(i => i.refObjId === 15).quantity = 50;
   g.World.gp.inventory = g.World.gp.inventory.filter(i => i.slot !== 13); g.World.gp.target = 61;
   g.World.gp.shop = { npc: 61, offers: [{ ...offer, contents: [{ refObjId: 200, quantity: 10 }] }] };
   g.Town.buy(); assert.equal(g.commands.some(c => c.kind === 'shop-buy'), false); assert.equal(g.Hunt.running, false);
@@ -1051,7 +1071,7 @@ test('unexpected world reset cancels service and independent party work continue
 });
 test('full pet latches town departure during combat and pending pickup without starting another fight', () => {
   for (const busy of ['cast', 'inventory']) {
-    const f = townFixture(); f.World.gp.inventory.find(i => i.refObjId === 102).quantity = 50;
+    const f = townFixture(); f.World.gp.inventory.find(i => i.refObjId === 15).quantity = 50;
     let fights = 0; f.Hunt.tick = () => fights++;
     let casting = busy === 'cast'; f.World.isCasting = () => casting;
     f.World.gp.inventoryPending = busy === 'inventory';

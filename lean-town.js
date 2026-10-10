@@ -3,6 +3,8 @@
 const Town = {
   trip: null, message: 'Town cycle off.',
   cfg() { return Restock.cfg().town; },
+  // Native v1.150 ITEM_ETC_HP_POTION_05 / ITEM_ETC_MP_POTION_05.
+  supplies() { return Restock.supplies().map(s => ({ ...s, refObjId: s.kind === 'hp' ? 8 : 15 })); },
   status() {
     if (this.trip || this.message.startsWith('Town cycle stopped:')) return this.message;
     if (!this.cfg().enabled) return 'Town cycle off. The pet-full chime is an alert; enable the scroll town cycle to return automatically.';
@@ -47,10 +49,9 @@ const Town = {
         (tf & 0x7fc) === 0x1ec || item.refObjId === 24198 ||
         Restock.supplies().some(s => s.refObjId === item.refObjId) ||
         splitList(c.keep).some(s => name.includes(s))) return false;
-    // Only explicitly ordinary, unenhanced equipment may be sold. Native
-    // rarity 2 covers all seal tiers; missing safety metadata means keep it.
-    if (ItemType.isEquipment(tf) && (item.tooltip?.fields?.rarity !== 0 ||
-        item.plus !== 0 || !Array.isArray(item.magic) || item.magic.length > 0 ||
+    // Native rarity 2 covers seal tiers. Plus and blue options do not protect
+    // ordinary gear; unknown rarity still means keep it rather than guess.
+    if (ItemType.isEquipment(tf) && (![0, 1].includes(item.tooltip?.fields?.rarity) ||
         /_(RARE|MAGIC|LEGEND|MYTH)(?:_HONOR)?$/i.test(item.codename || ''))) return false;
     return true;
   },
@@ -59,11 +60,11 @@ const Town = {
   reason() {
     const c = this.cfg(), pet = Loot.pet();
     if (c.petFull && pet && pet.rec.status - pet.rec.inventory.length <= c.petFree) return 'pickup pet nearly full';
-    if (Restock.supplies().some(s => Restock.count(s.refObjId) <= s.low)) return 'potions running low';
+    if (this.supplies().some(s => Restock.count(s.refObjId) <= s.low)) return 'potions running low';
     return '';
   },
   validate() {
-    const c = this.cfg(), supplies = Restock.supplies();
+    const c = this.cfg(), supplies = this.supplies();
     const missing = [['arrival', 'arrival point'], ['vendor', 'potion merchant'], ['smith', 'repair merchant'], ['gate', 'world statue / teleport'], ...(c.petFull ? [['storage', 'warehouse']] : [])].filter(([key]) => !c[key]).map(([, label]) => label);
     if (missing.length) return 'Save missing town services: ' + missing.join(', ') + '.';
     if (!supplies.length || supplies.some(s => !s.refObjId || !Number.isInteger(s.low) || !Number.isInteger(s.target) || s.low < 0 || s.target <= s.low || s.target > 10000)) return 'Choose potions and valid low-stock/refill quantities.';
@@ -96,7 +97,7 @@ const Town = {
     Resurrect.cancelTrip('', true); Resurrect.holdUntil = 0; Loot.suspend();
     this.trip = { phase: 'recall', at: now(), started: now(), origin: { ...World.pose() },
       manualAt: Manual.lastAt, character: World.charName, petRef: Loot.pet()?.rec.refObjId,
-      config: JSON.stringify(this.cfg()), supplies: Restock.supplies().map(s => ({ ...s })) };
+      config: JSON.stringify(this.cfg()), supplies: this.supplies() };
     Hunt.targetGid = Hunt.lootGid = 0;
     // Stop the worker's repeating attack/movement as well as the bot's next tick.
     // Pending inventory work still settles before item-use is admitted below.
@@ -247,7 +248,7 @@ const Town = {
     }
     if (!s) { this.enter('close-vendor'); return; }
     const offer = shop.offers.find(o => o.refObjId === s.refObjId && (s.kind === 'scroll' || Restock.offerKind(o) === s.kind));
-    if (!offer || !(offer.maxStack > 0)) return this.fail('Selected potion is unavailable here.');
+    if (!offer || !(offer.maxStack > 0)) return this.fail(s.kind === 'scroll' ? 'Selected scroll is unavailable here.' : 'X-Large ' + s.kind.toUpperCase() + ' potion is unavailable here.');
     const before = Restock.count(s.refObjId), room = World.items().filter(i => i.refObjId === s.refObjId).reduce((n, i) => n + Math.max(0, offer.maxStack - (i.quantity ?? 1)), 0);
     const quantity = Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, room + Math.max(0, World.freeBagSlots() - 1) * offer.maxStack);
     if (quantity < 1) return this.fail('Not enough bag space for refill and a spare transfer slot.');
