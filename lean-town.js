@@ -2,6 +2,67 @@
 // Native reverse scrolls are spent by travel-gate type 5/choice 2, not item-use.
 const Town = {
   trip: null, lastScrollPoint: null, message: 'Town cycle off.',
+  history: [], lastTrace: '',
+  blocked() {
+    if (!this.cfg().enabled) return 'town cycle is off';
+    if (!Hunt.running) return 'bot is stopped';
+    if (!World.inWorld() || !World.gp || !World.local()) return 'waiting for game world';
+    if (World.isDead()) return 'character is dead';
+    if (now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000) return 'manual control pause';
+    if (WalkBack.active) return 'walk-back is active';
+    if (Restock.recording) return 'recording a walking route';
+    if (Restock.activeShop() || World.gp.storage) return 'close the open shop or storage';
+    return '';
+  },
+  record(event = 'tick') {
+    // Diagnostics must never prevent Stop or hide an engine error.
+    try {
+      const gp = World.gp, pet = Loot.pet();
+      const row = { event, running: Hunt.running, mode: Controller.mode, phase: this.trip?.phase || '',
+        trigger: this.reason(), blocked: this.trip ? '' : this.blocked(), message: this.message,
+        inventoryPending: !!gp?.inventoryPending, casting: World.isCasting(), returnScroll: !!gp?.returnScroll,
+        attempts: this.trip?.scrollAttempts || 0, accepted: !!this.trip?.scrollRequest?.accepted,
+        freeBag: World.freeBagSlots(), petFree: pet ? pet.rec.status - pet.rec.inventory.length : null,
+        hp: Potion.count('hp'), mp: Potion.count('mp'), error: gp?.error || '' };
+      const key = JSON.stringify(row);
+      if (key === this.lastTrace) return;
+      this.lastTrace = key; this.history.push({ at: Date.now(), ...row });
+      if (this.history.length > 120) this.history.shift();
+    } catch {}
+  },
+
+  // Dispatch is not acknowledgement. Inventory-busy/cooldown refusals can
+  // leave the worker without ever starting a scroll. Never resend an accepted
+  // or unresolved inventory operation: native replies have no transaction ID.
+  sentScroll(scroll, phase) {
+    const request = { slot: scroll.slot, ref: scroll.refObjId, quantity: scroll.quantity ?? 1,
+      state: World.gp, accepted: false, at: now() };
+    this.trip.scrollAttempts = (this.trip.scrollAttempts || 0) + 1;
+    this.enter(phase); this.trip.scrollRequest = request;
+  },
+  checkScroll() {
+    const t = this.trip, r = t?.scrollRequest, gp = World.gp;
+    if (!r || !gp) return false;
+    const item = gp.inventory?.find(i => i.slot === r.slot && i.refObjId === r.ref);
+    if (t.transition || gp.returnScroll || Array.isArray(gp.inventory) && (!item || (item.quantity ?? 1) < r.quantity)) r.accepted = true;
+    if (r.accepted || now() - r.at < 5000) return false;
+    if (/timed out|resynchron/i.test(gp.error || '')) {
+      this.fail('Game inventory timed out; reconnect to resynchronize before restarting.'); return true;
+    }
+    // A new native snapshot must positively report the unchanged scroll and
+    // idle inventory, otherwise its outcome is still unknown.
+    if (gp === r.state || gp.inventoryPending !== false || !item || (item.quantity ?? 1) !== r.quantity || World.isCasting()) {
+      this.message = 'Scroll not confirmed; waiting for fresh, settled game state.'; return true;
+    }
+    if (t.scrollAttempts >= 3) {
+      this.fail('Return request was not accepted after three attempts. ' + (gp.error || 'Check game travel restrictions.')); return true;
+    }
+    const next = t.phase === 'recall-wait' ? 'recall' : 'reverse';
+    this.enter(next); t.scrollRequest = null;
+    if (next === 'recall') { t.haltSent = false; t.haltAttempts = 0; t.potionWindowReserved = true; }
+    this.message = 'Scroll was not accepted; retrying automatically (' + (t.scrollAttempts + 1) + '/3).';
+    return true;
+  },
   cfg() { return Restock.cfg().town; },
   // Native X-Large HP/MP IDs 8/15, both authored with 50 potions per stack.
   supplies() { return Restock.supplies().map(s => ({ ...s, refObjId: s.kind === 'hp' ? 8 : 15, target: this.cfg().stacks?.[s.kind] * 50 })); },
@@ -9,6 +70,8 @@ const Town = {
     if (this.trip || this.message.startsWith('Town cycle stopped:')) return this.message;
     if (!this.cfg().enabled) return 'Town cycle off. The pet-full chime is an alert; enable the scroll town cycle to return automatically.';
     if (!World.inWorld()) return 'Town cycle: waiting for game world.';
+    const blocked = this.blocked();
+    if (blocked) return 'Town return: ' + (this.reason() ? this.reason() + '; ' : '') + blocked + '.';
     const error = this.validate();
     return error ? 'Town cycle not ready: ' + error : 'Town cycle ready: waiting for low potions or character/pet bag capacity.';
   },
@@ -113,6 +176,7 @@ const Town = {
     else this.message = 'Using return scroll; recall must be bound to Hotan.';
   },
   arrived() {
+    this.trip.scrollAttempts = 0; this.trip.scrollRequest = null;
     if (World.freeBagSlots() < 1) return this.fail('Returned to town; free a character bag slot for storage and refills.');
     if (this.cfg().petFull && this.reason() === 'pickup pet nearly full' && !Loot.pet()?.rec.inventory.some(i => this.disposable(i))) return this.fail('Returned to town; pet is full of protected items. Empty it manually.');
     this.enter(this.cfg().storage ? 'walk-storage' : 'walk-vendor');
@@ -311,8 +375,7 @@ const Town = {
   tick() {
     const c = this.cfg();
     if (!this.trip) {
-      if (!c.enabled || !Hunt.running || !World.inWorld() || World.isDead() ||
-          WalkBack.active || Restock.recording || Restock.activeShop() || World.gp.storage || now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000 || !this.reason()) return false;
+      if (this.blocked() || !this.reason()) return false;
       this.begin();
       if (!this.trip) return true;
     }
@@ -324,6 +387,7 @@ const Town = {
     if (['recall-wait', 'reverse-wait', 'revive-arrival'].includes(t.phase) && now() - t.at > 90000) { this.fail('Scroll arrival timed out.'); return true; }
     if (!World.inWorld() || !gp?.pose || !World.local()) return true;
     if (World.isDead()) { this.fail('Character died during town service.'); return true; }
+    if (['recall-wait', 'reverse-wait'].includes(t.phase) && this.checkScroll()) return true;
     if (t.phase === 'recall' && now() - t.at > 30000) { this.fail('Combat or inventory did not settle before departure.'); return true; }
     // Stopping combat is part of departure, not a best-effort side effect.
     // The initial move may hit Cmd.move's 550 ms rate limit or pending queue.
@@ -344,7 +408,7 @@ const Town = {
       if (World.local()?.mountedOn) { this.fail('Dismount before starting town service.'); return true; }
       const scroll = this.scroll(0x09ec);
       if (!scroll) { this.fail('Return scroll missing.'); return true; }
-      if (Cmd.itemUse(scroll.slot)) this.enter('recall-wait');
+      if (Cmd.itemUse(scroll.slot)) this.sentScroll(scroll, 'recall-wait');
     } else if (t.phase === 'revive-arrival') {
       if (!gp.inventoryPending && !gp.returnScroll && dist2D(World.pose(), c.arrival) <= clamp(Number(c.arrivalRadius) || 500, 100, 1500)) this.arrived();
       else this.message = 'Waiting for revival at the saved town arrival area.';
@@ -360,7 +424,7 @@ const Town = {
           this.message = 'Town service complete; hunting resumed.'; UI.toast(this.message);
         }
       } else {
-        this.message = !t.transition ? 'Waiting for scroll travel confirmation.' : gp.inventoryPending || gp.returnScroll
+        this.message = !t.transition ? (t.scrollRequest?.accepted ? 'Scroll accepted by game; waiting for travel.' : 'Waiting for game to accept the scroll request.') : gp.inventoryPending || gp.returnScroll
           ? 'Waiting for scroll arrival state to settle.'
           : 'Waiting for arrival area: ' + (Number.isFinite(distance) ? Math.round(distance / 10) + ' m from saved point; tolerance ' + Math.round(radius / 10) + ' m.' : 'saved point is in another world.');
       }
@@ -383,7 +447,8 @@ const Town = {
       if (World.freeBagSlots() <= 1) { this.fail('Returned to town; free at least two character bag slots before hunting again.'); return true; }
       const npc = this.npc('gate');
       if (!npc || gp.target !== npc.gid || !(gp.targetCapabilities & 0x20000000)) { this.fail('Reverse-return teleport NPC unavailable.'); return true; }
-      if (Cmd.raw({ kind: 'travel-gate', gid: npc.gid, type: 5, target: 2 }, 'Town: reverse to last return-scroll point')) this.enter('reverse-wait');
+      const scroll = this.scroll(0x19ec);
+      if (Cmd.raw({ kind: 'travel-gate', gid: npc.gid, type: 5, target: 2 }, 'Town: reverse to last return-scroll point')) this.sentScroll(scroll, 'reverse-wait');
     }
     return true;
   },

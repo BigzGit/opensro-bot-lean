@@ -70,7 +70,7 @@ const server = http.createServer((req, res) => {
     page.on('request', request => { if (request.url().includes('/assets/')) assets.push(request.url()); });
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.addScriptTag({ content: script });
-    await page.getByText('OpenSRO Bot Lean', { exact: true }).waitFor();
+    await page.getByText(/^OpenSRO Bot Lean 1\./).waitFor();
     await page.evaluate(() => {
       const code = `onmessage = e => { if(e.data.kind === 'fixture') postMessage(e.data.message); else if(e.data.kind === 'session') postMessage({ kind: 'observed-command', command: e.data.command.command }); };`;
       window.testCommands = [];
@@ -122,6 +122,15 @@ const server = http.createServer((req, res) => {
     const townToggle = page.getByLabel('Use return scroll → town services → reverse return', { exact: true });
     assert.equal(await townToggle.isChecked(), false);
     await townToggle.check(); assert.equal(await page.evaluate(() => SROLean.town.cfg().enabled), true);
+
+    const reportDownload = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Save return diagnostics', exact: true }).click();
+    const downloaded = await reportDownload;
+    assert.equal(downloaded.suggestedFilename(), 'sro-bot-return-diagnostics.json');
+    const report = JSON.parse(fs.readFileSync(await downloaded.path(), 'utf8'));
+    assert.equal(report.version, await page.evaluate(() => SROLean.version));
+    assert.ok(report.history.some(row => row.event === 'export'));
+    assert.equal(report.history.some(row => 'character' in row || 'inventory' in row), false);
     await townToggle.uncheck();
     const reviveToggle = page.getByLabel('Revive in town and reverse to last scroll point', { exact: true });
     assert.equal(await reviveToggle.isChecked(), true);

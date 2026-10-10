@@ -8,11 +8,11 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.26**.
+- Latest userscript release at this snapshot: **1.2.27**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **131 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest validation: **139 integration tests**, JavaScript syntax check and headless browser checks pass.
 - Latest work: opt-in Hotan recall/storage/refill/repair/reverse cycle. Live-account testing is still outstanding.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
@@ -278,3 +278,12 @@ After the 1.2.25 push was blocked by automatic approval review, the user explici
 User clarified that on the latest version the bot only notices low potions/full inventory and recalls after toggling off/on. Status text was unavailable. Reproduced a matching failure in 1.2.25: Town.begin ignored a false Cmd.move result when a hunting move had just used the 550 ms rate limit. The worker could continue its combat loop while Town waited for combat to settle; toggle sends another stop. Town now tracks successful halt dispatch, retries rejected stops through normal Cmd.move guards, and allows at most three successful stop sends spaced by 1.5 seconds while casting continues. The existing 30-second departure limit remains; no repeated scroll dispatch is introduced.
 
 A dormant Restock.trip also excluded Town.tick while the enabled town setting prevented Restock.tick from running. Eligible town departure now clears that old walking trip and takes ownership. Recording, walk-back, open shops/storage, manual control, and disabled automation remain exclusions. Added regression coverage for both low-stock and pet-capacity triggers, recent-move rejection, ignored initial stops, pending movement queues, dormant restock state and F8 cancellation. 131 integration tests, syntax and isolated browser checks pass. These reproduce code defects matching the symptom; the exact live stalled state is still unverified.
+
+
+## Native scroll acknowledgement and live diagnostics: 1.2.27
+
+User still reports the toggle-required stall after 1.2.26 and requests thorough investigation. Browser inspection via cua failed to initialize because the sandbox launcher cannot enumerate D:. No live snapshot was obtained, so the exact user's runtime cause remains unconfirmed. Audited ticker, controller/toggle ownership, movement admission, World.applyGameplay, native gameplay/inventory use and server returnscroll.go. Native item-use can be refused before dispatch (inventory busy/cooldown); successful server return consumes a scroll and publishes returnScroll/travel. The old bot treated local Cmd.raw success as acceptance and only waited 90 seconds. A new regression reproduces a busy-lane rejection followed by fresh idle state remaining stuck until toggle.
+
+Town.sentScroll/checkScroll now track slot/ref/count, original game snapshot, acceptance and attempt count for recall and reverse. After five seconds, retry only with a new snapshot explicitly reporting inventoryPending false, the unchanged scroll, no return cast, no world transition and no character cast. Any observed consumption, return cast or transition permanently marks that attempt accepted. Stale/missing/busy state never authorizes resending. Maximum three sends per leg; recall attempts reset after confirmed town arrival. Inventory timeout/resynchronization errors stop with reconnect guidance because native replies lack transaction IDs. Existing travel, manual stop, death and transaction safeguards remain.
+
+Town.blocked provides precise gating reasons; main status shows town messages on every tab, and the header shows the runtime version. Town.history records up to 120 changed state snapshots and records before stopAll clears anything. Supplies exports these via Save return diagnostics; history survives bot toggles within the loaded page, not reload. Snapshot fields cover controller/phase/trigger, blocked reason, inventory pending/casting/scroll acceptance, supplies/capacity and error, not full inventories. UI download and visible version are browser-tested. 139 integration tests, syntax and isolated browser checks pass. These tests include fresh native-style gameplay snapshots, accepted/spent/last-stack/transition cases, reverse refusal, stale/missing state, timeout, retry caps and F8. Live account confirmation remains required.

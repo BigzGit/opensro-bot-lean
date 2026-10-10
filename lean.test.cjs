@@ -1158,7 +1158,7 @@ test('town recognizes a native world reset and waits for the fresh local player 
 });
 test('town arrival still needs travel confirmation, settled state and the configured area', () => {
   const f = townFixture(); f.Town.cfg().arrivalRadius = 100; f.Town.tick(); f.World.gp.pose.x = 100;
-  f.Town.tick(); assert.equal(f.Town.trip.phase, 'recall-wait'); assert.match(f.Town.message, /travel confirmation/);
+  f.Town.tick(); assert.equal(f.Town.trip.phase, 'recall-wait'); assert.match(f.Town.message, /accept the scroll request/);
   f.Town.phase('entering-world'); f.World.gp.pose.x = 350; f.Town.tick();
   assert.equal(f.Town.trip.phase, 'recall-wait'); assert.match(f.Town.message, /25 m.*10 m/);
   f.World.gp.pose.x = 100; f.World.gp.returnScroll = {}; f.Town.tick(); assert.equal(f.Town.trip.phase, 'recall-wait');
@@ -1322,5 +1322,108 @@ test('a blocked movement queue settles automatically but F8 still cancels depart
     if (cancel) { assert.equal(f.Town.trip, null); assert.equal(f.commands.some(c => c.kind === 'item-use'), false); }
     else assert.equal(f.Town.trip.phase, 'recall-wait');
   }
+});
+
+
+
+test('unaccepted return scroll retries after fresh settled gameplay instead of needing a toggle', () => {
+  const f = townFixture(); f.Controller.tick();
+  assert.equal(f.Town.trip.phase, 'recall-wait');
+  // Native worker rejects before sending when its inventory lane became busy.
+  f.World.applyGameplay({ ...f.World.gp, inventoryPending: true, error: 'Inventory is busy' });
+  f.advance(6000); f.Controller.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'item-use').length, 1);
+  f.World.applyGameplay({ ...f.World.gp, inventoryPending: false });
+  f.Controller.tick();
+  for (let i = 0; i < 15; i++) { f.advance(100); f.Controller.tick(); }
+  assert.equal(f.commands.filter(c => c.kind === 'item-use').length, 2);
+  assert.equal(f.Hunt.running, true);
+});
+
+
+test('scroll acknowledgement prevents retries for active casts, spent stacks and world transitions', () => {
+  for (const acceptedBy of ['cast', 'quantity', 'transition', 'last-stack']) {
+    const f = townFixture();
+    if (acceptedBy === 'last-stack') f.World.gp.inventory.find(i => i.slot === 13).quantity = 1;
+    f.Controller.tick();
+    const gp = { ...f.World.gp, inventory: f.World.gp.inventory.map(i => ({ ...i })) };
+    if (acceptedBy === 'cast') gp.returnScroll = { startedAtMs: 100000, durationMs: 30000 };
+    if (acceptedBy === 'quantity') gp.inventory.find(i => i.slot === 13).quantity--;
+    if (acceptedBy === 'last-stack') gp.inventory = gp.inventory.filter(i => i.slot !== 13);
+    if (acceptedBy === 'transition') f.Town.phase('entering-world');
+    f.World.applyGameplay(gp); f.advance(6000); f.Controller.tick();
+    assert.equal(f.commands.filter(c => c.kind === 'item-use').length, 1, acceptedBy);
+    assert.equal(f.Town.trip.scrollRequest.accepted, true, acceptedBy);
+  }
+});
+
+test('unknown, stale or busy inventory never authorizes a repeated scroll', () => {
+  for (const state of ['stale', 'pending', 'missing-pending', 'missing-inventory', 'casting']) {
+    const f = townFixture(); f.Controller.tick();
+    const gp = { ...f.World.gp };
+    if (state === 'pending') gp.inventoryPending = true;
+    if (state === 'missing-pending') delete gp.inventoryPending;
+    if (state === 'missing-inventory') delete gp.inventory;
+    if (state === 'casting') f.World.isCasting = () => true;
+    if (state !== 'stale') f.World.applyGameplay(gp);
+    f.advance(6000); f.Controller.tick();
+    assert.equal(f.commands.filter(c => c.kind === 'item-use').length, 1, state);
+    assert.equal(f.Town.trip.phase, 'recall-wait', state);
+  }
+});
+
+test('native inventory timeout stops with resynchronization guidance instead of retrying', () => {
+  const f = townFixture(); f.Controller.tick();
+  f.World.applyGameplay({ ...f.World.gp, inventoryPending: true, error: 'Inventory transaction timed out; reconnect to resynchronize' });
+  f.advance(11000); f.Controller.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'item-use').length, 1);
+  assert.equal(f.Hunt.running, false); assert.match(f.Town.message, /reconnect to resynchronize/);
+});
+
+test('unaccepted scroll retries are bounded and retain rejection diagnostics', () => {
+  const f = townFixture(); f.Controller.tick();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    f.World.applyGameplay({ ...f.World.gp, inventoryPending: false, error: 'Inventory rejected: 93' });
+    f.advance(6000); f.Controller.tick();
+    for (let n = 0; n < 12; n++) { f.advance(100); f.Controller.tick(); }
+  }
+  assert.equal(f.commands.filter(c => c.kind === 'item-use').length, 3);
+  assert.equal(f.Hunt.running, false); assert.match(f.Town.message, /three attempts.*Inventory rejected/);
+  assert.ok(f.Town.history.some(row => row.attempts === 3));
+  f.toggleBot();
+  assert.ok(f.Town.history.some(row => row.error === 'Inventory rejected: 93'));
+});
+
+test('reverse return also retries unaccepted requests without duplicating accepted scrolls', () => {
+  const f = townFixture(); f.Town.begin(); f.Town.enter('reverse');
+  const gp = f.World.gp; gp.target = 63; gp.targetCapabilities = 0x20000000;
+  gp.inventory.find(i => i.refObjId === 15).quantity = 50;
+  gp.inventory.find(i => i.slot === 6).durability = 10;
+  f.Town.tick(); assert.equal(f.Town.trip.phase, 'reverse-wait');
+  f.World.applyGameplay({ ...gp }); f.advance(6000); f.Town.tick();
+  f.advance(100); f.Town.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'travel-gate').length, 2);
+  f.World.applyGameplay({ ...f.World.gp, returnScroll: { durationMs: 30000 } });
+  f.advance(6000); f.Town.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'travel-gate').length, 2);
+});
+
+test('F8 cancels an unaccepted scroll retry and status names gating states', () => {
+  const f = townFixture(); f.Controller.tick(); f.stopAll();
+  f.World.applyGameplay({ ...f.World.gp }); f.advance(6000); f.Controller.tick();
+  assert.equal(f.Town.trip, null); assert.equal(f.commands.filter(c => c.kind === 'item-use').length, 1);
+  assert.ok(f.Town.history.some(row => row.event === 'stop' && row.phase === 'recall-wait'));
+  f.Town.message = ''; assert.match(f.Town.status(), /bot is stopped/);
+  f.Hunt.start(); f.WalkBack.active = {}; assert.match(f.Town.status(), /walk-back is active/);
+  f.WalkBack.active = null; f.Manual.lastAt = 100000 + 6000; assert.match(f.Town.status(), /manual control/);
+});
+
+
+
+test('diagnostic sampling cannot prevent manual stop on an inconsistent snapshot', () => {
+  const f = townFixture(); f.Controller.tick();
+  f.Town.reason = () => { throw Error('incomplete snapshot'); };
+  assert.doesNotThrow(() => f.stopAll());
+  assert.equal(f.Hunt.running, false); assert.equal(f.Town.trip, null);
 });
 console.log('Total integration tests: ' + passed);

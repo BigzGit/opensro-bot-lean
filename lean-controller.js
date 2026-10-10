@@ -66,6 +66,7 @@ Hunt.tick = function () {
 };
 
 function stopAll() {
+  Town.record('stop');
   const townActive = !!Town.trip;
   Town.cancel();
   Resurrect.cancelTrip('', true);
@@ -127,6 +128,8 @@ const Controller = {
       stopAll();
       if (now() - this.lastErrorAt > 5000) { this.lastErrorAt = now(); Log.error(e.message || String(e)); UI.toast('Bot stopped: ' + e.message, 'warn'); }
       this.mode = 'error';
+    } finally {
+      Town.record();
     }
   },
 };

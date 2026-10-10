@@ -15,6 +15,12 @@ const UI = {
     clearTimeout(this.toastTimer);
     this.toastTimer = setTimeout(() => { if (this.feedback) this.feedback.textContent = ''; }, ms);
   },
+  exportDiagnostics() {
+    Town.record('export');
+    const url = URL.createObjectURL(new Blob([JSON.stringify({ version: VERSION, history: Town.history }, null, 2)], { type: 'application/json' }));
+    const link = el('a'); link.href = url; link.download = 'sro-bot-return-diagnostics.json'; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  },
   button(text, action) {
     const b = el('button', text);
     b.type = 'button';
@@ -75,7 +81,7 @@ const UI = {
     const fold = this.button('−', () => { this.body.hidden = !this.body.hidden; fold.textContent = this.body.hidden ? '+' : '−'; });
     fold.className = 'fold'; fold.setAttribute('aria-label', 'Fold or unfold bot window');
     header.title = 'Shift+F7 hides or shows the whole window; F7 folds it.';
-    header.append(el('strong', 'OpenSRO Bot Lean'), fold);
+    header.append(el('strong', 'OpenSRO Bot Lean ' + VERSION), fold);
     this.body = el('div', null, 'body'); this.status = el('div', 'Waiting for game…', 'status'); this.status.setAttribute('role', 'status');
     const controls = this.row(this.button('Start / stop · F8', () => toggleBot()), this.button('Walk back', () => WalkBack.start()), this.button('Return & hunt', () => WalkBack.start(true)), this.button('Stop all', () => stopAll()));
     controls.classList.add('controls');
@@ -287,7 +293,7 @@ const UI = {
       services.append(el('p', 'Pet loot: store elixirs only. Sell other unprotected pet items at the saved weapon / repair merchant before repairing. Keep seal/rare equipment and equipment with unknown rarity in the pet. Ordinary equipment is sold regardless of + or blue options. Existing character bag items are never sold.', 'muted'));
       services.append(this.text('Keep in pet (names)', () => town().keep, v => town().keep = v),
         el('p', 'Town tops up X-Large potions to the stack targets here (default: 2 HP / 6 MP), counting potions already in your bag. Uses the Buy HP/MP switches and low-stock thresholds above; keep each threshold below its stack target. The earlier potion selections and Refill to fields apply to walking-route restock. Returns when the character bag has at most one free slot. Free at least two slots before hunting again; existing character items stay protected. Revival uses the saved town services and a reverse scroll, without using a return scroll in town. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. F8 cancels.', 'muted'));
-      this.townNote = el('p', Town.status(), 'muted'); services.append(this.townNote); this.pane.append(services);
+      this.townNote = el('p', Town.status(), 'muted'); services.append(this.townNote, this.button('Save return diagnostics', () => this.exportDiagnostics())); this.pane.append(services);
     } else if (this.current === 'Wardrobe') {
       LeanWardrobe.draw(this.pane);
     } else {
@@ -345,6 +351,7 @@ const UI = {
     const me = World.me(), center = Settings.profile.hunt.center;
     const distance = center ? dist2D(World.pose(), center) : Infinity;
     this.status.textContent = `${World.charName || 'No character'} · ${World.inWorld() ? Controller.mode : World.phase}\nHP ${Math.round(me.hpPct)}% · MP ${Math.round(me.mpPct)}% · Potions ${Potion.count('hp')}/${Potion.count('mp')} · Pickups ${Stats.values.loot}\nHunting spot: ${Number.isFinite(distance) ? Math.round(distance / 10) + ' m away' : center ? 'another region' : 'not saved'}${Restock.recording ? '\nRecording route: ' + Restock.draft.route.length + ' points' : ''}`;
+    if (Town.cfg().enabled) this.status.textContent += '\n' + Town.status();
     this.refreshers.forEach(refresh => refresh());
     for (const slot of this.pane.querySelectorAll('.slot[data-skill]')) {
       const id = Number(slot.dataset.skill), left = World.cooldownLeft(id), total = World.skill(id)?.cooldownMs || 0;
