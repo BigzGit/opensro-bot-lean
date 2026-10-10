@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.21
+// @version      1.2.22
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.21';
+const VERSION = '1.2.22';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -1771,6 +1771,7 @@ const Navigation = {
     for (const p of product.objects || []) {
       const m = p.mesh;
       if (!m || m.passThrough) continue;
+      if (p.terrainCells && !p.terrainCells.length) continue;
       const linked = new Set((p.links || []).map(l => l.edge));
       const vertex = id => {
         const x = m.vertices[id * 3], z = m.vertices[id * 3 + 2], c = Math.cos(p.yaw), s = Math.sin(p.yaw);
@@ -1778,10 +1779,23 @@ const Navigation = {
       };
       for (let i = 0; i < m.edges.length; i += 6) {
         const outline = m.edges[i + 5] === 0, flags = m.edges[i + 4];
+        // Native terrain contact ignores open outlines, terrain-owned surface
+        // borders (0x10) and internal edges of terrain-indexed placements.
+        if (outline && flags === 0) continue;
+        if (p.terrainCells && (!outline || (flags & 0x10))) continue;
         if (outline && (flags & 8) && linked.has(i / 6)) continue;
-        // One-way native borders are treated conservatively as walls by the planner.
         if (!outline && !(flags & 3)) continue;
-        add([...vertex(m.edges[i]), ...vertex(m.edges[i + 1])]);
+        const wall = [...vertex(m.edges[i]), ...vertex(m.edges[i + 1])];
+        // Flags 1/2 block one approach side only. Preserve source-cell winding
+        // so an allowed exit from a town object is not turned into an enclosure.
+        if (!(flags & 8) && (flags & 3) !== 3 && (flags & 3) && m.cells) {
+          const ids = Array.from(m.cells.slice(m.edges[i + 2] * 3, m.edges[i + 2] * 3 + 3));
+          if (ids.length === 3) {
+            const points = ids.map(vertex);
+            wall.push(flags, points.reduce((n, p) => n + p[0], 0) / 3, points.reduce((n, p) => n + p[1], 0) / 3);
+          }
+        }
+        add(wall);
       }
     }
     this.scene = scene; this.error = ''; this.revision++;
@@ -1816,6 +1830,10 @@ const Navigation = {
     for (let x = minX; x <= maxX; x++) for (let z = minZ; z <= maxZ; z++) for (const w of this.scene.walls.get(x + ',' + z) || []) {
       if (seen.has(w)) continue; seen.add(w);
       const c = { x: w[0], z: w[1] }, d = { x: w[2], z: w[3] };
+      if (w.length > 4) {
+        const side = cross(c, d, { x: w[5], z: w[6] }), approach = cross(c, d, a) || -cross(c, d, b);
+        if (Math.abs(side) > 1e-9 && !(approach * side > 0 ? w[4] & 2 : w[4] & 1)) continue;
+      }
       const intersects = cross(a, b, c) * cross(a, b, d) < 0 && cross(c, d, a) * cross(c, d, b) < 0;
       if (intersects || Math.min(this.nearSegment(a, c, d), this.nearSegment(b, c, d), this.nearSegment(c, a, b), this.nearSegment(d, a, b)) < 2) return false;
     }

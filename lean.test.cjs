@@ -222,6 +222,33 @@ test('collision routing goes around object walls through the actual gap', () => 
   for (const p of route) { const next = f.Navigation.local(p); assert.equal(f.Navigation.clear(previous, next), true); previous = next; }
   assert.equal(route.at(-1).x, 400);
 });
+test('native open outlines and terrain surface edges do not create false town walls', () => {
+  const f = fixture(), from = f.World.pose(), to = { ...from, x: 400 };
+  const vertices = [200,0,0,200,0,1920,100,0,100];
+  for (const placement of [
+    { mesh: { vertices, edges: [0,1,0,65535,0,0] } },
+    { terrainCells: [[0,0,1920,1920]], mesh: { vertices, edges: [0,1,0,65535,19,0] } },
+    { terrainCells: [[0,0,1920,1920]], mesh: { vertices, edges: [0,1,0,1,3,1] } },
+    { terrainCells: [], mesh: { vertices, edges: [0,1,0,65535,3,0] } },
+  ]) {
+    f.Navigation.install(navProduct([{ x: 0, z: 0, yaw: 0, ...placement }]));
+    assert.ok(f.Navigation.plan(from, to).length);
+    assert.equal(f.Navigation.clear(f.Navigation.local(from), f.Navigation.local(to)), true);
+  }
+  f.Navigation.install(navProduct([{ x: 0, z: 0, yaw: 0, terrainCells: [[0,0,1920,1920]], mesh: { vertices, edges: [0,1,0,65535,3,0] } }]));
+  assert.equal(f.Navigation.plan(from, to).length, 0, 'Real blocking outlines must remain walls');
+});
+
+test('native directional borders allow the permitted side and block the opposite side', () => {
+  const f = fixture(), left = f.World.pose(), right = { ...left, x: 400 };
+  for (const flag of [1, 2]) {
+    const mesh = { vertices: [200,0,0,200,0,1920,100,0,100], cells: [0,1,2], edges: [0,1,0,65535,flag,0] };
+    f.Navigation.install(navProduct([{ x: 0, z: 0, yaw: 0, mesh }]));
+    assert.equal(f.Navigation.clear(f.Navigation.local(left), f.Navigation.local(right)), flag === 1);
+    assert.equal(f.Navigation.clear(f.Navigation.local(right), f.Navigation.local(left)), flag === 2);
+  }
+});
+
 test('terrain barriers and fully sealed walls cannot be crossed', () => {
   const f = fixture(), blocked = new Uint8Array(9216);
   for (let z = 0; z < 96; z++) blocked[z * 96 + 10] = 1;

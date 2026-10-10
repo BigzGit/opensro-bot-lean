@@ -8,11 +8,11 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.21**.
+- Latest userscript release at this snapshot: **1.2.22**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **114 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest validation: **116 integration tests**, JavaScript syntax check and headless browser checks pass.
 - Latest work: opt-in Hotan recall/storage/refill/repair/reverse cycle. Live-account testing is still outstanding.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
@@ -241,3 +241,9 @@ Town movement accepts a collision-checked reachable point within up to 60 units 
 ## Valuable equipment sale protection: 1.2.21
 
 User requested SoS and other good equipment never be sold. Reproduced a failing test showing the 1.2.20 sale predicate accepted native rarity-2 equipment. Native tooltip/item-slot code confirms rarity 2 for all seal tiers, ordinary rarity 0; InventoryItem carries plus and magic. Town.disposable now admits equipment only if tooltip.fields.rarity is exactly 0, plus is exactly 0, magic is an explicit empty array, and codename does not end in RARE/MAGIC/LEGEND/MYTH (optional HONOR). Thus enhanced, blue/magic, nonordinary and incomplete equipment metadata remain protected in the pet, not storage. Existing name exclusions and supply protections still apply. UI documents the policy. Two regression tests cover seals, other rarity, enhancements, magic, missing fields and confirmed ordinary-only sale followed by repair with valuable gear retained. 114 integration tests, syntax and isolated browser checks pass; live server sale behavior remains unverified.
+
+## Native Hotan collision investigation: 1.2.22
+
+User reported persistent collision-map/no-route wait after warehouse deposit on the way to Manina and requested thorough investigation. Traced worker navigation capture, reset handling, product schema, native terrain contact and A* parsing. Game source stayed read-only. Native object-navigation.ts navContactDetail ignores zero-flag outlines; terrain-indexed objects ignore internal edges and 0x10 surface borders and use terrainVisit registration. The bot converted these into global 2D walls. It also blocked both directions of native one-way edges. Fixed these edge rules, ignored empty terrain registrations and retained winding/source-cell direction for flags 1/2 with conservative handling of missing or degenerate winding. Real blocking outlines and terrain remain enforced.
+
+Added lean.navigation.native.test.mjs (optional game-root argument, read-only licensed local assets). It uses the game generatedRoot resolver, native navigation resource loader, NPC 2083 warehouse and 2074 Manina at region 23687, and native createNavigation clipper. Resolved map contains nine regions and 67 objects. Before the fix all 36 sampled warehouse/manina approach pairs failed. Afterward 30 connected pairs route; every chord passes native clipping with sequential resolved height. The remaining six share the sample 60 units north of the warehouse, behind its structure; native grid traversal is confined there too (53 visited centres), so the test retains that limitation explicitly. No timeout extension or unchecked straight-line fallback was added. Two portable regressions cover ignored edges, retained walls and directional crossing rules; 116 integration tests plus browser/syntax/native checks pass. Exact user-saved coordinates and live account movement remain unverified.
