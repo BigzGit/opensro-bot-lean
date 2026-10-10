@@ -6,6 +6,11 @@ function toggleBot() {
 
 function boot() {
   UI.mount();
+  const unlockSound = e => {
+    if (e.isTrusted && Settings.profile.hunt.pickup.petFullSound) Sound.unlock();
+  };
+  W.addEventListener('pointerdown', unlockSound, true);
+  W.addEventListener('keydown', unlockSound, true);
   Combat.init(); Loot.init();
   bus.on('character', name => {
     const key = name ? 'profile:' + name : 'profile:default';

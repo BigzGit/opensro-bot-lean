@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.6
+// @version      1.2.7
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.6';
+const VERSION = '1.2.7';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -206,7 +206,7 @@ const DEFAULT_PROFILE = {
     levelMin: 0, levelMax: 0, include: '', exclude: '', priority: 'attackers', avoidKs: true,
     targetTimeoutS: 25,
     pickup: { enabled: true, gold: true, potions: true, equipment: true, elixirs: true, powders: true, alchemy: true, others: true,
-      collector: 'character', include: '', exclude: '', radius: 300, afterKillOnly: true, retries: 2 },
+      collector: 'character', petFullSound: true, include: '', exclude: '', radius: 300, afterKillOnly: true, retries: 2 },
     sit: { enabled: true, hpBelow: 35, mpBelow: 20, resumeAt: 90 },
     onDeath: 'stop', stopNoHpPotion: false, stopInvFull: false,
     playerAlert: { enabled: false, radius: 250, pause: false }, manualPauseS: 6,
@@ -261,7 +261,40 @@ const Stats = {
   count(kind) { if (kind in this.values) this.values[kind]++; },
   huntStart() {}, huntStop() {},
 };
-const Sound = { play() {} };
+// Only the pet-full alert is audible; existing combat/UI calls stay silent.
+const Sound = {
+  ctx: null,
+  unlock() {
+    try {
+      this.ctx ||= new (W.AudioContext || W.webkitAudioContext)();
+      if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+    } catch {}
+  },
+  play(kind) {
+    if (kind !== 'pet-full') return false;
+    try {
+      const ctx = this.ctx;
+      if (!ctx || ctx.state !== 'running') return false;
+      [659.25, 830.61, 987.77].forEach((frequency, i) => {
+        const oscillator = ctx.createOscillator(), gain = ctx.createGain();
+        const at = ctx.currentTime + i * 0.18;
+        oscillator.type = 'sine'; oscillator.frequency.value = frequency;
+        gain.gain.setValueAtTime(0, at);
+        gain.gain.linearRampToValueAtTime(0.12, at + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.55);
+        oscillator.connect(gain); gain.connect(ctx.destination);
+        oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
+        oscillator.start(at); oscillator.stop(at + 0.6);
+      });
+      return true;
+    } catch { return false; }
+  },
+  async test() {
+    this.unlock();
+    try { if (this.ctx?.state === 'suspended') await this.ctx.resume(); } catch {}
+    if (!this.play('pet-full')) UI.toast('Sound is blocked by the browser. Allow audio for this site and try again.', 'warn');
+  },
+};
 
 
 const SECTOR = 1920;
@@ -1911,6 +1944,23 @@ const Loot = {
   skips: new Map(),
   failureCounts: new Map(),
   petSetup: null,
+  fullAlert: null,
+  lastFullChimeAt: -Infinity,
+  checkPetFull() {
+    const P = Hunt.cfg().pickup;
+    if (!Hunt.running || !World.inWorld() || World.isDead() || !P.enabled || !this.petMode() || !P.petFullSound) return;
+    const pet = this.pet();
+    if (!pet || pet.rec.inventory.length < pet.rec.status) { this.fullAlert = null; return; }
+    let alert = this.fullAlert;
+    if (!alert || alert.gid !== pet.rec.gid) {
+      alert = this.fullAlert = { gid: pet.rec.gid, sounded: false };
+      UI.toast('Pickup pet bag is full. Free a slot; existing stacks may still accept items.', 'warn', 6000);
+    }
+    if (!alert.sounded && now() - this.lastFullChimeAt >= 30000) {
+      this.lastFullChimeAt = now();
+      alert.sounded = Sound.play('pet-full');
+    }
+  },
   pet() {
     for (const rec of World.gp?.cosRecords || []) {
       const ent = World.ents.get(rec.gid);
@@ -2082,7 +2132,7 @@ const Loot = {
     return true;
   },
   suspend() { this.active = null; Hunt.lootGid = 0; },
-  reset() { this.suspend(); this.skips.clear(); this.failureCounts.clear(); this.petSetup = null; },
+  reset() { this.suspend(); this.skips.clear(); this.failureCounts.clear(); this.petSetup = null; this.fullAlert = null; },
   init() {
     bus.on('game-error', message => { if (this.active) this.active.failure = String(message); });
     bus.on('despawn', e => {
@@ -2168,6 +2218,7 @@ const Controller = {
       Restock.sample();
       if (!World.inWorld()) { this.mode = 'waiting'; return; }
       Potion.tick();
+      Loot.checkPetFull();
       if (this.resumeAfterRevive && !World.isDead()) {
         if (World.gp?.inventoryPending) { this.mode = 'waiting'; return; }
         this.resumeAfterRevive = false;
@@ -4007,6 +4058,7 @@ const UI = {
       const options = this.group('Collection');
       options.append(this.select('Collector', [['character', 'Character'], ['pet', 'Pickup pet']], () => L().collector, v => { L().collector = v; Loot.reset(); }),
         this.button('Pet: elixirs only', () => { L().collector = 'pet'; Loot.reset(); Loot.preset('elixirs'); this.draw(); }));
+      options.append(this.check('Chime when pet bag is full', () => L().petFullSound, v => { L().petFullSound = v; Loot.fullAlert = null; }), this.button('Test pet chime', () => Sound.test()));
       this.petNote = el('p', '', 'muted'); options.append(this.petNote);
       options.append(this.row(...[['Elixirs only','elixirs'],['Elixirs + gold','elixirs-gold'],['All items','all']].map(([label,mode]) => this.button(label, () => { Loot.preset(mode); this.draw(); }))));
       for (const [key, label] of [['enabled', 'Collect drops'], ['gold', 'Gold'], ['potions', 'Potions and cure pills'], ['equipment', 'Equipment'], ['elixirs', 'Elixirs'], ['powders', 'Lucky powders'], ['alchemy', 'Other alchemy items / stones'], ['others', 'Other items'], ['afterKillOnly', 'Finish current fight before collecting']]) options.append(this.check(label, () => L()[key], v => L()[key] = v));
@@ -4080,6 +4132,11 @@ function toggleBot() {
 
 function boot() {
   UI.mount();
+  const unlockSound = e => {
+    if (e.isTrusted && Settings.profile.hunt.pickup.petFullSound) Sound.unlock();
+  };
+  W.addEventListener('pointerdown', unlockSound, true);
+  W.addEventListener('keydown', unlockSound, true);
   Combat.init(); Loot.init();
   bus.on('character', name => {
     const key = name ? 'profile:' + name : 'profile:default';

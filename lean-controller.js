@@ -74,6 +74,7 @@ const Controller = {
       Restock.sample();
       if (!World.inWorld()) { this.mode = 'waiting'; return; }
       Potion.tick();
+      Loot.checkPetFull();
       if (this.resumeAfterRevive && !World.isDead()) {
         if (World.gp?.inventoryPending) { this.mode = 'waiting'; return; }
         this.resumeAfterRevive = false;

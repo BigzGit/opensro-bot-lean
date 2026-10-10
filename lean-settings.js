@@ -23,7 +23,7 @@ const DEFAULT_PROFILE = {
     levelMin: 0, levelMax: 0, include: '', exclude: '', priority: 'attackers', avoidKs: true,
     targetTimeoutS: 25,
     pickup: { enabled: true, gold: true, potions: true, equipment: true, elixirs: true, powders: true, alchemy: true, others: true,
-      collector: 'character', include: '', exclude: '', radius: 300, afterKillOnly: true, retries: 2 },
+      collector: 'character', petFullSound: true, include: '', exclude: '', radius: 300, afterKillOnly: true, retries: 2 },
     sit: { enabled: true, hpBelow: 35, mpBelow: 20, resumeAt: 90 },
     onDeath: 'stop', stopNoHpPotion: false, stopInvFull: false,
     playerAlert: { enabled: false, radius: 250, pause: false }, manualPauseS: 6,
@@ -78,4 +78,37 @@ const Stats = {
   count(kind) { if (kind in this.values) this.values[kind]++; },
   huntStart() {}, huntStop() {},
 };
-const Sound = { play() {} };
+// Only the pet-full alert is audible; existing combat/UI calls stay silent.
+const Sound = {
+  ctx: null,
+  unlock() {
+    try {
+      this.ctx ||= new (W.AudioContext || W.webkitAudioContext)();
+      if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+    } catch {}
+  },
+  play(kind) {
+    if (kind !== 'pet-full') return false;
+    try {
+      const ctx = this.ctx;
+      if (!ctx || ctx.state !== 'running') return false;
+      [659.25, 830.61, 987.77].forEach((frequency, i) => {
+        const oscillator = ctx.createOscillator(), gain = ctx.createGain();
+        const at = ctx.currentTime + i * 0.18;
+        oscillator.type = 'sine'; oscillator.frequency.value = frequency;
+        gain.gain.setValueAtTime(0, at);
+        gain.gain.linearRampToValueAtTime(0.12, at + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.55);
+        oscillator.connect(gain); gain.connect(ctx.destination);
+        oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
+        oscillator.start(at); oscillator.stop(at + 0.6);
+      });
+      return true;
+    } catch { return false; }
+  },
+  async test() {
+    this.unlock();
+    try { if (this.ctx?.state === 'suspended') await this.ctx.resume(); } catch {}
+    if (!this.play('pet-full')) UI.toast('Sound is blocked by the browser. Allow audio for this site and try again.', 'warn');
+  },
+};

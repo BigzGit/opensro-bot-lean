@@ -154,6 +154,25 @@ const server = http.createServer((req, res) => {
     await page.waitForFunction(() => [...document.getElementById('sro-bot-lean').shadowRoot.querySelectorAll('.slot')].every(s => s.dataset.iconLoaded === 'true'));
     await page.screenshot({ path: __dirname + '/lean-buffs-desktop.png', fullPage: true });
     await page.getByRole('button', { name: 'Loot', exact: true }).click();
+    await page.evaluate(() => {
+      window.petChimeNotes = [];
+      const original = AudioContext.prototype.createOscillator;
+      AudioContext.prototype.createOscillator = function (...args) {
+        const oscillator = original.apply(this, args), start = oscillator.start;
+        oscillator.start = function (...times) {
+          window.petChimeNotes.push({ frequency: this.frequency.value, state: this.context.state });
+          return start.apply(this, times);
+        };
+        return oscillator;
+      };
+    });
+    assert.equal(await page.getByLabel('Chime when pet bag is full', { exact: true }).isChecked(), true);
+    await page.getByRole('button', { name: 'Test pet chime', exact: true }).click();
+    await page.waitForFunction(() => window.petChimeNotes.length === 3);
+    assert.equal(await page.evaluate(() => window.petChimeNotes.every(n => n.state === 'running')), true);
+    await page.getByLabel('Chime when pet bag is full', { exact: true }).uncheck();
+    assert.equal(await page.evaluate(() => SROLean.settings.profile.hunt.pickup.petFullSound), false);
+    await page.getByLabel('Chime when pet bag is full', { exact: true }).check();
     await page.getByRole('button', { name: 'Pet: elixirs only', exact: true }).click();
     assert.equal(await page.getByLabel('Collector', { exact:true }).inputValue(), 'pet');
     assert.equal(await page.getByLabel('Elixirs', { exact:true }).isChecked(), true);

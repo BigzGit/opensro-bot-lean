@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, bus, Manual, stopAll, toggleBot, boot, Ticker};\n})();';
+  'globalThis.bot = {World, Settings, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, bus, Manual, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [];
@@ -339,5 +339,46 @@ test('restarting walk-back preserves hunting on arrival', () => {
   f.Hunt.start(); f.WalkBack.start(); assert.equal(f.WalkBack.active.resume, true);
   f.advance(1000); f.WalkBack.start(); assert.equal(f.WalkBack.active.resume, true);
   f.World.gp.pose.x = 400; f.WalkBack.tick(); assert.equal(f.Hunt.running, true);
+});
+test('pet full chime alerts once and rearms after space is freed with a cooldown', () => {
+  const f = fixture(), pet = pickupPet(f); let sounds = 0;
+  f.Sound.play = kind => { if (kind !== 'pet-full') return false; sounds++; return true; };
+  f.Hunt.start(); pet.status = 1; pet.inventory = [{ slot: 0, refObjId: 101, quantity: 1 }];
+  f.Controller.tick(); f.advance(60000); f.Controller.tick();
+  assert.equal(sounds, 1); assert.equal(f.notices.filter(n => /bag is full/.test(n)).length, 1);
+  pet.inventory = []; f.Controller.tick(); pet.inventory = [{ slot: 0 }]; f.Controller.tick();
+  assert.equal(sounds, 2);
+  pet.inventory = []; f.Controller.tick(); pet.inventory = [{ slot: 0 }]; f.Controller.tick();
+  assert.equal(sounds, 2); f.advance(30000); f.Controller.tick(); assert.equal(sounds, 3);
+});
+
+test('pet full alert respects toggle, collector, stopped and missing pet states', () => {
+  const f = fixture(), pet = pickupPet(f); let sounds = 0;
+  f.Sound.play = kind => { if (kind !== 'pet-full') return false; sounds++; return true; }; pet.status = 1; pet.inventory = [{ slot: 0 }];
+  f.Controller.tick(); assert.equal(sounds, 0); f.Hunt.start();
+  f.Settings.profile.hunt.pickup.petFullSound = false; f.Controller.tick(); assert.equal(sounds, 0);
+  f.Settings.profile.hunt.pickup.petFullSound = true;
+  f.Settings.profile.hunt.pickup.collector = 'character'; f.Controller.tick(); assert.equal(sounds, 0);
+  f.Settings.profile.hunt.pickup.collector = 'pet'; pet.dead = true; f.Controller.tick(); assert.equal(sounds, 0);
+  pet.dead = false; f.Controller.tick(); assert.equal(sounds, 1);
+});
+
+test('blocked audio retries with cooldown and does not repeat full-bag notices', () => {
+  const f = fixture(), pet = pickupPet(f); let attempts = 0;
+  f.Sound.play = kind => kind === 'pet-full' && ++attempts >= 2; f.Hunt.start(); pet.status = 1; pet.inventory = [{ slot: 0 }];
+  f.Controller.tick(); f.advance(1000); f.Controller.tick(); assert.equal(attempts, 1);
+  f.advance(30000); f.Controller.tick(); assert.equal(attempts, 2);
+  f.advance(60000); f.Controller.tick(); assert.equal(attempts, 2);
+  assert.equal(f.notices.filter(n => /bag is full/.test(n)).length, 1);
+});
+
+test('pet chime schedules three gentle notes and leaves other bot sounds silent', () => {
+  const f = fixture(); let notes = 0;
+  assert.equal(f.Sound.play('pet-full'), false);
+  f.Sound.ctx = { state: 'running', currentTime: 10, destination: {},
+    createOscillator() { notes++; return { frequency: {}, connect() {}, start() {}, stop() {}, disconnect() {} }; },
+    createGain() { return { gain: { setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {}, disconnect() {} }; } };
+  assert.equal(f.Sound.play('good'), false); assert.equal(notes, 0);
+  assert.equal(f.Sound.play('pet-full'), true); assert.equal(notes, 3);
 });
 console.log(`${passed} lean integration tests passed.`);

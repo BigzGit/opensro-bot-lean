@@ -246,6 +246,7 @@ const UI = {
       const options = this.group('Collection');
       options.append(this.select('Collector', [['character', 'Character'], ['pet', 'Pickup pet']], () => L().collector, v => { L().collector = v; Loot.reset(); }),
         this.button('Pet: elixirs only', () => { L().collector = 'pet'; Loot.reset(); Loot.preset('elixirs'); this.draw(); }));
+      options.append(this.check('Chime when pet bag is full', () => L().petFullSound, v => { L().petFullSound = v; Loot.fullAlert = null; }), this.button('Test pet chime', () => Sound.test()));
       this.petNote = el('p', '', 'muted'); options.append(this.petNote);
       options.append(this.row(...[['Elixirs only','elixirs'],['Elixirs + gold','elixirs-gold'],['All items','all']].map(([label,mode]) => this.button(label, () => { Loot.preset(mode); this.draw(); }))));
       for (const [key, label] of [['enabled', 'Collect drops'], ['gold', 'Gold'], ['potions', 'Potions and cure pills'], ['equipment', 'Equipment'], ['elixirs', 'Elixirs'], ['powders', 'Lucky powders'], ['alchemy', 'Other alchemy items / stones'], ['others', 'Other items'], ['afterKillOnly', 'Finish current fight before collecting']]) options.append(this.check(label, () => L()[key], v => L()[key] = v));

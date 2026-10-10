@@ -4,6 +4,23 @@ const Loot = {
   skips: new Map(),
   failureCounts: new Map(),
   petSetup: null,
+  fullAlert: null,
+  lastFullChimeAt: -Infinity,
+  checkPetFull() {
+    const P = Hunt.cfg().pickup;
+    if (!Hunt.running || !World.inWorld() || World.isDead() || !P.enabled || !this.petMode() || !P.petFullSound) return;
+    const pet = this.pet();
+    if (!pet || pet.rec.inventory.length < pet.rec.status) { this.fullAlert = null; return; }
+    let alert = this.fullAlert;
+    if (!alert || alert.gid !== pet.rec.gid) {
+      alert = this.fullAlert = { gid: pet.rec.gid, sounded: false };
+      UI.toast('Pickup pet bag is full. Free a slot; existing stacks may still accept items.', 'warn', 6000);
+    }
+    if (!alert.sounded && now() - this.lastFullChimeAt >= 30000) {
+      this.lastFullChimeAt = now();
+      alert.sounded = Sound.play('pet-full');
+    }
+  },
   pet() {
     for (const rec of World.gp?.cosRecords || []) {
       const ent = World.ents.get(rec.gid);
@@ -175,7 +192,7 @@ const Loot = {
     return true;
   },
   suspend() { this.active = null; Hunt.lootGid = 0; },
-  reset() { this.suspend(); this.skips.clear(); this.failureCounts.clear(); this.petSetup = null; },
+  reset() { this.suspend(); this.skips.clear(); this.failureCounts.clear(); this.petSetup = null; this.fullAlert = null; },
   init() {
     bus.on('game-error', message => { if (this.active) this.active.failure = String(message); });
     bus.on('despawn', e => {
