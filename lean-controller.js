@@ -67,6 +67,7 @@ Hunt.tick = function () {
 };
 
 function stopAll() {
+  Resurrect.holdUntil = 0;
   Controller.resumeAfterRevive = false;
   const active = Hunt.running || Restock.trip || WalkBack.active || Loot.active;
   WalkBack.cancel('', false);
@@ -83,9 +84,12 @@ const Controller = {
       Restock.sample();
       if (!World.inWorld()) { this.mode = 'waiting'; return; }
       Party.tick();
-      Resurrect.tick();
       Potion.tick();
       Loot.checkPetFull();
+      if (!WalkBack.active && !Restock.trip && !Restock.recording && !Controller.resumeAfterRevive &&
+          !Restock.activeShop() && !World.gp.storage && Resurrect.tick()) {
+        this.mode = 'resurrect'; return;
+      }
       if (this.resumeAfterRevive && !World.isDead()) {
         if (World.gp?.inventoryPending) { this.mode = 'waiting'; return; }
         this.resumeAfterRevive = false;

@@ -499,6 +499,42 @@ function resurrection(f) {
   f.World.ents.set(50, { gid: 50, kind: 'player', name: 'Mate', regionId: 1, x: 110, y: 0, z: 100, appearanceState: [2, 0, 0] });
   return f.World.gp.social.members[1];
 }
+test('resurrection takes priority over hunting until its cast finishes, then hunting resumes', () => {
+  const f = fixture(); resurrection(f); f.Hunt.start(); let hunts = 0;
+  f.Hunt.tick = () => { hunts++; };
+  f.Controller.tick(); assert.equal(f.commands.at(-1).kind, 'skill');
+  assert.equal(hunts, 0); assert.equal(f.Controller.mode, 'resurrect'); assert.equal(f.Hunt.running, true);
+  f.advance(1000); f.Controller.tick(); assert.equal(hunts, 0);
+  f.advance(6000); f.Controller.tick(); assert.equal(hunts, 1);
+});
+test('auto-res still works under attack and returns to the existing hunting target', () => {
+  const f = fixture(); resurrection(f); f.Hunt.start();
+  f.World.ents.set(30, { gid: 30, kind: 'monster', name: 'Mob', regionId: 1, x: 120, z: 100, attackFlags: 16, appearanceState: [0] });
+  f.World.attackers.set(30, 100000); f.Hunt.targetGid = 30; f.Hunt.targetSince = 100000; f.World.gp.target = 30;
+  f.Controller.tick(); assert.equal(f.commands.at(-1).skillId, 10067); assert.equal(f.Hunt.targetGid, 30);
+  f.World.gp.target = 50; f.advance(7000); f.Controller.tick();
+  assert.equal(f.commands.at(-1).kind, 'select'); assert.equal(f.commands.at(-1).gid, 30);
+});
+test('auto-res does not interrupt another cast, empty MP or an inventory transaction', () => {
+  for (const change of [f => f.World.isCasting = () => true, f => f.World.gp.inventoryPending = true,
+    f => f.World.skill(10067).mp = 101]) {
+    const f = fixture(); resurrection(f); change(f); f.Controller.tick(); assert.equal(f.commands.length, 0);
+  }
+});
+test('auto-res yields to shopping and return travel even though it works while idle', () => {
+  for (const change of [f => f.Restock.activeShop = () => ({}), f => { f.Restock.recording = true; f.Restock.draft = { route: [{ ...f.World.pose() }] }; },
+    f => { f.Settings.profile.hunt.center.x = 400; f.WalkBack.start(); }]) {
+    const f = fixture(); resurrection(f); change(f); f.commands.length = 0; f.Controller.tick();
+    assert.notEqual(f.Controller.mode, 'error');
+    assert.equal(f.commands.some(c => c.kind === 'skill' || c.kind === 'select'), false);
+  }
+});
+test('auto-res holds an observed cast beyond its estimate and never chases out-of-range corpses', () => {
+  const f = fixture(); resurrection(f); f.Controller.tick(); f.advance(7000);
+  f.World.isCasting = () => true; f.Controller.tick(); assert.equal(f.Controller.mode, 'resurrect');
+  const g = fixture(); resurrection(g); g.World.skill(10067).range = 5;
+  g.Controller.tick(); assert.equal(g.commands.length, 0);
+});
 test('auto-resurrect is opt-in and selects the corpse before offering the rebirth', () => {
   const f = fixture(); resurrection(f);
   f.Settings.profile.party.autoRes = false; f.Controller.tick(); assert.equal(f.commands.length, 0);
@@ -515,7 +551,7 @@ test('auto-resurrect offers once per answer window and rearms after the member r
   f.Controller.tick(); assert.equal(f.commands.length, 2);
   f.advance(2000); f.Controller.tick(); assert.equal(f.commands.length, 2);
   f.advance(30000); f.Controller.tick(); assert.equal(f.commands.length, 4);
-  mate.status = 10; f.advance(800); f.Controller.tick(); assert.equal(f.commands.length, 4);
+  mate.status = 10; f.advance(7000); f.Controller.tick(); assert.equal(f.commands.length, 4);
   mate.status = 0; f.advance(800); f.Controller.tick(); assert.equal(f.commands.length, 6);
 });
 test('auto-resurrect needs a fallen party member whose corpse is in view', () => {
@@ -525,7 +561,7 @@ test('auto-resurrect needs a fallen party member whose corpse is in view', () =>
   f.Controller.tick(); assert.equal(f.commands.length, 0);
   f.World.ents.get(50).appearanceState = [2]; f.advance(800); f.Controller.tick();
   assert.equal(f.commands.length, 2);
-  mate.status = 10; f.advance(800); f.Controller.tick(); mate.status = 0;
+  mate.status = 10; f.advance(7000); f.Controller.tick(); mate.status = 0;
   f.World.ents.get(50).name = 'Stranger'; f.advance(800); f.Controller.tick(); assert.equal(f.commands.length, 2);
   f.World.ents.get(50).name = 'Mate'; f.advance(800); f.Controller.tick(); assert.equal(f.commands.length, 4);
 });

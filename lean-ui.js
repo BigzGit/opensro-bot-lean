@@ -296,7 +296,7 @@ const UI = {
         this.check('Auto-accept party-matching joins', () => Settings.profile.party.autoAcceptMatching, v => Settings.profile.party.autoAcceptMatching = v),
         el('p', 'Accepts applications to your own listing while you are the leader or forming a new party. Works while hunting is stopped; turn this switch off to stop accepting. Ordinary invitations are left to you.', 'muted'),
         this.check('Auto-resurrect party members', () => party().autoRes, v => { party().autoRes = v; Resurrect.reset(); }),
-        el('p', 'Casts your learned Rebirth skill on a fallen party member whose body is in view, and re-offers it every 30 seconds while the member stays dead. Works while hunting is stopped; the dead member still has to accept the revival.', 'muted')));
+        el('p', 'Works during hunting and while hunting is stopped. Briefly pauses fighting to cast your learned Rebirth on a visible fallen party member, then resumes hunting. Re-offers after the answer window while they stay dead. The member must accept the revival. Travel, shopping and manual control take priority.', 'muted')));
       this.pane.append(this.group('Profiles', el('p', 'Settings are saved separately for each character. Import copies only bot settings from the original assistant.', 'muted'),
         this.button('Import original bot settings', () => Settings.importOriginal()),
         this.button('Export Lean settings', () => {

@@ -31,6 +31,8 @@ Both scripts must not run together. Lean detects another active assistant and de
 
 ## What changed
 
+Version 1.2.13 fixes resurrection during hunting: auto-res briefly owns the character's action while Rebirth casts, then hunting resumes without waiting for the recipient to answer. Potions remain active. It waits for an existing cast, MP and inventory transactions, and does not interrupt shopping or return travel. Native range limits apply when published. This also works while hunting is stopped.
+
 Version 1.2.12 adds **Settings > Party > Auto-resurrect party members** (off by default, independent of hunting). It casts your learned Rebirth skill on a fallen party member whose body is in view, picks the highest-tier corpse-targeted skill you know, and re-offers the revival every 30 seconds while the member stays dead. The dead member still has to accept the revival, and fresh manual control briefly pauses new offers. Works while hunting is stopped; turn the switch off to stop offering.
 
 Version 1.2.11 lets pickup pets collect during combat, including while the character is casting or under attack. Pending pet pickups and retries no longer hold up combat. The finish-fight option applies only to character pickup. Inventory transaction and potion-priority checks remain in place.
@@ -75,7 +77,7 @@ Lean preserves the reviewed worker-hook and combat code from the supplied bot. N
 Validation completed:
 
 - JavaScript syntax check.
-- 59 integration tests covering the previous loot/combat/restock behaviours, collision routing, Thunderdragon level 13, wardrobe isolation and paid-avatar browsing, plus elixir presets, native item classification, capacity/ownership/exclusion checks, old-profile migration and cancellation after changing pickup filters. Pet tests cover acknowledged auto-grab setup, selective commands, pet bag capacity and gains, missing/foreign/dead/distant pets, potion priority, bounded setting retries, stop behaviour and controller integration. Regression tests also cover idle/manual/walk-back pet settings, deferred revival return, cancellation while waiting and repeated walk-back commands.
+- 72 integration tests covering the previous loot/combat/restock behaviours, collision routing, Thunderdragon level 13, wardrobe isolation and paid-avatar browsing, plus elixir presets, native item classification, capacity/ownership/exclusion checks, old-profile migration and cancellation after changing pickup filters. Pet tests cover acknowledged auto-grab setup, selective commands, pet bag capacity and gains, missing/foreign/dead/distant pets, potion priority, bounded setting retries, stop behaviour and controller integration. Regression tests also cover idle/manual/walk-back pet settings, deferred revival return, cancellation while waiting and repeated walk-back commands.
 - Headless Edge tests covering actual boot, worker-message hooks and captured collision routing; verified gzip/Range-pack image loading; missing Thunderdragon level 13 metadata recovery and selection; lazy wardrobe loading, skins, glow, presets, search and icon bounds; controls, hotkeys, cancellation and desktop/mobile bounds. No page errors were observed. The test uses simulated game state and local mock assets. Wardrobe catalogues are not requested before the wardrobe is opened; the skill catalogue is not requested unless learned metadata is missing.
 - Desktop and narrow-screen screenshots inspected.
 

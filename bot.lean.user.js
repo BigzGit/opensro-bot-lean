@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.12
+// @version      1.2.13
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.12';
+const VERSION = '1.2.13';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -2216,14 +2216,15 @@ const Party = {
 // Auto-resurrect dead party members with a learned corpse-targeted skill.
 // The sim worker replaces a skill press's gid with the newest selection intent
 // (core.ts), so the corpse is selected immediately before the press. The server
-// walks the caster into reach and proposes the revival, which the dead member
-// answers inside a 30 second window; the offer repeats after that window.
+// proposes the revival, which the dead member answers inside a 30 second window.
+// Only in-range corpses are considered when authored range is available.
 const Resurrect = {
   sent: {},           // member id -> time of the unanswered proposal
   nextAt: -Infinity,  // earliest next attempt
+  holdUntil: 0,
   windowMs: 31000,    // the server's answer window plus one tick
   message: 'No fallen party member.',
-  reset() { this.sent = {}; this.nextAt = -Infinity; this.message = 'No fallen party member.'; },
+  reset() { this.sent = {}; this.nextAt = -Infinity; this.holdUntil = 0; this.message = 'No fallen party member.'; },
   // The highest-tier learned corpse-targeted row: the Rebirth family marks
   // itself with the DeadBody target bit, and later tiers carry the higher
   // mastery requirement.
@@ -2242,8 +2243,11 @@ const Resurrect = {
   },
   tick() {
     const c = Settings.profile.party;
-    if (!c.autoRes) { this.message = 'Auto-resurrect off.'; return; }
-    if (!World.inWorld() || World.isDead()) { this.message = 'Waiting for a living character.'; return; }
+    if (!c.autoRes) { this.holdUntil = 0; this.message = 'Auto-resurrect off.'; return false; }
+    if (!World.inWorld() || World.isDead()) { this.holdUntil = 0; this.message = 'Waiting for a living character.'; return false; }
+    if (now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000) { this.holdUntil = 0; return false; }
+    if (now() < this.holdUntil || this.holdUntil && World.isCasting()) return true;
+    this.holdUntil = 0;
     const social = World.gp?.social, members = social?.members;
     if (!Array.isArray(members)) return;
     const party = members.filter(m => m && m.id && m.name && m.name !== social.localName);
@@ -2257,20 +2261,31 @@ const Resurrect = {
     const skill = this.skill();
     if (!skill) { this.message = 'No learned resurrection skill (Rebirth) was found.'; return; }
     if (t < this.nextAt || World.gp.targetPending || !Cmd.canCast(skill.id)) return;
-    if (t - Manual.lastAt < Hunt.cfg().manualPauseS * 1000) return;
+    if (World.isCasting() || World.isSitting() || World.local()?.mountedOn || World.gp.inventoryPending ||
+        now() - Combat.lastCastAt < Settings.profile.macro.castGapMs || !Combat.mpOk(skill.id, World.me())) return false;
     for (const m of party) {
       if ((m.status & 15) !== 0 || this.sent[m.id] && t - this.sent[m.id] < this.windowMs) continue;
       // The corpse must be in view as an entity to aim the select at.
       const e = [...World.ents.values()].find(x => x && x.kind === 'player' && x.name === m.name);
       if (!e || e.appearanceState?.[0] !== 2) continue;
+      const distance = dist2D(World.pose(), e);
+      if (!Number.isFinite(distance) || skill.range > 0 && distance > skill.range) continue;
+      if (Loot.active && !Loot.active.petGid) {
+        if (!Cmd.move(World.pose())) return false;
+        Loot.suspend();
+      }
       if (!Cmd.select(e.gid)) return;
       if (!Cmd.skill(skill.id, e.gid)) return;
+      Combat.lastCastAt = t; Combat.lastCastId = skill.id; Stats.count('casts');
+      // Keep combat/loot movement from replacing the approach or cast before
+      // the worker has published it. Continue holding any observed cast.
+      this.holdUntil = t + Math.max(1000, skill.actionMs || 6000) + 500;
       this.nextAt = t + 700;
       const first = this.sent[m.id] === undefined;
       this.sent[m.id] = t;
       this.message = 'Resurrection offered: ' + m.name + '; waiting for the answer.';
       if (first) UI.toast('Resurrection offered: ' + m.name, 'info', 3000);
-      return;
+      return true;
     }
   },
 };
@@ -2345,6 +2360,7 @@ Hunt.tick = function () {
 };
 
 function stopAll() {
+  Resurrect.holdUntil = 0;
   Controller.resumeAfterRevive = false;
   const active = Hunt.running || Restock.trip || WalkBack.active || Loot.active;
   WalkBack.cancel('', false);
@@ -2361,9 +2377,12 @@ const Controller = {
       Restock.sample();
       if (!World.inWorld()) { this.mode = 'waiting'; return; }
       Party.tick();
-      Resurrect.tick();
       Potion.tick();
       Loot.checkPetFull();
+      if (!WalkBack.active && !Restock.trip && !Restock.recording && !Controller.resumeAfterRevive &&
+          !Restock.activeShop() && !World.gp.storage && Resurrect.tick()) {
+        this.mode = 'resurrect'; return;
+      }
       if (this.resumeAfterRevive && !World.isDead()) {
         if (World.gp?.inventoryPending) { this.mode = 'waiting'; return; }
         this.resumeAfterRevive = false;
@@ -4253,7 +4272,7 @@ const UI = {
         this.check('Auto-accept party-matching joins', () => Settings.profile.party.autoAcceptMatching, v => Settings.profile.party.autoAcceptMatching = v),
         el('p', 'Accepts applications to your own listing while you are the leader or forming a new party. Works while hunting is stopped; turn this switch off to stop accepting. Ordinary invitations are left to you.', 'muted'),
         this.check('Auto-resurrect party members', () => party().autoRes, v => { party().autoRes = v; Resurrect.reset(); }),
-        el('p', 'Casts your learned Rebirth skill on a fallen party member whose body is in view, and re-offers it every 30 seconds while the member stays dead. Works while hunting is stopped; the dead member still has to accept the revival.', 'muted')));
+        el('p', 'Works during hunting and while hunting is stopped. Briefly pauses fighting to cast your learned Rebirth on a visible fallen party member, then resumes hunting. Re-offers after the answer window while they stay dead. The member must accept the revival. Travel, shopping and manual control take priority.', 'muted')));
       this.pane.append(this.group('Profiles', el('p', 'Settings are saved separately for each character. Import copies only bot settings from the original assistant.', 'muted'),
         this.button('Import original bot settings', () => Settings.importOriginal()),
         this.button('Export Lean settings', () => {

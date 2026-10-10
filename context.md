@@ -8,11 +8,11 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.11**.
-- Release commit: **`1b91c56`**, pushed to `main`.
+- Latest userscript release at this snapshot: **1.2.13**.
+- Release commit: use `git log -1 -- bot.lean.user.js` for the v1.2.13 cast-priority fix.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **59 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest validation: **72 integration tests**, JavaScript syntax check and headless browser checks pass.
 - No active unfinished implementation at this handoff. The latest discussion diagnosed stale GitHub update metadata.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
@@ -179,3 +179,9 @@ This was stale public metadata delivery, not a missing local version bump. Do no
 Live-server combat/pickup timing, navigation, merchant purchases and party registration/re-listing have not been validated on the user's account. Browser tests are deliberately isolated. Collision planning is conservative and mainly outdoor/town-oriented; dungeon routes and narrow passages may require recorded routes or manual intervention. The server remains authoritative over movement, loot, party membership and transactions.
 
 Full-page reload matters: the worker hook and keyboard guard should install at document start, before game listeners. Updating the script file does not replace the already-running copy in an open game page.
+
+## Resurrection during hunting: 1.2.13
+
+The published v1.2.12 implementation runs independently of hunting, including while stopped. A regression test showed its cast could be overwritten by the hunting tick in the same controller iteration. v1.2.13 makes `Resurrect.tick()` report action ownership while casting; the controller keeps potions running and yields fighting/loot movement until the authored action duration plus a buffer (or 6.5-second fallback) ends and any observed cast settles. Hunting stays enabled and resumes afterward, without waiting for party acceptance. Existing casts, MP, inventory, sitting/mounting, manual control, return travel and shopping are respected. Visible corpses outside the native skill range are skipped when range is supplied. Five new regression tests cover actual hunting-target restoration under attack, cast priority, transaction/MP gates, travel/shop exclusion and observed cast holds. No live-account resurrection has been verified.
+
+A concurrent v1.2.12 implementation was found on origin and preserved. An unpublished alternative remains recoverable at local branch `saved/auto-res-targeted-0709284`; it is not part of the installed script.
