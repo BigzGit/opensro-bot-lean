@@ -28,12 +28,21 @@ Hunt.tick = function () {
   if (H.stopInvFull && World.freeBagSlots() === 0) return this.stop('inventory full');
   Loot.preparePet();
   const attacked = this.underAttack(), current = this.currentTarget();
-  if (attacked) Loot.suspend();
-  // An active pickup owns the tick until done, failed or interrupted by an attacker.
-  if (!attacked && Loot.active && Loot.tick()) return;
-  if (H.pickup.enabled && !attacked && (!current || !H.pickup.afterKillOnly) && !World.isSitting()) {
-    const drop = Loot.choose();
-    if (drop && Loot.begin(drop)) { this.state = 'loot'; return; }
+  if (Loot.petMode()) {
+    // Pet movement does not own the character's combat tick.
+    if (Loot.active) Loot.tick();
+    if (!Loot.active && H.pickup.enabled) {
+      const drop = Loot.choose();
+      if (drop) Loot.begin(drop);
+    }
+  } else {
+    if (attacked) Loot.suspend();
+    // Character pickup owns movement until done or interrupted by an attacker.
+    if (!attacked && Loot.active && Loot.tick()) return;
+    if (H.pickup.enabled && !attacked && (!current || !H.pickup.afterKillOnly) && !World.isSitting()) {
+      const drop = Loot.choose();
+      if (drop && Loot.begin(drop)) { this.state = 'loot'; return; }
+    }
   }
   const me = World.me();
   if (World.isSitting()) {
@@ -49,7 +58,7 @@ Hunt.tick = function () {
   if (Combat.buffs(true)) { this.state = 'buff'; return; }
   const target = current || this.chooseTarget();
   if (target) { this.engage(target); return; }
-  this.targetGid = 0; this.state = 'search';
+  this.targetGid = 0; this.state = Loot.active?.petGid ? 'loot' : 'search';
   if (H.returnToCenter && H.center && dist2D(World.pose(), H.center) > Math.max(40, H.radius * 0.5) && now() - this.lastMoveAt > 2500) {
     if (!Number.isFinite(dist2D(World.pose(), H.center))) return this.stop('hunt area is in another region');
     if (Cmd.move(H.center)) this.lastMoveAt = now();

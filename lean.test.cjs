@@ -74,12 +74,10 @@ test('missing, foreign, dead or distant pet never falls back to character collec
   ent.x = 100; f.World.gp.cosRecords = []; assert.equal(f.Loot.begin(d), false);
   assert.equal(f.commands.length, 0);
 });
-test('pet pickup yields to busy inventory, attacks and low potion thresholds', () => {
+test('pet pickup yields to busy inventory and low potion thresholds', () => {
   const f = fixture(); pickupPet(f); const d = f.drop(20, 3436);
   f.World.gp.inventoryPending = true; assert.equal(f.Loot.begin(d), false);
-  f.World.gp.inventoryPending = false; f.World.ents.set(30, { gid: 30, kind: 'monster', appearanceState: [0] });
-  f.World.attackers.set(30, 100000); assert.equal(f.Loot.begin(d), false);
-  f.World.attackers.clear(); f.World.gp.vitals = [{ gid: 1, hp: 65, mp: 100, maxHp: 100, maxMp: 100 }];
+  f.World.gp.inventoryPending = false; f.World.gp.vitals = [{ gid: 1, hp: 65, mp: 100, maxHp: 100, maxMp: 100 }];
   assert.equal(f.Loot.begin(d), false); assert.equal(f.commands.length, 0);
 });
 test('pet configuration retries are bounded and resummoning resets setup', () => {
@@ -492,5 +490,37 @@ test('auto-recruit validates listing purpose against job suit', () => {
   f.Controller.tick(); assert.equal(f.commands.length, 0);
   f.World.gp.inventory = [{ slot: 8, typeFlags: (1 << 11) | 0x3ac }];
   f.Controller.tick(); assert.equal(f.commands[0].registration.purpose, 2);
+});
+function petFight(f) {
+  const pet = pickupPet(f); f.Hunt.start();
+  f.World.ents.set(30, { gid: 30, kind: 'monster', name: 'Mob', regionId: 1, x: 120, z: 100, attackFlags: 16, appearanceState: [0] });
+  f.Hunt.targetGid = 30; f.Hunt.targetSince = 100000; f.World.gp.target = 30;
+  f.World.attackers.set(30, 100000);
+  return pet;
+}
+test('pet picks up during combat and casting even with finish-fight enabled', () => {
+  const f = fixture(); petFight(f); f.drop(20, 3436); let fights = 0;
+  f.Combat.fight = () => { fights++; }; f.World.isCasting = () => true;
+  assert.equal(f.Settings.profile.hunt.pickup.afterKillOnly, true);
+  f.Hunt.tick(); assert.equal(f.commands.filter(c => c.kind === 'cos-pickup').length, 1);
+  assert.equal(fights, 1); assert.equal(f.Hunt.state, 'fight'); assert.ok(f.Loot.active);
+  f.advance(500); f.Hunt.tick(); assert.equal(fights, 2); assert.ok(f.Loot.active);
+  assert.equal(f.commands.some(c => c.kind === 'pickup' || c.kind === 'move'), false);
+});
+test('pet pickup confirmation and retries do not pause combat or move the player', () => {
+  const f = fixture(), pet = petFight(f); f.drop(20, 3436); let fights = 0;
+  f.Combat.fight = () => { fights++; }; f.Hunt.tick();
+  f.advance(9000); f.Hunt.tick(); f.advance(800); f.Hunt.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'cos-pickup').length, 2); assert.equal(fights, 3);
+  pet.inventory.push({ slot: 0, refObjId: 101, quantity: 1 }); f.Hunt.tick();
+  assert.equal(f.Stats.values.loot, 1); assert.equal(fights, 4);
+  assert.equal(f.commands.some(c => c.kind === 'move'), false);
+});
+test('pet waits for inventory and potion priority without holding up combat', () => {
+  const f = fixture(); petFight(f); f.drop(20, 3436); let fights = 0;
+  f.Combat.fight = () => { fights++; }; f.World.gp.inventoryPending = true;
+  f.Hunt.tick(); assert.equal(fights, 1); assert.equal(f.Loot.active, null);
+  f.World.gp.inventoryPending = false; f.World.gp.vitals = [{ gid: 1, hp: 65, mp: 100, maxHp: 100, maxMp: 100 }];
+  f.Hunt.tick(); assert.equal(fights, 2); assert.equal(f.Loot.active, null);
 });
 console.log(`${passed} lean integration tests passed.`);

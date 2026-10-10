@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.10
+// @version      1.2.11
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.10';
+const VERSION = '1.2.11';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -2000,7 +2000,7 @@ const Loot = {
   },
   pressed() {
     const me = World.me(), p = Settings.profile.potion;
-    return Hunt.underAttack() || p.enabled && ((p.hp.on && me.hpPct <= p.hp.pct + 10) || (p.mp.on && me.mpPct <= p.mp.pct + 10));
+    return p.enabled && ((p.hp.on && me.hpPct <= p.hp.pct + 10) || (p.mp.on && me.mpPct <= p.mp.pct + 10));
   },
   categories: ['gold', 'potions', 'equipment', 'elixirs', 'powders', 'alchemy', 'others'],
   category(tf) {
@@ -2073,7 +2073,7 @@ const Loot = {
     return chosen;
   },
   begin(e) {
-    if (!this.allowed(e) || World.gp?.inventoryPending || World.isCasting()) return false;
+    if (!this.allowed(e) || World.gp?.inventoryPending || !this.petMode() && World.isCasting()) return false;
     const petGid = this.petMode() ? this.pet()?.rec.gid : 0;
     if (this.petMode() && (!petGid || this.pressed()) || !this.pickup(e.gid, petGid)) return false;
     const gold = ItemType.isGold(e.groundItem.typeFlags);
@@ -2091,7 +2091,7 @@ const Loot = {
     const a = this.active;
     if (!a) return false;
     if (!!a.petGid !== this.petMode() || a.petGid && this.pet()?.rec.gid !== a.petGid) { this.suspend(); return false; }
-    Hunt.state = 'loot';
+    if (!a.petGid) Hunt.state = 'loot';
     const e = World.ents.get(a.gid);
     if (this.gained(a)) {
       Stats.count('loot');
@@ -2243,12 +2243,21 @@ Hunt.tick = function () {
   if (H.stopInvFull && World.freeBagSlots() === 0) return this.stop('inventory full');
   Loot.preparePet();
   const attacked = this.underAttack(), current = this.currentTarget();
-  if (attacked) Loot.suspend();
-  // An active pickup owns the tick until done, failed or interrupted by an attacker.
-  if (!attacked && Loot.active && Loot.tick()) return;
-  if (H.pickup.enabled && !attacked && (!current || !H.pickup.afterKillOnly) && !World.isSitting()) {
-    const drop = Loot.choose();
-    if (drop && Loot.begin(drop)) { this.state = 'loot'; return; }
+  if (Loot.petMode()) {
+    // Pet movement does not own the character's combat tick.
+    if (Loot.active) Loot.tick();
+    if (!Loot.active && H.pickup.enabled) {
+      const drop = Loot.choose();
+      if (drop) Loot.begin(drop);
+    }
+  } else {
+    if (attacked) Loot.suspend();
+    // Character pickup owns movement until done or interrupted by an attacker.
+    if (!attacked && Loot.active && Loot.tick()) return;
+    if (H.pickup.enabled && !attacked && (!current || !H.pickup.afterKillOnly) && !World.isSitting()) {
+      const drop = Loot.choose();
+      if (drop && Loot.begin(drop)) { this.state = 'loot'; return; }
+    }
   }
   const me = World.me();
   if (World.isSitting()) {
@@ -2264,7 +2273,7 @@ Hunt.tick = function () {
   if (Combat.buffs(true)) { this.state = 'buff'; return; }
   const target = current || this.chooseTarget();
   if (target) { this.engage(target); return; }
-  this.targetGid = 0; this.state = 'search';
+  this.targetGid = 0; this.state = Loot.active?.petGid ? 'loot' : 'search';
   if (H.returnToCenter && H.center && dist2D(World.pose(), H.center) > Math.max(40, H.radius * 0.5) && now() - this.lastMoveAt > 2500) {
     if (!Number.isFinite(dist2D(World.pose(), H.center))) return this.stop('hunt area is in another region');
     if (Cmd.move(H.center)) this.lastMoveAt = now();
@@ -4134,12 +4143,12 @@ const UI = {
       options.append(this.check('Chime when pet bag is full', () => L().petFullSound, v => { L().petFullSound = v; Loot.fullAlert = null; }), this.button('Test pet chime', () => Sound.test()));
       this.petNote = el('p', '', 'muted'); options.append(this.petNote);
       options.append(this.row(...[['Elixirs only','elixirs'],['Elixirs + gold','elixirs-gold'],['All items','all']].map(([label,mode]) => this.button(label, () => { Loot.preset(mode); this.draw(); }))));
-      for (const [key, label] of [['enabled', 'Collect drops'], ['gold', 'Gold'], ['potions', 'Potions and cure pills'], ['equipment', 'Equipment'], ['elixirs', 'Elixirs'], ['powders', 'Lucky powders'], ['alchemy', 'Other alchemy items / stones'], ['others', 'Other items'], ['afterKillOnly', 'Finish current fight before collecting']]) options.append(this.check(label, () => L()[key], v => L()[key] = v));
+      for (const [key, label] of [['enabled', 'Collect drops'], ['gold', 'Gold'], ['potions', 'Potions and cure pills'], ['equipment', 'Equipment'], ['elixirs', 'Elixirs'], ['powders', 'Lucky powders'], ['alchemy', 'Other alchemy items / stones'], ['others', 'Other items'], ['afterKillOnly', 'Finish current fight before character pickup']]) options.append(this.check(label, () => L()[key], v => L()[key] = v));
       options.append(this.number('Pickup radius (m)', () => L().radius / 10, v => L().radius = v * 10, 3, 100),
         this.number('Retries after first attempt', () => L().retries, v => L().retries = v, 0, 3),
         this.text('Always include names', () => L().include, v => L().include = v),
         this.text('Exclude names', () => L().exclude, v => L().exclude = v),
-        el('p', 'Presets clear Always include names; exclusions still apply. Other items excludes the separate categories above. Ownership and bag capacity always apply. Failed pickups use a backoff.', 'muted'));
+        el('p', 'Pets collect during combat regardless of the finish-fight setting. Inventory transactions and potion priority can briefly delay pet requests. Presets clear Always include names; exclusions still apply. Other items excludes the separate categories above. Ownership and bag capacity always apply. Failed pickups use a backoff.', 'muted'));
       this.pane.append(options);
     } else if (this.current === 'Supplies') {
       const pots = this.group('Automatic potion use', this.check('Use potions automatically', () => P().enabled, v => P().enabled = v));

@@ -59,7 +59,7 @@ const Loot = {
   },
   pressed() {
     const me = World.me(), p = Settings.profile.potion;
-    return Hunt.underAttack() || p.enabled && ((p.hp.on && me.hpPct <= p.hp.pct + 10) || (p.mp.on && me.mpPct <= p.mp.pct + 10));
+    return p.enabled && ((p.hp.on && me.hpPct <= p.hp.pct + 10) || (p.mp.on && me.mpPct <= p.mp.pct + 10));
   },
   categories: ['gold', 'potions', 'equipment', 'elixirs', 'powders', 'alchemy', 'others'],
   category(tf) {
@@ -132,7 +132,7 @@ const Loot = {
     return chosen;
   },
   begin(e) {
-    if (!this.allowed(e) || World.gp?.inventoryPending || World.isCasting()) return false;
+    if (!this.allowed(e) || World.gp?.inventoryPending || !this.petMode() && World.isCasting()) return false;
     const petGid = this.petMode() ? this.pet()?.rec.gid : 0;
     if (this.petMode() && (!petGid || this.pressed()) || !this.pickup(e.gid, petGid)) return false;
     const gold = ItemType.isGold(e.groundItem.typeFlags);
@@ -150,7 +150,7 @@ const Loot = {
     const a = this.active;
     if (!a) return false;
     if (!!a.petGid !== this.petMode() || a.petGid && this.pet()?.rec.gid !== a.petGid) { this.suspend(); return false; }
-    Hunt.state = 'loot';
+    if (!a.petGid) Hunt.state = 'loot';
     const e = World.ents.get(a.gid);
     if (this.gained(a)) {
       Stats.count('loot');
