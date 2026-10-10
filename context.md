@@ -172,7 +172,7 @@ This was stale public metadata delivery, not a missing local version bump. Do no
 | 1.2.9 | `599c5a8` | Saved listing and independent auto-recruit. |
 | 1.2.10 | `b585a53` | Isolate field typing from game shortcuts; preserve focused controls during refresh. |
 | 1.2.11 | `1b91c56` | Pet collection runs alongside combat; finish-fight is character-only. |
-| 1.2.12 | `pending` | Auto-resurrect: Rebirth cast on fallen party members, opt-in and independent of hunting. |
+| 1.2.12 | `0d4e1e3` | Auto-resurrect: Rebirth cast on fallen party members, opt-in and independent of hunting. |
 
 ## Remaining practical limitations
 
