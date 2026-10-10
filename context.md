@@ -8,11 +8,11 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.13**.
-- Release commit: use `git log -1 -- bot.lean.user.js` for the v1.2.13 cast-priority fix.
+- Latest userscript release at this snapshot: **1.2.14**.
+- Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **72 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest validation: **83 integration tests**, JavaScript syntax check and headless browser checks pass.
 - No active unfinished implementation at this handoff. The latest discussion diagnosed stale GitHub update metadata.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
@@ -36,6 +36,7 @@ The panel lives inside an open shadow root on `#sro-bot-lean`. Runtime diagnosti
 | `lean-controller.js` | Coordinates hunting, restocking, return, loot and independent services. |
 | `lean-loot.js` | Drop eligibility, categories, pet selection/setup, pickup confirmation/retries and full-bag alert. |
 | `lean-party.js` | Party-matching acceptance and saved-listing auto-recruit. |
+| `lean-speed-scroll.js` | Opt-in beginner +100% speed-scroll activation, buff confirmation and bounded retry. |
 | `lean-resurrect.js` | Auto-resurrect fallen party members with a learned corpse-targeted skill. |
 | `lean-walkback.js` | Saved-spot return and optional hunting resume. |
 | `lean-navigation.js` | Collision-data capture and waypoint planning. |
@@ -185,3 +186,11 @@ Full-page reload matters: the worker hook and keyboard guard should install at d
 The published v1.2.12 implementation runs independently of hunting, including while stopped. A regression test showed its cast could be overwritten by the hunting tick in the same controller iteration. v1.2.13 makes `Resurrect.tick()` report action ownership while casting; the controller keeps potions running and yields fighting/loot movement until the authored action duration plus a buffer (or 6.5-second fallback) ends and any observed cast settles. Hunting stays enabled and resumes afterward, without waiting for party acceptance. Existing casts, MP, inventory, sitting/mounting, manual control, return travel and shopping are respected. Visible corpses outside the native skill range are skipped when range is supplied. Five new regression tests cover actual hunting-target restoration under attack, cast priority, transaction/MP gates, travel/shop exclusion and observed cast holds. No live-account resurrection has been verified.
 
 A concurrent v1.2.12 implementation was found on origin and preserved. An unpublished alternative remains recoverable at local branch `saved/auto-res-targeted-0709284`; it is not part of the installed script.
+
+## Configurable res travel and beginner speed scroll: 1.2.14
+
+`party.resRadius` defaults to 300 game units (30 m), controlled in Settings → Party. During hunting, only visible corpses within this radius of the saved hunt spot are eligible; while stopped, the trip starts and returns at the current position. `Resurrect.trip` owns approach/cast/return movement via `Navigation.next` and keeps combat from replacing it. Cast range remains the native skill range (150-unit conservative fallback for absent metadata). Each leg has 30-second absolute and 12-second no-progress limits. Radius changes, member loss/revival, manual control, F8/Stop all, blocked paths and return failure are handled; return failure stops hunting. Native collision coverage is required for res travel, with no blind fallback.
+
+`potion.speedScroll` defaults off. `lean-speed-scroll.js` uses only beginner scroll item 24198 (`ITEM_ETC_SPEED_UP_BASIC`), whose buff is skill 31107 (+100% for one hour); local game source confirms both. The code also recognizes the existing mall +100% buff 5411 and active catalogued speed buffs, without consuming paid items. It runs during hunting, walk-back, restock or res travel, after potion priority. Item dispatch is not confirmation: it waits for the buff, backs off on missing confirmation and caps attempts at three. Buff appearance rearms it; UI toggle resets attempts. Scrolls cannot interrupt an unobserved resurrection cast hold.
+
+83 VM integration tests and the isolated browser UI checks passed. New tests cover approach/cast/return, radius anchoring and changes, collision detours, blocked/missing coverage, cancellation, revived targets, return timeout, exact scroll identity, existing buffs, no paid consumption, gating, activation confirmation and bounded retries. Live trips, scroll activation and resurrection remain untested on the user account.

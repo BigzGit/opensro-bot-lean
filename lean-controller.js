@@ -67,6 +67,7 @@ Hunt.tick = function () {
 };
 
 function stopAll() {
+  Resurrect.cancelTrip('', true);
   Resurrect.holdUntil = 0;
   Controller.resumeAfterRevive = false;
   const active = Hunt.running || Restock.trip || WalkBack.active || Loot.active;
@@ -86,6 +87,7 @@ const Controller = {
       Party.tick();
       Potion.tick();
       Loot.checkPetFull();
+      if (SpeedScroll.tick()) { this.mode = 'speed scroll'; return; }
       if (!WalkBack.active && !Restock.trip && !Restock.recording && !Controller.resumeAfterRevive &&
           !Restock.activeShop() && !World.gp.storage && Resurrect.tick()) {
         this.mode = 'resurrect'; return;

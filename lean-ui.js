@@ -259,6 +259,9 @@ const UI = {
       this.pane.append(options);
     } else if (this.current === 'Supplies') {
       const pots = this.group('Automatic potion use', this.check('Use potions automatically', () => P().enabled, v => P().enabled = v));
+      this.speedNote = el('p', '', 'muted');
+      pots.append(this.check('Use beginner +100% speed scroll automatically', () => P().speedScroll, v => { P().speedScroll = v; SpeedScroll.reset(); }),
+        el('p', 'Uses only the beginner scroll during hunting or travel when no movement-speed buff is active. Waits for buff confirmation and stops retrying after three unconfirmed attempts.', 'muted'), this.speedNote);
       for (const kind of ['hp', 'mp']) pots.append(this.check('Use ' + kind.toUpperCase(), () => P()[kind].on, v => P()[kind].on = v), this.number(kind.toUpperCase() + ' below (%)', () => P()[kind].pct, v => P()[kind].pct = v, 5, 95));
       pots.append(this.check('Use vigor potions', () => P().vigor.on, v => P().vigor.on = v), this.check('Use cure pills', () => P().cure.on, v => P().cure.on = v));
       this.pane.append(pots);
@@ -296,7 +299,8 @@ const UI = {
         this.check('Auto-accept party-matching joins', () => Settings.profile.party.autoAcceptMatching, v => Settings.profile.party.autoAcceptMatching = v),
         el('p', 'Accepts applications to your own listing while you are the leader or forming a new party. Works while hunting is stopped; turn this switch off to stop accepting. Ordinary invitations are left to you.', 'muted'),
         this.check('Auto-resurrect party members', () => party().autoRes, v => { party().autoRes = v; Resurrect.reset(); }),
-        el('p', 'Works during hunting and while hunting is stopped. Briefly pauses fighting to cast your learned Rebirth on a visible fallen party member, then resumes hunting. Re-offers after the answer window while they stay dead. The member must accept the revival. Travel, shopping and manual control take priority.', 'muted')));
+        this.number('Maximum res distance from hunt spot (m)', () => party().resRadius / 10, v => party().resRadius = v * 10, 1, 100),
+        el('p', 'Works during hunting and while stopped. Walks into skill range for visible dead members within the maximum radius, casts Rebirth, then returns. During hunting the radius is measured from the saved hunt spot; while stopped it uses your starting position. Collision data is required for walking. Travel stops after 30 seconds or 12 seconds without progress per leg. The member must accept the revival. Travel, shopping and manual control take priority.', 'muted')));
       this.pane.append(this.group('Profiles', el('p', 'Settings are saved separately for each character. Import copies only bot settings from the original assistant.', 'muted'),
         this.button('Import original bot settings', () => Settings.importOriginal()),
         this.button('Export Lean settings', () => {
@@ -317,6 +321,7 @@ const UI = {
       this.partyNote.textContent = notes.join(' ');
     }
     if (!this.status) return;
+    if (this.current === 'Supplies' && this.speedNote) this.speedNote.textContent = SpeedScroll.message;
     if (this.current === 'Loot' && this.petNote) { this.petNote.hidden = !Loot.petMode(); this.petNote.textContent = Loot.petStatus(); }
     Learned.repair();
     if (this.current === 'Combat' && this.lastSkillKey !== this.skillKey()) { this.draw(); return; }

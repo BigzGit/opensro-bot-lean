@@ -7,6 +7,7 @@ const WalkBack = {
     if (!dest || !pose) return UI.toast(T('Önce av merkezini kaydedin.', 'Save a hunting spot first using Set here in Hunt → Area.'), 'warn');
     if (!Number.isFinite(dist2D(pose, dest))) return UI.toast(T('Önce aynı bölgeye dönün.', 'Return to the same world or dungeon before walking back.'), 'warn');
     if (World.gp?.inventoryPending) return UI.toast(T('Envanter işlemini bekleyin.', 'Wait for the inventory transaction to finish.'), 'warn');
+    Resurrect.cancelTrip('', true); Resurrect.holdUntil = 0;
     const shouldResume = resume || Hunt.running || !!this.active?.resume;
     this.cancel();
     Restock.cancelRecording();

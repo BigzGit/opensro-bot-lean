@@ -114,6 +114,16 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.evaluate(() => SROLean.settings.profile.macro.imbue.id), 8);
     await page.waitForFunction(() => [...document.getElementById('sro-bot-lean').shadowRoot.querySelectorAll('.slot')].every(s => s.dataset.iconLoaded === 'true'));
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    assert.equal(await page.getByLabel('Maximum res distance from hunt spot (m)', { exact: true }).inputValue(), '30');
+    await page.getByLabel('Maximum res distance from hunt spot (m)', { exact: true }).fill('40');
+    await page.getByLabel('Maximum res distance from hunt spot (m)', { exact: true }).dispatchEvent('change');
+    assert.equal(await page.evaluate(() => SROLean.settings.profile.party.resRadius), 400);
+    await page.getByRole('button', { name: 'Supplies', exact: true }).click();
+    assert.equal(await page.getByLabel('Use beginner +100% speed scroll automatically', { exact: true }).isChecked(), false);
+    await page.getByLabel('Use beginner +100% speed scroll automatically', { exact: true }).check();
+    assert.equal(await page.evaluate(() => SROLean.settings.profile.potion.speedScroll), true);
+    await page.getByLabel('Use beginner +100% speed scroll automatically', { exact: true }).uncheck();
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
     assert.equal(await page.getByLabel('Auto-accept party-matching joins', { exact: true }).isChecked(), false);
     await page.getByLabel('Auto-accept party-matching joins', { exact: true }).check();
     await page.evaluate(() => {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.13
+// @version      1.2.14
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.13';
+const VERSION = '1.2.14';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -183,7 +183,7 @@ const Store = {
 
 const CLASS_KEYS = ['normal', 'champion', 'giant', 'party', 'elite', 'unique'];
 const DEFAULT_PROFILE = {
-  party: { autoAcceptMatching: false, autoRecruit: false, autoRes: false, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true },
+  party: { autoAcceptMatching: false, autoRecruit: false, autoRes: false, resRadius: 300, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true },
   wardrobe: { on: true, phantom: true, realAnim: true, hideAvatars: false,
     eq: {}, av: {}, pet: { atk: 0, pick: 0, mount: 0 }, presets: {}, undo: null },
   macro: {
@@ -192,7 +192,7 @@ const DEFAULT_PROFILE = {
     imbueBeforeAttack: true, berserk: 'strong', minMpPct: 0, castGapMs: 350,
   },
   potion: {
-    enabled: true, hp: { on: true, pct: 60 }, mp: { on: true, pct: 40 },
+    enabled: true, speedScroll: false, hp: { on: true, pct: 60 }, mp: { on: true, pct: 40 },
     vigor: { on: true, hpPct: 30, mpPct: 15 }, cure: { on: true },
     prefer: { hp: 0, mp: 0, vigor: 0, cure: 0 }, delayMs: 350,
     restock: {
@@ -1887,6 +1887,7 @@ const WalkBack = {
     if (!dest || !pose) return UI.toast(T('Önce av merkezini kaydedin.', 'Save a hunting spot first using Set here in Hunt → Area.'), 'warn');
     if (!Number.isFinite(dist2D(pose, dest))) return UI.toast(T('Önce aynı bölgeye dönün.', 'Return to the same world or dungeon before walking back.'), 'warn');
     if (World.gp?.inventoryPending) return UI.toast(T('Envanter işlemini bekleyin.', 'Wait for the inventory transaction to finish.'), 'warn');
+    Resurrect.cancelTrip('', true); Resurrect.holdUntil = 0;
     const shouldResume = resume || Hunt.running || !!this.active?.resume;
     this.cancel();
     Restock.cancelRecording();
@@ -2222,9 +2223,68 @@ const Resurrect = {
   sent: {},           // member id -> time of the unanswered proposal
   nextAt: -Infinity,  // earliest next attempt
   holdUntil: 0,
+  trip: null,
   windowMs: 31000,    // the server's answer window plus one tick
   message: 'No fallen party member.',
-  reset() { this.sent = {}; this.nextAt = -Infinity; this.holdUntil = 0; this.message = 'No fallen party member.'; },
+  reset() { this.cancelTrip('', true); this.sent = {}; this.nextAt = -Infinity; this.holdUntil = 0; this.message = 'No fallen party member.'; },
+  cancelTrip(message = '', halt = false) {
+    if (this.trip && halt && this.trip.phase === 'approach') this.sent[this.trip.member] = now();
+    if (this.trip && halt && World.inWorld() && !World.isDead()) Cmd.move(World.pose());
+    this.trip = null;
+    if (message) { this.message = message; Log.warn(message); }
+  },
+  returnTrip(message = '') {
+    const a = this.trip;
+    if (!a) return;
+    a.phase = 'return'; a.travel = null; a.at = a.progressAt = now(); a.lastPose = { ...World.pose() }; a.sentAt = -Infinity;
+    this.message = message || 'Returning to the hunting spot after resurrection.';
+    if (message) Log.info(message);
+  },
+  travelTick(skill, members) {
+    const a = this.trip, pose = World.pose();
+    if (!a || !pose) return false;
+    const member = members.find(m => m.id === a.member && m.name === a.name);
+    const body = World.ents.get(a.gid);
+    if (a.phase === 'cast') this.returnTrip();
+    if (a.phase === 'approach' && (!member || (member.status & 15) !== 0 || !body || body.name !== a.name || body.appearanceState?.[0] !== 2 ||
+        !Number.isFinite(dist2D(a.home, body)) || dist2D(a.home, body) > Settings.profile.party.resRadius)) {
+      this.returnTrip('Resurrection target unavailable or outside the configured radius; returning.');
+    }
+    if (dist2D(a.lastPose, pose) > 3) { a.lastPose = { ...pose }; a.progressAt = now(); }
+    if (now() - a.at > 30000 || now() - a.progressAt > 12000) {
+      if (a.phase === 'approach') {
+        this.sent[a.member] = now() + 30000;
+        this.returnTrip('Resurrection travel timed out; returning to the hunting spot.');
+      } else {
+        this.cancelTrip('Resurrection return blocked or timed out.', true);
+        if (Hunt.running) Hunt.stop('Resurrection return blocked or timed out.');
+        return false;
+      }
+    }
+    const destination = a.phase === 'return' ? a.home : body;
+    const distance = dist2D(pose, destination);
+    if (a.phase === 'return' && distance <= 12) { this.trip = null; this.message = 'Back at the hunting spot.'; return false; }
+    if (a.phase === 'approach' && distance <= Math.max(1, (skill.range || 150) - 5)) return false;
+    if (World.isCasting() || World.isSitting()) return true;
+    const move = Navigation.next(a, destination);
+    if (move.error && !move.waiting) {
+      if (a.phase === 'approach') {
+        this.sent[a.member] = now() + 30000;
+        this.returnTrip('No walkable route to the party member; returning.');
+      } else {
+        this.cancelTrip(move.error, true);
+        if (Hunt.running) Hunt.stop(move.error);
+      }
+      return true;
+    }
+    if (move.waiting) { this.message = move.error || 'Waiting for resurrection travel.'; return true; }
+    if (a.phase === 'approach' && dist2D(a.home, move.point) > Math.max(Settings.profile.party.resRadius, dist2D(a.home, pose) + 1)) {
+      this.sent[a.member] = now() + 30000; this.returnTrip('Resurrection detour exceeds the configured radius; returning.'); return true;
+    }
+    if (now() - a.sentAt >= 900 && Cmd.move(move.point)) a.sentAt = now();
+    this.message = a.phase === 'return' ? 'Returning to the hunting spot.' : 'Walking into resurrection range: ' + a.name;
+    return true;
+  },
   // The highest-tier learned corpse-targeted row: the Rebirth family marks
   // itself with the DeadBody target bit, and later tiers carry the higher
   // mastery requirement.
@@ -2243,13 +2303,13 @@ const Resurrect = {
   },
   tick() {
     const c = Settings.profile.party;
-    if (!c.autoRes) { this.holdUntil = 0; this.message = 'Auto-resurrect off.'; return false; }
-    if (!World.inWorld() || World.isDead()) { this.holdUntil = 0; this.message = 'Waiting for a living character.'; return false; }
-    if (now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000) { this.holdUntil = 0; return false; }
+    if (!c.autoRes) { this.cancelTrip('', true); this.holdUntil = 0; this.message = 'Auto-resurrect off.'; return false; }
+    if (!World.inWorld() || World.isDead()) { this.cancelTrip(); this.holdUntil = 0; this.message = 'Waiting for a living character.'; return false; }
+    if (now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000) { this.cancelTrip('Manual control: resurrection travel cancelled.'); this.holdUntil = 0; return false; }
     if (now() < this.holdUntil || this.holdUntil && World.isCasting()) return true;
     this.holdUntil = 0;
     const social = World.gp?.social, members = social?.members;
-    if (!Array.isArray(members)) return;
+    if (!Array.isArray(members)) { this.cancelTrip('', true); return false; }
     const party = members.filter(m => m && m.id && m.name && m.name !== social.localName);
     const t = now();
     for (const id of Object.keys(this.sent)) {
@@ -2259,23 +2319,32 @@ const Resurrect = {
     const offered = party.find(m => this.sent[m.id]);
     this.message = offered ? 'Resurrection offered: ' + offered.name + '; waiting for the answer.' : 'Watching for fallen party members.';
     const skill = this.skill();
-    if (!skill) { this.message = 'No learned resurrection skill (Rebirth) was found.'; return; }
-    if (t < this.nextAt || World.gp.targetPending || !Cmd.canCast(skill.id)) return;
+    if (!skill) { this.cancelTrip('', true); this.message = 'No learned resurrection skill (Rebirth) was found.'; return; }
+    if (this.trip && this.travelTick(skill, party)) return true;
+    if (t < this.nextAt || World.gp.targetPending || !Cmd.canCast(skill.id)) return !!this.trip;
     if (World.isCasting() || World.isSitting() || World.local()?.mountedOn || World.gp.inventoryPending ||
-        now() - Combat.lastCastAt < Settings.profile.macro.castGapMs || !Combat.mpOk(skill.id, World.me())) return false;
+        now() - Combat.lastCastAt < Settings.profile.macro.castGapMs || !Combat.mpOk(skill.id, World.me())) return !!this.trip;
     for (const m of party) {
       if ((m.status & 15) !== 0 || this.sent[m.id] && t - this.sent[m.id] < this.windowMs) continue;
       // The corpse must be in view as an entity to aim the select at.
       const e = [...World.ents.values()].find(x => x && x.kind === 'player' && x.name === m.name);
       if (!e || e.appearanceState?.[0] !== 2) continue;
+      if (this.trip && e.gid !== this.trip.gid) continue;
       const distance = dist2D(World.pose(), e);
-      if (!Number.isFinite(distance) || skill.range > 0 && distance > skill.range) continue;
+      const home = this.trip?.home || (Hunt.running && Settings.profile.hunt.center) || World.pose();
+      if (!Number.isFinite(distance) || dist2D(home, e) > c.resRadius) continue;
       if (Loot.active && !Loot.active.petGid) {
         if (!Cmd.move(World.pose())) return false;
         Loot.suspend();
       }
-      if (!Cmd.select(e.gid)) return;
-      if (!Cmd.skill(skill.id, e.gid)) return;
+      if (distance > Math.max(1, (skill.range || 150) - 5)) {
+        if (!this.trip) this.trip = { phase: 'approach', member: m.id, gid: e.gid, name: e.name, home: { ...home },
+          at: t, progressAt: t, lastPose: { ...World.pose() }, sentAt: -Infinity };
+        return this.travelTick(skill, party);
+      }
+      if (!Cmd.select(e.gid)) return !!this.trip;
+      if (!Cmd.skill(skill.id, e.gid)) return !!this.trip;
+      if (this.trip) this.trip.phase = 'cast';
       Combat.lastCastAt = t; Combat.lastCastId = skill.id; Stats.count('casts');
       // Keep combat/loot movement from replacing the approach or cast before
       // the worker has published it. Continue holding any observed cast.
@@ -2287,6 +2356,44 @@ const Resurrect = {
       if (first) UI.toast('Resurrection offered: ' + m.name, 'info', 3000);
       return true;
     }
+  },
+};
+
+
+// Native beta starter scroll: item 24198 -> skill 31107 (+100%, one hour).
+// Never choose a paid scroll or infer consumption from a local command dispatch.
+const SpeedScroll = {
+  pending: null, attempts: 0, nextAt: 0, message: 'Speed scroll off.',
+  reset() { this.pending = null; this.attempts = 0; this.nextAt = 0; this.message = 'Waiting for automation.'; },
+  active() {
+    if (World.buffRemaining(31107) > 0 || World.buffRemaining(5411) > 0) return true;
+    const effects = [...(World.gp?.buffSlots || []).filter(b => b.state !== 'departing').map(b => b.effect), ...(World.gp?.attachedEffects || [])];
+    return effects.some(e => e?.gid === World.localGid() && World.skill(e.skill)?.speedBuff?.active && World.buffRemaining(e.skill) > 0);
+  },
+  tick() {
+    if (!Settings.profile.potion.speedScroll) { this.message = 'Speed scroll off.'; return false; }
+    if (!World.inWorld() || World.isDead()) return false;
+    if (this.active()) {
+      this.pending = null; this.attempts = 0; this.nextAt = 0;
+      this.message = 'Movement-speed buff active.'; return false;
+    }
+    if (!(Hunt.running || WalkBack.active || Restock.trip || Resurrect.trip)) { this.message = 'Waiting for hunting or travel.'; return false; }
+    if (World.gp.inventoryPending || World.isCasting() || Resurrect.holdUntil > now() || World.isSitting() || World.local()?.mountedOn ||
+        Restock.activeShop() || World.gp.storage || Restock.recording || now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000) return false;
+    if (this.pending) {
+      if (now() - this.pending.at < 8000) { this.message = 'Waiting for speed-buff confirmation.'; return false; }
+      this.pending = null; this.nextAt = now() + 30000 * this.attempts;
+      this.message = 'Speed buff was not confirmed. Backing off before retrying.';
+      Log.warn(this.message);
+    }
+    if (this.attempts >= 3) { this.message = 'Speed buff not confirmed after 3 attempts. Check the game and toggle this option to retry.'; return false; }
+    if (now() < this.nextAt) return false;
+    const item = World.items().find(i => i.refObjId === 24198 && (i.quantity ?? 1) > 0);
+    if (!item) { this.message = 'No beginner +100% speed scroll in your bag.'; return false; }
+    if (!Cmd.itemUse(item.slot)) return false;
+    this.attempts++; this.pending = { at: now() };
+    this.message = 'Beginner speed scroll requested; waiting for its buff.';
+    return true;
   },
 };
 
@@ -2360,6 +2467,7 @@ Hunt.tick = function () {
 };
 
 function stopAll() {
+  Resurrect.cancelTrip('', true);
   Resurrect.holdUntil = 0;
   Controller.resumeAfterRevive = false;
   const active = Hunt.running || Restock.trip || WalkBack.active || Loot.active;
@@ -2379,6 +2487,7 @@ const Controller = {
       Party.tick();
       Potion.tick();
       Loot.checkPetFull();
+      if (SpeedScroll.tick()) { this.mode = 'speed scroll'; return; }
       if (!WalkBack.active && !Restock.trip && !Restock.recording && !Controller.resumeAfterRevive &&
           !Restock.activeShop() && !World.gp.storage && Resurrect.tick()) {
         this.mode = 'resurrect'; return;
@@ -4235,6 +4344,9 @@ const UI = {
       this.pane.append(options);
     } else if (this.current === 'Supplies') {
       const pots = this.group('Automatic potion use', this.check('Use potions automatically', () => P().enabled, v => P().enabled = v));
+      this.speedNote = el('p', '', 'muted');
+      pots.append(this.check('Use beginner +100% speed scroll automatically', () => P().speedScroll, v => { P().speedScroll = v; SpeedScroll.reset(); }),
+        el('p', 'Uses only the beginner scroll during hunting or travel when no movement-speed buff is active. Waits for buff confirmation and stops retrying after three unconfirmed attempts.', 'muted'), this.speedNote);
       for (const kind of ['hp', 'mp']) pots.append(this.check('Use ' + kind.toUpperCase(), () => P()[kind].on, v => P()[kind].on = v), this.number(kind.toUpperCase() + ' below (%)', () => P()[kind].pct, v => P()[kind].pct = v, 5, 95));
       pots.append(this.check('Use vigor potions', () => P().vigor.on, v => P().vigor.on = v), this.check('Use cure pills', () => P().cure.on, v => P().cure.on = v));
       this.pane.append(pots);
@@ -4272,7 +4384,8 @@ const UI = {
         this.check('Auto-accept party-matching joins', () => Settings.profile.party.autoAcceptMatching, v => Settings.profile.party.autoAcceptMatching = v),
         el('p', 'Accepts applications to your own listing while you are the leader or forming a new party. Works while hunting is stopped; turn this switch off to stop accepting. Ordinary invitations are left to you.', 'muted'),
         this.check('Auto-resurrect party members', () => party().autoRes, v => { party().autoRes = v; Resurrect.reset(); }),
-        el('p', 'Works during hunting and while hunting is stopped. Briefly pauses fighting to cast your learned Rebirth on a visible fallen party member, then resumes hunting. Re-offers after the answer window while they stay dead. The member must accept the revival. Travel, shopping and manual control take priority.', 'muted')));
+        this.number('Maximum res distance from hunt spot (m)', () => party().resRadius / 10, v => party().resRadius = v * 10, 1, 100),
+        el('p', 'Works during hunting and while stopped. Walks into skill range for visible dead members within the maximum radius, casts Rebirth, then returns. During hunting the radius is measured from the saved hunt spot; while stopped it uses your starting position. Collision data is required for walking. Travel stops after 30 seconds or 12 seconds without progress per leg. The member must accept the revival. Travel, shopping and manual control take priority.', 'muted')));
       this.pane.append(this.group('Profiles', el('p', 'Settings are saved separately for each character. Import copies only bot settings from the original assistant.', 'muted'),
         this.button('Import original bot settings', () => Settings.importOriginal()),
         this.button('Export Lean settings', () => {
@@ -4293,6 +4406,7 @@ const UI = {
       this.partyNote.textContent = notes.join(' ');
     }
     if (!this.status) return;
+    if (this.current === 'Supplies' && this.speedNote) this.speedNote.textContent = SpeedScroll.message;
     if (this.current === 'Loot' && this.petNote) { this.petNote.hidden = !Loot.petMode(); this.petNote.textContent = Loot.petStatus(); }
     Learned.repair();
     if (this.current === 'Combat' && this.lastSkillKey !== this.skillKey()) { this.draw(); return; }
@@ -4311,7 +4425,7 @@ const UI = {
 
 
 function toggleBot() {
-  if (Hunt.running || WalkBack.active || Restock.trip || Controller.resumeAfterRevive) stopAll();
+  if (Hunt.running || WalkBack.active || Restock.trip || Resurrect.trip || Controller.resumeAfterRevive) stopAll();
   else if (Restock.recording) UI.toast('Finish or cancel route recording before starting the bot.', 'warn');
   else Hunt.start();
 }
@@ -4337,10 +4451,11 @@ function boot() {
     const key = name ? 'profile:' + name : 'profile:default';
     if (key !== Settings.profileKey) { stopAll(); Settings.useCharacter(name); }
   });
-  bus.on('profile', () => { Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
+  bus.on('profile', () => { SpeedScroll.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
   bus.on('phase', phase => {
     if (phase !== 'world') {
       Party.reset();
+      SpeedScroll.reset();
       Resurrect.reset();
       const revival = phase === 'entering-world' && Hunt.running && Hunt.cfg().onDeath === 'revive' && (Hunt.state === 'dead' || Hunt.revived);
       stopAll(); Restock.cancelRecording(); Loot.reset();
@@ -4348,7 +4463,7 @@ function boot() {
     }
   });
   bus.on('failure', () => { stopAll(); Restock.cancelRecording(); UI.toast('Game connection failed; bot stopped.', 'warn'); });
-  bus.on('reset', () => { Party.reset(); Resurrect.reset(); Loot.reset(); Navigation.scene = null; Wardrobe.inv = Wardrobe.baseInv = Wardrobe.av = Wardrobe.baseAv = null; Wardrobe.body = ''; });
+  bus.on('reset', () => { SpeedScroll.reset(); Party.reset(); Resurrect.reset(); Loot.reset(); Navigation.scene = null; Wardrobe.inv = Wardrobe.baseInv = Wardrobe.av = Wardrobe.baseAv = null; Wardrobe.body = ''; });
   bus.on('attached', ({ late }) => { if (late) UI.toast('Attached after the game started. Reload for complete character data.', 'warn'); });
   bus.on('potion-empty', kind => UI.toast('Out of ' + kind.toUpperCase() + ' potions.', 'warn'));
   W.addEventListener('keydown', e => {
@@ -4364,7 +4479,7 @@ function boot() {
   }, true);
   Ticker.start(() => Controller.tick(), 100);
   setInterval(() => { Wardrobe.tick(); UI.update(); }, 500);
-  W.SROLean = { version: VERSION, world: World, settings: Settings, hunt: Hunt, loot: Loot,
+  W.SROLean = { version: VERSION, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, resurrect: Resurrect,
     restock: Restock, walkBack: WalkBack, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, stop: stopAll, log: Log };
   Log.info('OpenSRO Bot Lean ready. F8 starts/stops; F7 folds; Shift+F7 hides/shows the window.');
 }

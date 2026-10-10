@@ -1,6 +1,6 @@
 const CLASS_KEYS = ['normal', 'champion', 'giant', 'party', 'elite', 'unique'];
 const DEFAULT_PROFILE = {
-  party: { autoAcceptMatching: false, autoRecruit: false, autoRes: false, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true },
+  party: { autoAcceptMatching: false, autoRecruit: false, autoRes: false, resRadius: 300, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true },
   wardrobe: { on: true, phantom: true, realAnim: true, hideAvatars: false,
     eq: {}, av: {}, pet: { atk: 0, pick: 0, mount: 0 }, presets: {}, undo: null },
   macro: {
@@ -9,7 +9,7 @@ const DEFAULT_PROFILE = {
     imbueBeforeAttack: true, berserk: 'strong', minMpPct: 0, castGapMs: 350,
   },
   potion: {
-    enabled: true, hp: { on: true, pct: 60 }, mp: { on: true, pct: 40 },
+    enabled: true, speedScroll: false, hp: { on: true, pct: 60 }, mp: { on: true, pct: 40 },
     vigor: { on: true, hpPct: 30, mpPct: 15 }, cure: { on: true },
     prefer: { hp: 0, mp: 0, vigor: 0, cure: 0 }, delayMs: 350,
     restock: {

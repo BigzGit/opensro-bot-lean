@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, bus, Manual, Resurrect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, bus, Manual, Resurrect, SpeedScroll, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [];
@@ -499,6 +499,96 @@ function resurrection(f) {
   f.World.ents.set(50, { gid: 50, kind: 'player', name: 'Mate', regionId: 1, x: 110, y: 0, z: 100, appearanceState: [2, 0, 0] });
   return f.World.gp.social.members[1];
 }
+function resurrectionTravel() {
+  const f = fixture(); resurrection(f); f.Hunt.start();
+  Object.assign(f.World.skill(10067), { range: 100, actionMs: 1000 });
+  f.World.ents.get(50).x = 350; return f;
+}
+test('res travel defaults to 30m, approaches, casts and returns before resuming hunting', () => {
+  const f = resurrectionTravel(); assert.equal(f.Settings.profile.party.resRadius, 300);
+  f.Controller.tick(); assert.equal(f.Resurrect.trip.phase, 'approach'); assert.equal(f.commands.at(-1).kind, 'move');
+  f.advance(1000); f.World.gp.pose.x = 270; f.Controller.tick(); assert.equal(f.commands.at(-1).kind, 'skill');
+  assert.equal(f.Resurrect.trip.phase, 'cast'); assert.equal(f.Hunt.running, true);
+  f.advance(2000); f.Controller.tick(); assert.equal(f.Resurrect.trip.phase, 'return');
+  assert.equal(f.commands.at(-1).destination.x, 100);
+  f.World.gp.pose.x = 100; f.advance(1000); f.Controller.tick(); assert.equal(f.Resurrect.trip, null); assert.equal(f.Hunt.running, true);
+});
+test('res radius is anchored to hunt spot and never selects outside it', () => {
+  const f = resurrectionTravel(); f.Settings.profile.party.resRadius = 200;
+  f.World.gp.pose.x = 340; f.Controller.tick(); assert.equal(f.Resurrect.trip, null);
+  assert.equal(f.commands.some(c => c.kind === 'skill' || c.kind === 'select'), false);
+  f.World.ents.get(50).x = 250; f.advance(1000); f.Controller.tick(); assert.equal(f.commands.at(-1).kind, 'skill');
+});
+test('res travel uses collision detours and skips blocked bodies with backoff', () => {
+  const f = resurrectionTravel(); f.Navigation.plan = () => [];
+  f.Controller.tick(); assert.equal(f.Resurrect.trip.phase, 'return');
+  f.advance(500); f.Controller.tick(); assert.equal(f.Resurrect.trip, null);
+  assert.equal(f.commands.some(c => c.kind === 'skill'), false); assert.ok(f.Resurrect.sent[11] > 100000);
+  const g = resurrectionTravel();
+  g.Navigation.install(navProduct([{x:0,y:0,z:0,yaw:0,mesh:{vertices:[200,0,0,200,0,200],edges:[0,1,0,65535,3,0]}}]));
+  g.Controller.tick(); assert.equal(g.commands.at(-1).kind, 'move'); assert.ok(g.commands.at(-1).destination.z > 100);
+});
+test('res travel cancels on manual control, stop hotkey and explicit walk-back', () => {
+  const f = resurrectionTravel(); f.Controller.tick(); f.Manual.lastAt = 100000;
+  f.advance(500); f.Controller.tick(); assert.equal(f.Resurrect.trip, null);
+  const g = resurrectionTravel(); g.Hunt.stop(); g.advance(1000); g.Controller.tick(); assert.ok(g.Resurrect.trip);
+  g.toggleBot(); assert.equal(g.Resurrect.trip, null); assert.equal(g.Hunt.running, false);
+  const h = resurrectionTravel(); h.Controller.tick(); h.advance(1000); h.WalkBack.start(); assert.equal(h.Resurrect.trip, null);
+});
+test('res travel returns if member revives and does not stall on missing collision coverage', () => {
+  const f = resurrectionTravel(); f.Controller.tick(); f.World.gp.pose.x = 180;
+  f.World.gp.social.members[1].status = 10; f.World.ents.get(50).appearanceState = [0];
+  f.advance(1000); f.Controller.tick(); assert.equal(f.Resurrect.trip.phase, 'return'); assert.equal(f.commands.some(c => c.kind === 'skill'), false);
+  const g = resurrectionTravel(); g.Navigation.scene = null; g.Controller.tick(); assert.ok(g.Resurrect.trip);
+  g.advance(13000); g.Controller.tick(); assert.equal(g.Resurrect.trip, null);
+});
+function beginnerScroll(f) {
+  f.Settings.profile.potion.speedScroll = true;
+  f.World.gp.inventory.push({ slot: 15, refObjId: 24198, typeFlags: 3820, quantity: 2 });
+  f.Hunt.start();
+}
+test('beginner speed scroll is opt-in, uses its exact item and waits for buff confirmation', () => {
+  const f = fixture(); assert.equal(f.Settings.profile.potion.speedScroll, false); beginnerScroll(f);
+  f.Controller.tick(); assert.equal(f.commands.at(-1).kind, 'item-use'); assert.equal(f.commands.at(-1).slot, 15);
+  assert.equal(f.Controller.mode, 'speed scroll'); f.advance(1000); f.Controller.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'item-use').length, 1);
+  f.World.gp.buffSlots = [{ state:'active', effect:{gid:1,skill:31107,remainingMs:3600000,receivedAtMs:101000} }];
+  f.Controller.tick(); assert.equal(f.SpeedScroll.pending, null); assert.equal(f.SpeedScroll.attempts, 0);
+  f.World.gp.buffSlots = []; f.advance(1000); f.Controller.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'item-use').length, 2);
+});
+test('speed scroll does not overwrite an existing speed buff or consume paid items', () => {
+  const f = fixture(); beginnerScroll(f);
+  f.World.gp.attachedEffects = [{gid:1,skill:5411}]; f.Controller.tick(); assert.equal(f.commands.length, 0);
+  f.World.gp.attachedEffects = []; f.World.gp.inventory[0].refObjId = 12345; f.advance(1000); f.Controller.tick();
+  assert.equal(f.commands.some(c => c.kind === 'item-use'), false);
+  f.World.gp.inventory[0].refObjId = 24198; f.World.rebuildCatalog([{id:123,group:123,speedBuff:{active:true}}]);
+  f.World.gp.attachedEffects = [{gid:1,skill:123}]; f.Controller.tick(); assert.equal(f.commands.some(c => c.kind === 'item-use'), false);
+});
+test('speed scroll respects idle, manual, busy inventory, existing cast and shop gates', () => {
+  for (const change of [f=>f.Hunt.stop(),f=>f.Manual.lastAt=100000,f=>f.World.gp.inventoryPending=true,
+    f=>f.World.isCasting=()=>true,f=>f.Restock.activeShop=()=>({})]) {
+    const f = fixture(); beginnerScroll(f); change(f); f.commands.length=0; f.Controller.tick();
+    assert.equal(f.commands.some(c=>c.kind==='item-use'),false);
+  }
+});
+test('unconfirmed speed activation has bounded backoff even for unlimited starter stacks', () => {
+  const f=fixture(); beginnerScroll(f); f.Controller.tick();
+  for(let i=0;i<4;i++) { f.advance(9000); f.Controller.tick(); f.advance(90000); f.Controller.tick(); }
+  assert.equal(f.commands.filter(c=>c.kind==='item-use').length,3); assert.match(f.SpeedScroll.message,/3 attempts/);
+});
+test('speed scroll works during return travel and cannot interrupt a resurrection hold', () => {
+  const f=fixture(); beginnerScroll(f); f.Hunt.stop(); f.Settings.profile.hunt.center.x=400;
+  f.advance(1000); f.WalkBack.start(); f.Controller.tick(); assert.equal(f.commands.at(-1).kind,'item-use');
+  const g=fixture(); beginnerScroll(g); g.Resurrect.holdUntil=110000;
+  assert.equal(g.SpeedScroll.tick(),false); assert.equal(g.commands.filter(c=>c.kind==='item-use').length,0);
+});
+test('res travel returns when radius shrinks and stops hunting if return cannot progress', () => {
+  const f=resurrectionTravel(); f.Controller.tick(); f.World.gp.pose.x=270;
+  f.Settings.profile.party.resRadius=200; f.advance(1000); f.Controller.tick();
+  assert.equal(f.Resurrect.trip.phase,'return'); assert.equal(f.commands.some(c=>c.kind==='skill'),false);
+  f.advance(31000); f.Controller.tick(); assert.equal(f.Resurrect.trip,null); assert.equal(f.Hunt.running,false);
+});
 test('resurrection takes priority over hunting until its cast finishes, then hunting resumes', () => {
   const f = fixture(); resurrection(f); f.Hunt.start(); let hunts = 0;
   f.Hunt.tick = () => { hunts++; };
@@ -529,11 +619,11 @@ test('auto-res yields to shopping and return travel even though it works while i
     assert.equal(f.commands.some(c => c.kind === 'skill' || c.kind === 'select'), false);
   }
 });
-test('auto-res holds an observed cast beyond its estimate and never chases out-of-range corpses', () => {
+test('auto-res holds an observed cast beyond its estimate and walks before an out-of-range cast', () => {
   const f = fixture(); resurrection(f); f.Controller.tick(); f.advance(7000);
   f.World.isCasting = () => true; f.Controller.tick(); assert.equal(f.Controller.mode, 'resurrect');
   const g = fixture(); resurrection(g); g.World.skill(10067).range = 5;
-  g.Controller.tick(); assert.equal(g.commands.length, 0);
+  g.Controller.tick(); assert.equal(g.commands.at(-1).kind, 'move'); assert.equal(g.commands.some(c => c.kind === 'skill'), false);
 });
 test('auto-resurrect is opt-in and selects the corpse before offering the rebirth', () => {
   const f = fixture(); resurrection(f);
