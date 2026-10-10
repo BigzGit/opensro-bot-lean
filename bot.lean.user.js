@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.20
+// @version      1.2.21
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.20';
+const VERSION = '1.2.21';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -2453,6 +2453,11 @@ const Town = {
         (tf & 0x7fc) === 0x1ec || item.refObjId === 24198 ||
         Restock.supplies().some(s => s.refObjId === item.refObjId) ||
         splitList(c.keep).some(s => name.includes(s))) return false;
+    // Only explicitly ordinary, unenhanced equipment may be sold. Native
+    // rarity 2 covers all seal tiers; missing safety metadata means keep it.
+    if (ItemType.isEquipment(tf) && (item.tooltip?.fields?.rarity !== 0 ||
+        item.plus !== 0 || !Array.isArray(item.magic) || item.magic.length > 0 ||
+        /_(RARE|MAGIC|LEGEND|MYTH)(?:_HONOR)?$/i.test(item.codename || ''))) return false;
     return true;
   },
   eligible(item) { return this.disposable(item) && Loot.category(item.typeFlags) === 'elixirs'; },
@@ -4741,7 +4746,7 @@ const UI = {
         el('p', 'Bind your recall to Hotan in the game. While stopped, save the arrival point where a return scroll places you. Stand near, select and save the warehouse, potion merchant, repair merchant and world statue / teleport. Open the potion shop before saving its merchant. Saves your standing position for each approach. Uses collision-aware walking between services. Overrides the recorded walking restock while enabled.', 'muted'));
       for (const [role, label] of [['arrival', 'Arrival point'], ['storage', 'Warehouse'], ['vendor', 'Potion merchant'], ['smith', 'Repair merchant'], ['gate', 'World statue / teleport']]) services.append(
         this.row(this.button('Save ' + label.toLowerCase(), () => Town.save(role)), el('span', town()[role]?.name || (town()[role] ? 'Saved' : 'Not saved'), 'muted')));
-      services.append(el('p', 'Pet loot: store elixirs only. Sell other unprotected pet items at the saved weapon / repair merchant before repairing. Existing character bag items are never sold.', 'muted'));
+      services.append(el('p', 'Pet loot: store elixirs only. Sell other unprotected pet items at the saved weapon / repair merchant before repairing. Keep sealed/rare equipment, any + equipment, blue/magic options and equipment with incomplete safety metadata in the pet. Existing character bag items are never sold.', 'muted'));
       services.append(this.text('Keep in pet (names)', () => town().keep, v => town().keep = v),
         el('p', 'Uses the potion selections and refill thresholds above. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. Does not buy Item Mall scrolls. Failures stop the bot in place. F8 cancels.', 'muted'));
       this.townNote = el('p', Town.status(), 'muted'); services.append(this.townNote); this.pane.append(services);

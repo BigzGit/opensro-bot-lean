@@ -8,11 +8,11 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.20**.
+- Latest userscript release at this snapshot: **1.2.21**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **112 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest validation: **114 integration tests**, JavaScript syntax check and headless browser checks pass.
 - Latest work: opt-in Hotan recall/storage/refill/repair/reverse cycle. Live-account testing is still outstanding.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
@@ -237,3 +237,7 @@ User reported slow loading ending with town movement blocked or collision data u
 User reported a no-walkable-route wait after storage, requested storing only elixirs and selling the rest at the weapon store. Town.eligible now selects only unprotected elixirs regardless of legacy store category settings. Town.sellable selects other unprotected pet loot; supplies, travel scrolls, beginner speed item, unknown types and Keep names remain protected. UI replaces category controls with the fixed policy. Weapon/repair shop now enters sell before repair; native cos-shop-sell sells directly from the pet bag. Native command, ownership, shop and payload contract verified read-only in game gameplay.ts, inventory.ts cosTrade and merchant.ts. Full-stack disappearance confirms each sale; no repeat on rejection/partial or missing acknowledgement. Selection and pet identity are checked; original bag items are never sold. Capacity is checked after sales instead of after storage.
 
 Town movement accepts a collision-checked reachable point within up to 60 units of the saved approach, reduced to preserve native 200-unit service range. Navigation.next first attempts the exact goal, then retries A* with a bounded arrival radius only when no exact route exists. Other callers retain exact-goal routing. Waiting status names the service. A blocked saved-tile test verifies recovery and collision clearance; this does not prove the cause of the user screenshot, which does not expose the live collision map. Full-cycle test now confirms elixir-only storage plus non-elixir sales and protected survivors. New tests cover pending/partial sale timeout without duplication, wrong merchant, pet replacement and approach routing. 112 integration tests, syntax and isolated browser checks pass. Live-server selling and the reported Hotan route remain unverified.
+
+## Valuable equipment sale protection: 1.2.21
+
+User requested SoS and other good equipment never be sold. Reproduced a failing test showing the 1.2.20 sale predicate accepted native rarity-2 equipment. Native tooltip/item-slot code confirms rarity 2 for all seal tiers, ordinary rarity 0; InventoryItem carries plus and magic. Town.disposable now admits equipment only if tooltip.fields.rarity is exactly 0, plus is exactly 0, magic is an explicit empty array, and codename does not end in RARE/MAGIC/LEGEND/MYTH (optional HONOR). Thus enhanced, blue/magic, nonordinary and incomplete equipment metadata remain protected in the pet, not storage. Existing name exclusions and supply protections still apply. UI documents the policy. Two regression tests cover seals, other rarity, enhancements, magic, missing fields and confirmed ordinary-only sale followed by repair with valuable gear retained. 114 integration tests, syntax and isolated browser checks pass; live server sale behavior remains unverified.

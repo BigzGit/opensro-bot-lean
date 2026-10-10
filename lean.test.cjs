@@ -920,6 +920,34 @@ test('town sells only unprotected non-elixir pet loot and waits for a full sale 
   assert.equal(f.commands.some(c => c.kind === 'shop-sell'), false);
 });
 
+test('town never sells sealed, enhanced or blue equipment and keeps incomplete metadata', () => {
+  const f = townFixture(), normal = { refObjId: 1100, typeFlags: 44 | (6 << 7), name: 'Sword', plus: 0, magic: [], tooltip: { fields: { rarity: 0 } } };
+  assert.equal(f.Town.sellable(normal), true);
+  for (const item of [
+    ...[1, 2, 3].map(itemClass => ({ ...normal, tooltip: { fields: { rarity: 2, itemClass } } })),
+    { ...normal, plus: 1 }, { ...normal, plus: 12 }, { ...normal, magic: ['123'] },
+    { ...normal, tooltip: { fields: { rarity: 1 } } },
+    { ...normal, tooltip: undefined }, { ...normal, tooltip: { fields: {} } },
+    { ...normal, plus: undefined }, { ...normal, magic: undefined },
+    { ...normal, codename: 'ITEM_CH_SWORD_01_A_RARE' },
+  ]) {
+    assert.equal(f.Town.sellable(item), false, JSON.stringify(item));
+    assert.equal(f.Town.eligible(item), false);
+  }
+});
+
+test('town sells ordinary pet equipment while leaving valuable equipment in the pet bag', () => {
+  const f = townFixture(), gp = f.World.gp;
+  const normal = { slot: 5, refObjId: 1100, typeFlags: 44 | (6 << 7), quantity: 1, plus: 0, magic: [], tooltip: { fields: { rarity: 0 } } };
+  const rare = { ...normal, slot: 6, refObjId: 1101, tooltip: { fields: { rarity: 2, itemClass: 3 } } };
+  f.pet.status = 20; f.pet.inventory = [rare, normal];
+  f.Town.begin(); f.Town.enter('sell'); gp.target = 62; gp.shop = { npc: 62 };
+  f.Town.tick(); assert.equal(f.commands.at(-1).kind, 'cos-shop-sell'); assert.equal(f.commands.at(-1).slot, 5);
+  f.pet.inventory = [rare]; f.advance(1000); f.Town.tick();
+  assert.equal(f.Town.trip.phase, 'repair'); assert.equal(f.pet.inventory[0].refObjId, 1101);
+  assert.equal(f.commands.filter(c => c.kind === 'cos-shop-sell').length, 1);
+});
+
 test('town refuses selling at the wrong merchant or after the pet is replaced', () => {
   const f = townFixture(); f.Town.begin(); f.Town.enter('sell');
   f.World.gp.target = 61; f.World.gp.shop = { npc: 61 };

@@ -47,6 +47,11 @@ const Town = {
         (tf & 0x7fc) === 0x1ec || item.refObjId === 24198 ||
         Restock.supplies().some(s => s.refObjId === item.refObjId) ||
         splitList(c.keep).some(s => name.includes(s))) return false;
+    // Only explicitly ordinary, unenhanced equipment may be sold. Native
+    // rarity 2 covers all seal tiers; missing safety metadata means keep it.
+    if (ItemType.isEquipment(tf) && (item.tooltip?.fields?.rarity !== 0 ||
+        item.plus !== 0 || !Array.isArray(item.magic) || item.magic.length > 0 ||
+        /_(RARE|MAGIC|LEGEND|MYTH)(?:_HONOR)?$/i.test(item.codename || ''))) return false;
     return true;
   },
   eligible(item) { return this.disposable(item) && Loot.category(item.typeFlags) === 'elixirs'; },
