@@ -70,9 +70,9 @@ Live-server combat, loot timing, merchant transactions and navigation have not b
 `build-lean.py` extracts the retained worker/world/command/combat core, renderer-copy helpers, selected original skin textures and verified asset reader from the reviewed full `bot.js`. It runs `build-wardrobe.py` to retain the original validated wardrobe appearance core. Lean modules add the panel, collision planner, learned-metadata recovery, compact wardrobe browser and bot controller. The full bot's original `walkback.js` stays separate from `lean-walkback.js`.
 
 ```powershell
-python C:\sroserver\srobot\build-lean.py
-node --check C:\sroserver\srobot\bot.lean.user.js
-node C:\sroserver\srobot\lean.test.cjs
+python build-lean.py
+node --check bot.lean.user.js
+node lean.test.cjs
 ```
 
 The browser test also needs Playwright and a separate test profile; its runner takes the directory containing the bundled Node packages as its second argument. It generates screenshots of simulated game state and does not connect to a game account. Browser profiles, generated screenshots and personal settings are not included in the repository.
