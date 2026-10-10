@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.25
+// @version      1.2.26
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.25';
+const VERSION = '1.2.26';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -2523,6 +2523,7 @@ const Town = {
     const origin = revival ? this.lastScrollPoint || Hunt.cfg().center : World.pose();
     if (!origin) return this.fail('No saved hunting point for revival return.');
     if (revival) Hunt.running = true;
+    Restock.trip = null;
     Resurrect.cancelTrip('', true); Resurrect.holdUntil = 0; Loot.suspend();
     this.trip = { phase: 'recall', at: now(), started: now(), origin: { ...origin }, revival,
       manualAt: Manual.lastAt, character: World.charName, petRef: Loot.pet()?.rec.refObjId,
@@ -2530,7 +2531,9 @@ const Town = {
     Hunt.targetGid = Hunt.lootGid = 0;
     // Stop the worker's repeating attack/movement as well as the bot's next tick.
     // Pending inventory work still settles before item-use is admitted below.
-    Cmd.move(World.pose());
+    this.trip.haltSent = Cmd.move(World.pose());
+    this.trip.haltAt = now();
+    this.trip.haltAttempts = this.trip.haltSent ? 1 : 0;
     if (revival) this.enter('revive-arrival');
     else this.message = 'Using return scroll; recall must be bound to Hotan.';
   },
@@ -2734,7 +2737,7 @@ const Town = {
     const c = this.cfg();
     if (!this.trip) {
       if (!c.enabled || !Hunt.running || !World.inWorld() || World.isDead() ||
-          WalkBack.active || Restock.trip || Restock.recording || Restock.activeShop() || World.gp.storage || now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000 || !this.reason()) return false;
+          WalkBack.active || Restock.recording || Restock.activeShop() || World.gp.storage || now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000 || !this.reason()) return false;
       this.begin();
       if (!this.trip) return true;
     }
@@ -2747,6 +2750,14 @@ const Town = {
     if (!World.inWorld() || !gp?.pose || !World.local()) return true;
     if (World.isDead()) { this.fail('Character died during town service.'); return true; }
     if (t.phase === 'recall' && now() - t.at > 30000) { this.fail('Combat or inventory did not settle before departure.'); return true; }
+    // Stopping combat is part of departure, not a best-effort side effect.
+    // The initial move may hit Cmd.move's 550 ms rate limit or pending queue.
+    // Retry it before waiting for a cast that the worker otherwise repeats.
+    if (t.phase === 'recall' && (!t.haltSent || World.isCasting() && now() - t.haltAt >= 1500 && t.haltAttempts < 3)) {
+      if (Cmd.move(World.pose())) { t.haltSent = true; t.haltAt = now(); t.haltAttempts++; }
+      this.message = 'Town departure: stopping combat before using the return scroll.';
+      return true;
+    }
     if (now() - Potion.lastUse < 350) return true;
     Hunt.state = 'restock';
     if (t.phase === 'recall') {

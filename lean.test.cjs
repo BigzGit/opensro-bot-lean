@@ -843,7 +843,8 @@ test('town cycle is opt-in, hunting-only and overrides walking restock without r
   f.Hunt.start(); f.World.gp.inventory.find(i => i.refObjId === 15).quantity = 50;
   f.pet.inventory = []; f.Hunt.tick(); assert.equal(f.Restock.trip, null); assert.equal(f.Hunt.running, true);
   f.World.gp.inventory.find(i => i.refObjId === 15).quantity = 5;
-  f.Town.tick(); assert.equal(f.Town.trip.phase, 'recall-wait');
+  f.Town.tick(); f.advance(600); f.Town.tick(); f.advance(100); f.Town.tick();
+  assert.equal(f.Town.trip.phase, 'recall-wait');
 });
 test('pet storage protects supplies, keep names and items with missing metadata', () => {
   const f = townFixture(); f.Town.cfg().store.others = true;
@@ -1257,5 +1258,69 @@ test('near-hunt party revival resumes without waiting for town arrival', () => {
   f.World.local().appearanceState[0] = 2; f.Controller.tick();
   f.World.local().appearanceState[0] = 0; f.Controller.tick();
   assert.equal(f.Hunt.deathAt, 0); assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, true);
+});
+
+
+
+test('departure retries a rate-limited stop without needing the bot toggled', () => {
+  for (const trigger of ['potions', 'pet']) {
+    const f = townFixture();
+    if (trigger === 'potions') f.pet.inventory = [];
+    else f.World.gp.inventory.find(i => i.refObjId === 15).quantity = 50;
+    let fighting = true;
+    f.World.isCasting = () => fighting;
+    // A hunt move was just dispatched before the inventory update triggers town.
+    f.Cmd.move(f.World.pose());
+    const post = f.Hook.post;
+    f.Hook.post = msg => {
+      post(msg);
+      if (msg.command.command.kind === 'move') fighting = false;
+    };
+    f.Controller.tick(); assert.equal(f.Town.trip.phase, 'recall');
+    for (let n = 0; n < 20; n++) { f.advance(100); f.Controller.tick(); }
+    assert.equal(f.Town.trip.phase, 'recall-wait', 'Must recover automatically for ' + trigger);
+    assert.equal(f.Hunt.running, true);
+    assert.equal(f.commands.filter(c => c.kind === 'item-use' && c.slot === 13).length, 1);
+  }
+});
+
+test('enabled town departure takes ownership from a dormant walking-restock trip', () => {
+  const f = townFixture();
+  f.Restock.trip = { phase: 'vendor', manualAt: f.Manual.lastAt };
+  f.Controller.tick();
+  assert.equal(f.Restock.trip, null);
+  assert.equal(f.Town.trip.phase, 'recall-wait');
+  assert.equal(f.commands.filter(c => c.kind === 'item-use' && c.slot === 13).length, 1);
+});
+
+
+test('departure retries an unobserved stop at bounded intervals then recalls once', () => {
+  const f = townFixture(); let fighting = true, stops = 0;
+  f.World.isCasting = () => fighting;
+  const post = f.Hook.post;
+  f.Hook.post = msg => {
+    post(msg);
+    if (msg.command.command.kind === 'move' && ++stops === 2) fighting = false;
+  };
+  f.Controller.tick();
+  for (let n = 0; n < 14; n++) { f.advance(100); f.Controller.tick(); }
+  assert.equal(stops, 1); assert.equal(f.commands.some(c => c.kind === 'item-use'), false);
+  f.advance(100); f.Controller.tick(); assert.equal(stops, 2);
+  f.advance(100); f.Controller.tick(); assert.equal(f.Town.trip.phase, 'recall-wait');
+  for (let n = 0; n < 30; n++) { f.advance(100); f.Controller.tick(); }
+  assert.equal(stops, 2); assert.equal(f.commands.filter(c => c.kind === 'item-use').length, 1);
+});
+
+test('a blocked movement queue settles automatically but F8 still cancels departure', () => {
+  for (const cancel of [false, true]) {
+    const f = townFixture(); f.World.gp.pendingMoves = 25;
+    f.Controller.tick(); assert.equal(f.Town.trip.phase, 'recall');
+    assert.equal(f.commands.some(c => c.kind === 'item-use'), false);
+    if (cancel) f.stopAll();
+    f.World.gp.pendingMoves = 0;
+    f.advance(600); f.Controller.tick(); f.advance(100); f.Controller.tick();
+    if (cancel) { assert.equal(f.Town.trip, null); assert.equal(f.commands.some(c => c.kind === 'item-use'), false); }
+    else assert.equal(f.Town.trip.phase, 'recall-wait');
+  }
 });
 console.log('Total integration tests: ' + passed);

@@ -31,6 +31,8 @@ Both scripts must not run together. Lean detects another active assistant and de
 
 ## What changed
 
+Version **1.2.26** fixes a departure stall that could require toggling the bot. The combat-stop move is now retried if movement rate limits or a busy movement queue reject it, and repeated combat gets up to three spaced stop requests. Scroll use waits for that stop and settled combat/inventory. A dormant walking-restock trip can no longer block the enabled town cycle. Manual stop still cancels all retries.
+
 Version **1.2.25** reserves a settled item-use window for recall so alternating potions cannot starve departure. Character bags with at most one free slot now trigger recall too. Full bags and protected-only pets are checked after arrival; the bot stays in town with an explicit explanation when manual emptying is required. Existing character bag items remain untouched. With the town cycle enabled, the new revival switch defaults on: revive in town, service supplies/gear, then reverse to the last return-scroll point and resume hunting. Keep the saved hunt point near that scroll destination, and carry reverse scrolls.
 
 Version **1.2.24** adds editable **Town HP refill (stacks of 50)** and **Town MP refill (stacks of 50)** under Supplies → Hotan scroll town cycle. Defaults are **2 HP stacks (100 pots)** and **6 MP stacks (300 pots)**, including existing profiles without these settings. The cycle tops up to the target total, counting potions already in the character bag. Whole stack targets range from 1 to 200; each enabled kind needs a low-stock threshold below its total target. Town stack amounts are separate from the recorded walking-route Refill to quantities.

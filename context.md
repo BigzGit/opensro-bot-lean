@@ -8,11 +8,11 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.25**.
+- Latest userscript release at this snapshot: **1.2.26**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **127 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest validation: **131 integration tests**, JavaScript syntax check and headless browser checks pass.
 - Latest work: opt-in Hotan recall/storage/refill/repair/reverse cycle. Live-account testing is still outstanding.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
@@ -271,3 +271,10 @@ Town.revive defaults true (effective only with the town cycle enabled), overridi
 ## Standing publication preference (2026-10-10)
 
 After the 1.2.25 push was blocked by automatic approval review, the user explicitly instructed: "always publish tog github." Publish completed bot updates to https://github.com/nixxane/opensro-bot-lean as part of the release workflow, including the prepared 1.2.25 release. This is standing authorization for this bot repository.
+
+
+## Toggle-required departure stall: 1.2.26
+
+User clarified that on the latest version the bot only notices low potions/full inventory and recalls after toggling off/on. Status text was unavailable. Reproduced a matching failure in 1.2.25: Town.begin ignored a false Cmd.move result when a hunting move had just used the 550 ms rate limit. The worker could continue its combat loop while Town waited for combat to settle; toggle sends another stop. Town now tracks successful halt dispatch, retries rejected stops through normal Cmd.move guards, and allows at most three successful stop sends spaced by 1.5 seconds while casting continues. The existing 30-second departure limit remains; no repeated scroll dispatch is introduced.
+
+A dormant Restock.trip also excluded Town.tick while the enabled town setting prevented Restock.tick from running. Eligible town departure now clears that old walking trip and takes ownership. Recording, walk-back, open shops/storage, manual control, and disabled automation remain exclusions. Added regression coverage for both low-stock and pet-capacity triggers, recent-move rejection, ignored initial stops, pending movement queues, dormant restock state and F8 cancellation. 131 integration tests, syntax and isolated browser checks pass. These reproduce code defects matching the symptom; the exact live stalled state is still unverified.
