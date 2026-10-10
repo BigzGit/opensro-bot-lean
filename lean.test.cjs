@@ -381,4 +381,62 @@ test('pet chime schedules three gentle notes and leaves other bot sounds silent'
   assert.equal(f.Sound.play('good'), false); assert.equal(notes, 0);
   assert.equal(f.Sound.play('pet-full'), true); assert.equal(notes, 3);
 });
+function partyApplication(f) {
+  f.Settings.profile.party.autoAcceptMatching = true;
+  f.World.gp.social = { self: 10, leader: 10, options: 1, members: [{ id: 10 }] };
+  f.World.gp.partyMatching = { own: { id: 5, type: 1 }, request: { a: 40, b: 50, expires: 110000, member: { name: 'Applicant' } } };
+  return f.World.gp.partyMatching;
+}
+
+test('party matching is opt-in and accepts once while hunting is stopped', () => {
+  const f = fixture(); assert.equal(f.Settings.profile.party.autoAcceptMatching, false);
+  partyApplication(f); f.Settings.profile.party.autoAcceptMatching = false;
+  f.Controller.tick(); assert.equal(f.commands.length, 0);
+  f.Settings.profile.party.autoAcceptMatching = true; f.Controller.tick();
+  assert.deepEqual(JSON.parse(JSON.stringify(f.commands[0])), { kind: 'party-match-answer', a: 40, b: 50, answer: 1 });
+  f.advance(1000); f.Controller.tick(); assert.equal(f.commands.length, 1); assert.equal(f.Hunt.running, false);
+});
+
+test('party matching permits first applicant but never approves for another leader or listing', () => {
+  const f = fixture(), m = partyApplication(f);
+  f.World.gp.social.leader = 99; f.Controller.tick(); assert.equal(f.commands.length, 0);
+  f.World.gp.social.leader = 10; m.own = null; f.Controller.tick(); assert.equal(f.commands.length, 0);
+  m.own = { id: 5, type: 1 }; f.World.gp.social = { leader: 0, self: 0, options: 0, members: [] };
+  f.Controller.tick(); assert.equal(f.commands[0].answer, 1);
+});
+
+test('party matching respects four and eight member capacity', () => {
+  for (const [options, capacity] of [[0, 4], [1, 8]]) {
+    const f = fixture(); partyApplication(f); f.World.gp.social.options = options;
+    f.World.gp.social.members = Array.from({ length: capacity }, (_, id) => ({ id }));
+    f.Controller.tick(); assert.equal(f.commands.length, 0);
+    f.World.gp.social.members.pop(); f.Controller.tick(); assert.equal(f.commands.length, 1);
+  }
+});
+
+test('party matching leaves invitations and expired or unclocked requests alone', () => {
+  const f = fixture(), m = partyApplication(f), request = m.request;
+  m.request = null; f.World.gp.social.invitation = { type: 2, gid: 99 };
+  f.Controller.tick(); assert.equal(f.commands.length, 0);
+  m.request = request; f.World.simOffset = null; f.Controller.tick(); assert.equal(f.commands.length, 0);
+  f.World.simOffset = 0; request.expires = 100000; f.Controller.tick(); assert.equal(f.commands.length, 0);
+  request.expires = 110000; f.World.phase = 'login'; f.Controller.tick(); assert.equal(f.commands.length, 0);
+});
+
+test('party matching retries failed dispatch and correlates replacement requests', () => {
+  const f = fixture(), m = partyApplication(f), raw = f.Cmd.raw;
+  f.Cmd.raw = () => false; f.Controller.tick(); assert.equal(f.commands.length, 0);
+  f.Cmd.raw = raw; f.Controller.tick(); assert.equal(f.commands.length, 1);
+  m.request = { ...m.request, b: 51 }; f.advance(300); f.Controller.tick();
+  assert.equal(f.commands.length, 2); assert.equal(f.commands[1].b, 51);
+  m.request = { ...m.request, b: 52 }; f.Settings.profile.party.autoAcceptMatching = false;
+  f.advance(300); f.Controller.tick(); assert.equal(f.commands.length, 2);
+});
+
+test('gameplay mirror exposes party matching requests and clears answered requests', () => {
+  const f = fixture(), m = partyApplication(f);
+  f.World.applyGameplay({ ...f.World.gp, partyMatching: m }); f.Controller.tick(); assert.equal(f.commands.length, 1);
+  f.World.applyGameplay({ ...f.World.gp, partyMatching: { ...m, request: null } });
+  f.advance(300); f.Controller.tick(); assert.equal(f.commands.length, 1);
+});
 console.log(`${passed} lean integration tests passed.`);

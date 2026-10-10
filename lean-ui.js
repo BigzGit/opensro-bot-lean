@@ -280,6 +280,9 @@ const UI = {
         this.check('Stop when HP potions run out', () => H().stopNoHpPotion, v => H().stopNoHpPotion = v),
         this.check('Stop when bag is full', () => H().stopInvFull, v => H().stopInvFull = v),
         this.number('Manual control pause (s)', () => H().manualPauseS, v => H().manualPauseS = v, 1, 30)));
+      this.pane.append(this.group('Party',
+        this.check('Auto-accept party-matching joins', () => Settings.profile.party.autoAcceptMatching, v => Settings.profile.party.autoAcceptMatching = v),
+        el('p', 'Accepts applications to your own listing while you are the leader or forming a new party. Works while hunting is stopped; turn this switch off to stop accepting. Ordinary invitations are left to you.', 'muted')));
       this.pane.append(this.group('Profiles', el('p', 'Settings are saved separately for each character. Import copies only bot settings from the original assistant.', 'muted'),
         this.button('Import original bot settings', () => Settings.importOriginal()),
         this.button('Export Lean settings', () => {

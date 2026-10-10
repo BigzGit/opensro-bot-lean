@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.7
+// @version      1.2.8
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.7';
+const VERSION = '1.2.8';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -183,6 +183,7 @@ const Store = {
 
 const CLASS_KEYS = ['normal', 'champion', 'giant', 'party', 'elite', 'unique'];
 const DEFAULT_PROFILE = {
+  party: { autoAcceptMatching: false },
   wardrobe: { on: true, phantom: true, realAnim: true, hideAvatars: false,
     eq: {}, av: {}, pet: { atk: 0, pick: 0, mount: 0 }, presets: {}, undo: null },
   macro: {
@@ -216,7 +217,7 @@ const DEFAULT_PROFILE = {
 function botProfile(input) {
   const result = deepMerge(DEFAULT_PROFILE, {});
   if (!input || typeof input !== 'object') return result;
-  for (const key of ['macro', 'potion', 'hunt', 'wardrobe']) {
+  for (const key of ['macro', 'potion', 'hunt', 'wardrobe', 'party']) {
     if (!input[key] || typeof input[key] !== 'object') continue;
     for (const field of Object.keys(DEFAULT_PROFILE[key])) {
       if (field in input[key]) result[key][field] = deepMerge(DEFAULT_PROFILE[key][field], input[key][field]);
@@ -2142,6 +2143,34 @@ const Loot = {
 };
 
 
+// Approve only correlated applications to the local player's matching listing.
+const Party = {
+  answered: '',
+  reset() { this.answered = ''; },
+  tick() {
+    if (!Settings.profile.party.autoAcceptMatching || !World.inWorld()) return;
+    const gp = World.gp, matching = gp?.partyMatching, request = matching?.request, social = gp?.social;
+    if (!request) { this.reset(); return; }
+    if (!matching.own || !social || !Array.isArray(social.members)) return;
+    // An owned listing can exist before the first applicant forms the party.
+    if (social.leader && (!social.self || social.self !== social.leader)) return;
+    if (!social.leader && social.members.length) return;
+    const options = social.leader ? social.options : matching.own.type;
+    if (!Number.isInteger(options) || social.members.length >= ((options & 1) ? 8 : 4)) return;
+    const sim = World.simNow();
+    if (!Number.isFinite(sim) || !Number.isFinite(request.expires) || sim >= request.expires) return;
+    if (![request.a, request.b].every(id => Number.isInteger(id) && id > 0 && id <= 0xffffffff)) return;
+    const key = `${request.a}:${request.b}:${request.expires}`;
+    if (key === this.answered || !Cmd.spaced('party-match-answer')) return;
+    // Same correlation and accept value as the game's matching approval button.
+    if (Cmd.raw({ kind: 'party-match-answer', a: request.a, b: request.b, answer: 1 }, 'Auto-accept party-matching application')) {
+      this.answered = key;
+      UI.toast('Party join acceptance sent: ' + (request.member?.name || 'Applicant'), 'info', 3000);
+    }
+  },
+};
+
+
 // Single owner for movement/combat/pickup. Potion use remains a separate emergency lane.
 Hunt.lootAllowed = e => Loot.allowed(e);
 Hunt.chooseLoot = () => Loot.choose();
@@ -2217,6 +2246,7 @@ const Controller = {
     try {
       Restock.sample();
       if (!World.inWorld()) { this.mode = 'waiting'; return; }
+      Party.tick();
       Potion.tick();
       Loot.checkPetFull();
       if (this.resumeAfterRevive && !World.isDead()) {
@@ -4092,6 +4122,9 @@ const UI = {
         this.check('Stop when HP potions run out', () => H().stopNoHpPotion, v => H().stopNoHpPotion = v),
         this.check('Stop when bag is full', () => H().stopInvFull, v => H().stopInvFull = v),
         this.number('Manual control pause (s)', () => H().manualPauseS, v => H().manualPauseS = v, 1, 30)));
+      this.pane.append(this.group('Party',
+        this.check('Auto-accept party-matching joins', () => Settings.profile.party.autoAcceptMatching, v => Settings.profile.party.autoAcceptMatching = v),
+        el('p', 'Accepts applications to your own listing while you are the leader or forming a new party. Works while hunting is stopped; turn this switch off to stop accepting. Ordinary invitations are left to you.', 'muted')));
       this.pane.append(this.group('Profiles', el('p', 'Settings are saved separately for each character. Import copies only bot settings from the original assistant.', 'muted'),
         this.button('Import original bot settings', () => Settings.importOriginal()),
         this.button('Export Lean settings', () => {
@@ -4142,16 +4175,17 @@ function boot() {
     const key = name ? 'profile:' + name : 'profile:default';
     if (key !== Settings.profileKey) { stopAll(); Settings.useCharacter(name); }
   });
-  bus.on('profile', () => { stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
+  bus.on('profile', () => { Party.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
   bus.on('phase', phase => {
     if (phase !== 'world') {
+      Party.reset();
       const revival = phase === 'entering-world' && Hunt.running && Hunt.cfg().onDeath === 'revive' && (Hunt.state === 'dead' || Hunt.revived);
       stopAll(); Restock.cancelRecording(); Loot.reset();
       Controller.resumeAfterRevive = revival;
     }
   });
   bus.on('failure', () => { stopAll(); Restock.cancelRecording(); UI.toast('Game connection failed; bot stopped.', 'warn'); });
-  bus.on('reset', () => { Loot.reset(); Navigation.scene = null; Wardrobe.inv = Wardrobe.baseInv = Wardrobe.av = Wardrobe.baseAv = null; Wardrobe.body = ''; });
+  bus.on('reset', () => { Party.reset(); Loot.reset(); Navigation.scene = null; Wardrobe.inv = Wardrobe.baseInv = Wardrobe.av = Wardrobe.baseAv = null; Wardrobe.body = ''; });
   bus.on('attached', ({ late }) => { if (late) UI.toast('Attached after the game started. Reload for complete character data.', 'warn'); });
   bus.on('potion-empty', kind => UI.toast('Out of ' + kind.toUpperCase() + ' potions.', 'warn'));
   W.addEventListener('keydown', e => {

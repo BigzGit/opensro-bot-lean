@@ -113,6 +113,21 @@ const server = http.createServer((req, res) => {
     await page.getByRole('button', { name: 'Use imbue Weapon imbue', exact: true }).click();
     assert.equal(await page.evaluate(() => SROLean.settings.profile.macro.imbue.id), 8);
     await page.waitForFunction(() => [...document.getElementById('sro-bot-lean').shadowRoot.querySelectorAll('.slot')].every(s => s.dataset.iconLoaded === 'true'));
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    assert.equal(await page.getByLabel('Auto-accept party-matching joins', { exact: true }).isChecked(), false);
+    await page.getByLabel('Auto-accept party-matching joins', { exact: true }).check();
+    await page.evaluate(() => {
+      SROLean.world.simOffset = 0;
+      testSim.postMessage({ kind: 'fixture', message: { kind: 'world', batch: { events: [{ kind: 'gameplay', state: {
+        ...SROLean.world.gp,
+        social: { self: 10, leader: 10, options: 1, members: [{ id: 10 }] },
+        partyMatching: { own: { id: 5, type: 1 }, request: { a: 40, b: 50, expires: performance.now() + 10000, member: { name: 'TestApplicant' } } }
+      } }] } } });
+    });
+    await page.waitForFunction(() => testCommands.some(c => c.kind === 'party-match-answer'));
+    assert.deepEqual(await page.evaluate(() => testCommands.filter(c => c.kind === 'party-match-answer')), [{ kind: 'party-match-answer', a: 40, b: 50, answer: 1 }]);
+    await page.getByLabel('Auto-accept party-matching joins', { exact: true }).uncheck();
+    await page.evaluate(() => { SROLean.world.gp.partyMatching = null; });
     for (const tab of ['Loot', 'Supplies', 'Settings', 'Combat']) await page.getByRole('button', { name: tab, exact: true }).click();
     await page.getByRole('button', { name: 'Hunt area', exact: true }).click();
     await page.getByLabel('Hunt radius (m)', { exact: true }).fill('55');

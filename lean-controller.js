@@ -73,6 +73,7 @@ const Controller = {
     try {
       Restock.sample();
       if (!World.inWorld()) { this.mode = 'waiting'; return; }
+      Party.tick();
       Potion.tick();
       Loot.checkPetFull();
       if (this.resumeAfterRevive && !World.isDead()) {
