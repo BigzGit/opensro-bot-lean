@@ -280,7 +280,18 @@ const UI = {
         this.check('Stop when HP potions run out', () => H().stopNoHpPotion, v => H().stopNoHpPotion = v),
         this.check('Stop when bag is full', () => H().stopInvFull, v => H().stopInvFull = v),
         this.number('Manual control pause (s)', () => H().manualPauseS, v => H().manualPauseS = v, 1, 30)));
+      const party = () => Settings.profile.party;
+      this.partyNote = el('p', '', 'muted');
       this.pane.append(this.group('Party',
+        this.check('Auto-recruit', () => party().autoRecruit, v => { party().autoRecruit = v; Party.reset(); }),
+        this.text('Party listing title', () => party().title, v => party().title = v),
+        this.number('Party minimum level', () => party().min, v => party().min = v, 1, 90),
+        this.number('Party maximum level', () => party().max, v => party().max = v, 1, 90),
+        this.select('Party purpose', [[0, 'Hunting'], [1, 'Quest'], [2, 'Trade'], [3, 'Thief']], () => party().purpose, v => party().purpose = Number(v)),
+        this.check('Share EXP in new parties', () => party().expShare, v => party().expShare = v),
+        this.check('Share items in new parties', () => party().itemShare, v => party().itemShare = v),
+        this.partyNote,
+        el('p', 'Auto-recruit registers your saved listing and accepts applicants whenever enabled, even with hunting stopped. Restores missing listings when space opens. Existing listings and party sharing settings are preserved; edits apply to the next new listing. Turning this off leaves the current listing in place.', 'muted'),
         this.check('Auto-accept party-matching joins', () => Settings.profile.party.autoAcceptMatching, v => Settings.profile.party.autoAcceptMatching = v),
         el('p', 'Accepts applications to your own listing while you are the leader or forming a new party. Works while hunting is stopped; turn this switch off to stop accepting. Ordinary invitations are left to you.', 'muted')));
       this.pane.append(this.group('Profiles', el('p', 'Settings are saved separately for each character. Import copies only bot settings from the original assistant.', 'muted'),
@@ -297,6 +308,7 @@ const UI = {
     return (World.gp?.skills || []).map(id => { const s = World.skill(id); return `${id}:${s?.name}:${s?.icon}:${s?.level}`; }).join('|');
   },
   update() {
+    if (this.current === 'Settings' && this.partyNote) this.partyNote.textContent = Settings.profile.party.autoRecruit ? Party.message : 'Auto-recruit off.';
     if (!this.status) return;
     if (this.current === 'Loot' && this.petNote) { this.petNote.hidden = !Loot.petMode(); this.petNote.textContent = Loot.petStatus(); }
     Learned.repair();

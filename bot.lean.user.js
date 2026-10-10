@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.8
+// @version      1.2.9
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.8';
+const VERSION = '1.2.9';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -183,7 +183,7 @@ const Store = {
 
 const CLASS_KEYS = ['normal', 'champion', 'giant', 'party', 'elite', 'unique'];
 const DEFAULT_PROFILE = {
-  party: { autoAcceptMatching: false },
+  party: { autoAcceptMatching: false, autoRecruit: false, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true },
   wardrobe: { on: true, phantom: true, realAnim: true, hideAvatars: false,
     eq: {}, av: {}, pet: { atk: 0, pick: 0, mount: 0 }, presets: {}, undo: null },
   macro: {
@@ -2146,11 +2146,53 @@ const Loot = {
 // Approve only correlated applications to the local player's matching listing.
 const Party = {
   answered: '',
-  reset() { this.answered = ''; },
+  registration: null,
+  lastRegisterAt: -Infinity,
+  message: 'Auto-recruit off.',
+  reset() { this.answered = ''; this.registration = null; this.lastRegisterAt = -Infinity; this.message = 'Waiting for party state.'; },
+  recruit(matching, social) {
+    const c = Settings.profile.party;
+    if (!c.autoRecruit) { this.message = 'Auto-recruit off.'; return; }
+    if (matching.own) {
+      this.registration = null;
+      this.message = social.leader && social.self !== social.leader ? 'Listing present; only the leader can auto-accept.' : social.members.length >= (((social.leader ? social.options : matching.own.type) & 1) ? 8 : 4) ? 'Party full; waiting for a free slot.' : 'Listing active; accepting applicants when space is available.';
+      return;
+    }
+    if (this.registration) {
+      this.message = now() - this.registration.at < 15000 ? 'Waiting for registration confirmation.' : 'Registration not confirmed. Check the game, then toggle Auto-recruit to retry.';
+      return;
+    }
+    if (matching.own !== null || matching.pending || matching.request || matching.joining) { this.message = 'Waiting for party matching.'; return; }
+    if (social.leader && (!social.self || social.self !== social.leader) || !social.leader && social.members.length) {
+      this.message = 'Waiting until you are solo or party leader.'; return;
+    }
+    const type = social.leader ? social.options : (c.expShare ? 1 : 0) | (c.itemShare ? 2 : 0);
+    if (!Number.isInteger(type) || type < 0 || type > 7) { this.message = 'Waiting for party options.'; return; }
+    if (social.members.length >= ((type & 1) ? 8 : 4)) { this.message = 'Party full; waiting for a free slot.'; return; }
+    if (!social.leader && !(World.gp?.progression?.level >= 5)) { this.message = 'Level 5 is required to form a listing.'; return; }
+    const title = String(c.title || '').trim();
+    if (!title || title.length > 50 || !Number.isInteger(c.min) || !Number.isInteger(c.max) || c.min < 1 || c.max > 90 || c.min > c.max) {
+      this.message = 'Set a title (1-50 characters) and a level range within 1-90.'; return;
+    }
+    // Match the client party-matching purpose matrix for the equipped job suit.
+    const flags = World.gp.inventory?.find(i => i.slot === 8)?.typeFlags ?? 0, suit = flags >>> 11;
+    const job = (flags & 0x7fe) === 0x3ac && suit >= 1 && suit <= 3 ? suit : 4;
+    const validPurpose = Number.isInteger(c.purpose) && (job === 1 || job === 3 ? c.purpose === 2 : job === 2 ? c.purpose === 3 : c.purpose >= 0 && c.purpose < 2);
+    if (!validPurpose) { this.message = 'Listing purpose does not match your equipped job suit.'; return; }
+    if (now() - this.lastRegisterAt < 30000 || !Cmd.spaced('party-match-register')) { this.message = 'Waiting before restoring the listing.'; return; }
+    const registration = { party: 0, type, purpose: c.purpose, min: c.min, max: c.max, title };
+    if (Cmd.raw({ kind: 'party-match-register', registration }, 'Auto-recruit: register party listing')) {
+      this.registration = { at: now() }; this.lastRegisterAt = now();
+      this.message = 'Waiting for registration confirmation.';
+    }
+  },
   tick() {
-    if (!Settings.profile.party.autoAcceptMatching || !World.inWorld()) return;
+    const c = Settings.profile.party;
+    if (!World.inWorld() || (!c.autoAcceptMatching && !c.autoRecruit)) return;
     const gp = World.gp, matching = gp?.partyMatching, request = matching?.request, social = gp?.social;
-    if (!request) { this.reset(); return; }
+    if (!matching || !social || !Array.isArray(social.members)) return;
+    this.recruit(matching, social);
+    if (!request) { this.answered = ''; return; }
     if (!matching.own || !social || !Array.isArray(social.members)) return;
     // An owned listing can exist before the first applicant forms the party.
     if (social.leader && (!social.self || social.self !== social.leader)) return;
@@ -4122,7 +4164,18 @@ const UI = {
         this.check('Stop when HP potions run out', () => H().stopNoHpPotion, v => H().stopNoHpPotion = v),
         this.check('Stop when bag is full', () => H().stopInvFull, v => H().stopInvFull = v),
         this.number('Manual control pause (s)', () => H().manualPauseS, v => H().manualPauseS = v, 1, 30)));
+      const party = () => Settings.profile.party;
+      this.partyNote = el('p', '', 'muted');
       this.pane.append(this.group('Party',
+        this.check('Auto-recruit', () => party().autoRecruit, v => { party().autoRecruit = v; Party.reset(); }),
+        this.text('Party listing title', () => party().title, v => party().title = v),
+        this.number('Party minimum level', () => party().min, v => party().min = v, 1, 90),
+        this.number('Party maximum level', () => party().max, v => party().max = v, 1, 90),
+        this.select('Party purpose', [[0, 'Hunting'], [1, 'Quest'], [2, 'Trade'], [3, 'Thief']], () => party().purpose, v => party().purpose = Number(v)),
+        this.check('Share EXP in new parties', () => party().expShare, v => party().expShare = v),
+        this.check('Share items in new parties', () => party().itemShare, v => party().itemShare = v),
+        this.partyNote,
+        el('p', 'Auto-recruit registers your saved listing and accepts applicants whenever enabled, even with hunting stopped. Restores missing listings when space opens. Existing listings and party sharing settings are preserved; edits apply to the next new listing. Turning this off leaves the current listing in place.', 'muted'),
         this.check('Auto-accept party-matching joins', () => Settings.profile.party.autoAcceptMatching, v => Settings.profile.party.autoAcceptMatching = v),
         el('p', 'Accepts applications to your own listing while you are the leader or forming a new party. Works while hunting is stopped; turn this switch off to stop accepting. Ordinary invitations are left to you.', 'muted')));
       this.pane.append(this.group('Profiles', el('p', 'Settings are saved separately for each character. Import copies only bot settings from the original assistant.', 'muted'),
@@ -4139,6 +4192,7 @@ const UI = {
     return (World.gp?.skills || []).map(id => { const s = World.skill(id); return `${id}:${s?.name}:${s?.icon}:${s?.level}`; }).join('|');
   },
   update() {
+    if (this.current === 'Settings' && this.partyNote) this.partyNote.textContent = Settings.profile.party.autoRecruit ? Party.message : 'Auto-recruit off.';
     if (!this.status) return;
     if (this.current === 'Loot' && this.petNote) { this.petNote.hidden = !Loot.petMode(); this.petNote.textContent = Loot.petStatus(); }
     Learned.repair();

@@ -439,4 +439,58 @@ test('gameplay mirror exposes party matching requests and clears answered reques
   f.World.applyGameplay({ ...f.World.gp, partyMatching: { ...m, request: null } });
   f.advance(300); f.Controller.tick(); assert.equal(f.commands.length, 1);
 });
+function recruiting(f) {
+  f.Settings.profile.party.autoRecruit = true;
+  f.World.gp.progression.level = 30;
+  f.World.gp.social = { self: 0, leader: 0, options: 0, members: [] };
+  f.World.gp.partyMatching = { own: null, request: null, pending: null };
+  return f.World.gp.partyMatching;
+}
+test('auto-recruit registers saved settings while hunting is stopped', () => {
+  const f = fixture(); assert.equal(f.Settings.profile.party.autoRecruit, false); recruiting(f);
+  Object.assign(f.Settings.profile.party, { title: 'My party', min: 20, max: 40, itemShare: false });
+  f.Controller.tick(); assert.equal(f.Hunt.running, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(f.commands[0])), { kind: 'party-match-register', registration: { party: 0, type: 1, purpose: 0, min: 20, max: 40, title: 'My party' } });
+});
+test('auto-recruit preserves existing listings and existing party sharing options', () => {
+  const f = fixture(), m = recruiting(f); m.own = { id: 5, type: 0 };
+  f.Controller.tick(); assert.equal(f.commands.length, 0);
+  m.own = null; f.World.gp.social = { self: 10, leader: 10, options: 6, members: [{ id: 10 }] };
+  f.Controller.tick(); assert.equal(f.commands[0].registration.type, 6);
+});
+test('auto-recruit waits for confirmation without duplicate or blind repeat registrations', () => {
+  const f = fixture(), m = recruiting(f); f.Controller.tick();
+  f.advance(1000); m.pending = 'register'; f.Controller.tick();
+  f.advance(60000); m.pending = null; m.result = 9; f.Controller.tick();
+  assert.equal(f.commands.length, 1);
+});
+test('auto-recruit restores a confirmed listing after it disappears and space opens', () => {
+  const f = fixture(), m = recruiting(f); f.Controller.tick();
+  m.own = { id: 5, type: 1 }; f.Controller.tick();
+  f.World.gp.social = { self: 10, leader: 10, options: 1, members: Array(8).fill({ id: 10 }) };
+  m.own = null; f.advance(31000); f.Controller.tick(); assert.equal(f.commands.length, 1);
+  f.World.gp.social.members.pop(); f.Controller.tick(); assert.equal(f.commands.length, 2);
+});
+test('auto-recruit accepts matching applicants without requiring the separate accept switch', () => {
+  const f = fixture(), m = recruiting(f); m.own = { id: 5, type: 1 };
+  m.request = { a: 40, b: 50, expires: 110000, member: { name: 'Applicant' } };
+  f.Controller.tick(); assert.equal(f.commands[0].kind, 'party-match-answer');
+  f.Settings.profile.party.autoRecruit = false; m.request.b++; f.advance(500); f.Controller.tick(); assert.equal(f.commands.length, 1);
+});
+test('auto-recruit skips non-leaders, low level, pending matching and invalid listing settings', () => {
+  const f = fixture(), m = recruiting(f);
+  f.World.gp.social = { self: 10, leader: 20, options: 1, members: [{ id: 10 }] }; f.Controller.tick();
+  f.World.gp.social = { self: 0, leader: 0, options: 0, members: [] };
+  f.World.gp.progression.level = 4; f.Controller.tick(); f.World.gp.progression.level = 30;
+  m.pending = 'join'; f.Controller.tick(); m.pending = null;
+  f.Settings.profile.party.title = ''; f.Controller.tick(); f.Settings.profile.party.title = 'Test';
+  f.Settings.profile.party.min = 60; f.Settings.profile.party.max = 30; f.Controller.tick();
+  assert.equal(f.commands.length, 0);
+});
+test('auto-recruit validates listing purpose against job suit', () => {
+  const f = fixture(); recruiting(f); f.Settings.profile.party.purpose = 2;
+  f.Controller.tick(); assert.equal(f.commands.length, 0);
+  f.World.gp.inventory = [{ slot: 8, typeFlags: (1 << 11) | 0x3ac }];
+  f.Controller.tick(); assert.equal(f.commands[0].registration.purpose, 2);
+});
 console.log(`${passed} lean integration tests passed.`);

@@ -127,6 +127,17 @@ const server = http.createServer((req, res) => {
     await page.waitForFunction(() => testCommands.some(c => c.kind === 'party-match-answer'));
     assert.deepEqual(await page.evaluate(() => testCommands.filter(c => c.kind === 'party-match-answer')), [{ kind: 'party-match-answer', a: 40, b: 50, answer: 1 }]);
     await page.getByLabel('Auto-accept party-matching joins', { exact: true }).uncheck();
+    await page.evaluate(() => {
+      SROLean.world.gp.partyMatching = { own: null, pending: null, request: null };
+      SROLean.world.gp.social = { self: 0, leader: 0, options: 0, members: [] };
+      SROLean.world.gp.progression.level = 30;
+    });
+    await page.getByLabel('Party listing title', { exact: true }).fill('Browser recruitment');
+    await page.getByLabel('Party listing title', { exact: true }).dispatchEvent('change');
+    await page.getByLabel('Auto-recruit', { exact: true }).check();
+    await page.waitForFunction(() => testCommands.some(c => c.kind === 'party-match-register'));
+    assert.deepEqual(await page.evaluate(() => testCommands.filter(c => c.kind === 'party-match-register')), [{ kind: 'party-match-register', registration: { party: 0, type: 3, purpose: 0, min: 1, max: 90, title: 'Browser recruitment' } }]);
+    await page.getByLabel('Auto-recruit', { exact: true }).uncheck();
     await page.evaluate(() => { SROLean.world.gp.partyMatching = null; });
     for (const tab of ['Loot', 'Supplies', 'Settings', 'Combat']) await page.getByRole('button', { name: tab, exact: true }).click();
     await page.getByRole('button', { name: 'Hunt area', exact: true }).click();

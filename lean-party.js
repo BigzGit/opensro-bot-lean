@@ -1,11 +1,53 @@
 // Approve only correlated applications to the local player's matching listing.
 const Party = {
   answered: '',
-  reset() { this.answered = ''; },
+  registration: null,
+  lastRegisterAt: -Infinity,
+  message: 'Auto-recruit off.',
+  reset() { this.answered = ''; this.registration = null; this.lastRegisterAt = -Infinity; this.message = 'Waiting for party state.'; },
+  recruit(matching, social) {
+    const c = Settings.profile.party;
+    if (!c.autoRecruit) { this.message = 'Auto-recruit off.'; return; }
+    if (matching.own) {
+      this.registration = null;
+      this.message = social.leader && social.self !== social.leader ? 'Listing present; only the leader can auto-accept.' : social.members.length >= (((social.leader ? social.options : matching.own.type) & 1) ? 8 : 4) ? 'Party full; waiting for a free slot.' : 'Listing active; accepting applicants when space is available.';
+      return;
+    }
+    if (this.registration) {
+      this.message = now() - this.registration.at < 15000 ? 'Waiting for registration confirmation.' : 'Registration not confirmed. Check the game, then toggle Auto-recruit to retry.';
+      return;
+    }
+    if (matching.own !== null || matching.pending || matching.request || matching.joining) { this.message = 'Waiting for party matching.'; return; }
+    if (social.leader && (!social.self || social.self !== social.leader) || !social.leader && social.members.length) {
+      this.message = 'Waiting until you are solo or party leader.'; return;
+    }
+    const type = social.leader ? social.options : (c.expShare ? 1 : 0) | (c.itemShare ? 2 : 0);
+    if (!Number.isInteger(type) || type < 0 || type > 7) { this.message = 'Waiting for party options.'; return; }
+    if (social.members.length >= ((type & 1) ? 8 : 4)) { this.message = 'Party full; waiting for a free slot.'; return; }
+    if (!social.leader && !(World.gp?.progression?.level >= 5)) { this.message = 'Level 5 is required to form a listing.'; return; }
+    const title = String(c.title || '').trim();
+    if (!title || title.length > 50 || !Number.isInteger(c.min) || !Number.isInteger(c.max) || c.min < 1 || c.max > 90 || c.min > c.max) {
+      this.message = 'Set a title (1-50 characters) and a level range within 1-90.'; return;
+    }
+    // Match the client party-matching purpose matrix for the equipped job suit.
+    const flags = World.gp.inventory?.find(i => i.slot === 8)?.typeFlags ?? 0, suit = flags >>> 11;
+    const job = (flags & 0x7fe) === 0x3ac && suit >= 1 && suit <= 3 ? suit : 4;
+    const validPurpose = Number.isInteger(c.purpose) && (job === 1 || job === 3 ? c.purpose === 2 : job === 2 ? c.purpose === 3 : c.purpose >= 0 && c.purpose < 2);
+    if (!validPurpose) { this.message = 'Listing purpose does not match your equipped job suit.'; return; }
+    if (now() - this.lastRegisterAt < 30000 || !Cmd.spaced('party-match-register')) { this.message = 'Waiting before restoring the listing.'; return; }
+    const registration = { party: 0, type, purpose: c.purpose, min: c.min, max: c.max, title };
+    if (Cmd.raw({ kind: 'party-match-register', registration }, 'Auto-recruit: register party listing')) {
+      this.registration = { at: now() }; this.lastRegisterAt = now();
+      this.message = 'Waiting for registration confirmation.';
+    }
+  },
   tick() {
-    if (!Settings.profile.party.autoAcceptMatching || !World.inWorld()) return;
+    const c = Settings.profile.party;
+    if (!World.inWorld() || (!c.autoAcceptMatching && !c.autoRecruit)) return;
     const gp = World.gp, matching = gp?.partyMatching, request = matching?.request, social = gp?.social;
-    if (!request) { this.reset(); return; }
+    if (!matching || !social || !Array.isArray(social.members)) return;
+    this.recruit(matching, social);
+    if (!request) { this.answered = ''; return; }
     if (!matching.own || !social || !Array.isArray(social.members)) return;
     // An owned listing can exist before the first applicant forms the party.
     if (social.leader && (!social.self || social.self !== social.leader)) return;
