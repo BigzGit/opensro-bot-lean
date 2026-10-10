@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, bus, Manual, Resurrect, SpeedScroll, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [];
@@ -720,5 +720,201 @@ test('pet waits for inventory and potion priority without holding up combat', ()
   f.Hunt.tick(); assert.equal(fights, 1); assert.equal(f.Loot.active, null);
   f.World.gp.inventoryPending = false; f.World.gp.vitals = [{ gid: 1, hp: 65, mp: 100, maxHp: 100, maxMp: 100 }];
   f.Hunt.tick(); assert.equal(fights, 2); assert.equal(f.Loot.active, null);
+});
+function townFixture() {
+  const f = fixture(), c = f.Town.cfg(), r = f.Restock.cfg(), gp = f.World.gp;
+  c.enabled = true; c.arrival = { regionId: 1, x: 100, y: 0, z: 100 }; c.keep = 'favorite';
+  for (const [index, role] of ['storage', 'vendor', 'smith', 'gate'].entries()) {
+    const npc = { gid: 60 + index, refObjId: 600 + index, kind: 'npc', name: role, regionId: 1, x: 130 + index * 40, y: 0, z: 100 };
+    c[role] = { ...npc }; f.World.ents.set(npc.gid, npc);
+  }
+  r.hp.on = false; r.mp.refObjId = 102; r.mp.low = 5; r.mp.target = 50;
+  gp.inventory = [
+    { slot: 6, refObjId: 900, typeFlags: 44 | (6 << 7), durability: 5, variance: '0', magic: [], tooltip: { fields: { canRepair: 1, varianceIntMin1c0: 10, varianceIntMax1c4: 10 } } },
+    { slot: 13, refObjId: 200, typeFlags: 0x09ec, quantity: 3 },
+    { slot: 14, refObjId: 201, typeFlags: 0x19ec, quantity: 2 },
+    { slot: 15, refObjId: 102, typeFlags: 4332, quantity: 1 },
+  ];
+  const pet = pickupPet(f);
+  pet.inventory = [
+    { slot: 0, refObjId: 1000, typeFlags: 3436, quantity: 2, name: 'Elixir' },
+    { slot: 1, refObjId: 1001, typeFlags: 5484, quantity: 1, name: 'Powder' },
+    { slot: 2, refObjId: 1002, typeFlags: 44 | (6 << 7), quantity: 1, name: 'Favorite sword' },
+    { slot: 3, refObjId: 102, typeFlags: 4332, quantity: 5, name: 'MP potion' },
+    { slot: 4, refObjId: 1003, typeFlags: 108, quantity: 1, name: 'Other item' },
+  ];
+  gp.pose.x = 700; f.Settings.profile.hunt.center.x = 700;
+  f.Hunt.start();
+  return { ...f, pet };
+}
+test('town cycle recalls, confirms pet storage and purchases, repairs, reverses and resumes', () => {
+  const f = townFixture(), gp = f.World.gp, commands = f.commands;
+  f.UI.mount = f.UI.draw = f.UI.update = f.Ticker.start = () => {}; f.boot();
+  const stored = [], buys = [], phases = [];
+  let handled = 0;
+  for (let n = 0; n < 140; n++) {
+    f.Controller.tick();
+    if (f.Town.trip) phases.push(f.Town.trip.phase);
+    while (handled < commands.length) {
+      const c = commands[handled++];
+      if (c.kind === 'item-use') {
+        assert.equal(c.slot, 13); gp.inventory.find(i => i.slot === 13).quantity--;
+        f.bus.emit('phase', 'entering-world'); f.bus.emit('reset');
+        gp.pose.x = 100; f.Navigation.install(navProduct());
+      } else if (c.kind === 'move') gp.pose = { ...c.destination };
+      else if (c.kind === 'select') {
+        gp.target = c.gid; gp.targetCapabilities = {60:4,61:1,62:0x801,63:0x20000080}[c.gid];
+      } else if (c.kind === 'storage-open') gp.storage = { npc: c.gid, phase: 'open', capacity: 30, items: [] };
+      else if (c.kind === 'cos-transfer') {
+        const i = f.pet.inventory.find(i => i.slot === c.source);
+        gp.inventory.push({ ...i, slot: c.destination }); f.pet.inventory = f.pet.inventory.filter(i => i.slot !== c.source);
+      } else if (c.kind === 'storage-move') {
+        const i = gp.inventory.find(i => i.slot === c.move.source);
+        stored.push(i.refObjId); gp.storage.items.push({ ...i, slot: c.move.destination });
+        gp.inventory = gp.inventory.filter(i => i.slot !== c.move.source);
+      } else if (c.kind === 'shop-open') {
+        gp.shop = { npc: c.gid, offers: [{ refObjId: 102, name: 'MP', tab: 0, slot: 0, maxStack: 100, price: '10', previews: [{ refObjId: 102, typeFlags: 4332 }] }] };
+        gp.shopCompletionRevision++;
+      } else if (c.kind === 'shop-buy') { buys.push(c.quantity); gp.inventory.find(i => i.refObjId === 102).quantity += c.quantity; }
+      else if (c.kind === 'shop-repair') gp.inventory.find(i => i.slot === 6).durability = 10;
+      else if (c.kind === 'npc-close') { gp.target = 0; gp.shop = null; gp.storage = null; }
+      else if (c.kind === 'npc-talk') gp.npcConversation = { gid: gp.target, phase: 'menu' };
+      else if (c.kind === 'travel-gate') {
+        assert.equal(c.gid, 63); assert.equal(c.type, 5); assert.equal(c.target, 2);
+        f.bus.emit('phase', 'entering-world'); f.bus.emit('reset'); gp.pose.x = 700;
+      }
+    }
+    f.advance(600);
+    if (!f.Town.trip && phases.includes('reverse-wait')) break;
+  }
+  assert.equal(f.Town.trip, null, f.Town.message); assert.equal(f.Hunt.running, true, f.Town.message);
+  assert.deepEqual(stored, [1000, 1001]); assert.deepEqual(buys, [49]);
+  assert.equal(f.pet.inventory.length, 3); assert.equal(gp.inventory.find(i => i.slot === 6).durability, 10);
+  assert.equal(commands.filter(c => c.kind === 'item-use').length, 1);
+  assert.equal(commands.filter(c => c.kind === 'travel-gate').length, 1);
+  assert.match(f.Town.message, /complete/);
+});
+test('town preflight stops before consuming scrolls when setup, scrolls or staging space are missing', () => {
+  for (const change of [f => f.Town.cfg().gate = null, f => f.World.gp.inventory = f.World.gp.inventory.filter(i => i.slot !== 14),
+      f => f.World.gp.inventorySlotCount = 16, f => f.World.gp.progression.gold = '0']) {
+    const f = townFixture(); change(f); f.Town.tick();
+    assert.equal(f.Hunt.running, false); assert.equal(f.Town.trip, null);
+    assert.equal(f.commands.some(c => c.kind === 'item-use'), false);
+  }
+});
+test('town cycle is opt-in, hunting-only and overrides walking restock without recording', () => {
+  const f = townFixture(); f.Restock.cfg().enabled = true;
+  f.Town.cfg().enabled = false; assert.equal(f.Town.tick(), false);
+  f.Town.cfg().enabled = true; f.Hunt.stop(); assert.equal(f.Town.tick(), false);
+  f.Hunt.start(); f.World.gp.inventory.find(i => i.refObjId === 102).quantity = 50;
+  f.pet.inventory = []; f.Hunt.tick(); assert.equal(f.Restock.trip, null); assert.equal(f.Hunt.running, true);
+  f.World.gp.inventory.find(i => i.refObjId === 102).quantity = 5;
+  f.Town.tick(); assert.equal(f.Town.trip.phase, 'recall-wait');
+});
+test('pet storage protects supplies, keep names and items with missing metadata', () => {
+  const f = townFixture(); f.Town.cfg().store.others = true;
+  for (const item of [...f.World.items(), f.pet.inventory[2], f.pet.inventory[3], { name: 'Unknown', refObjId: 123 }]) assert.equal(f.Town.eligible(item), false);
+  assert.equal(f.Town.eligible(f.pet.inventory[0]), true);
+  assert.equal(f.Town.eligible({ refObjId: 24198, typeFlags: 3820 }), false);
+  f.Town.cfg().store.elixirs = false; assert.equal(f.Town.eligible(f.pet.inventory[0]), false);
+});
+test('town cycle does not repeat unconfirmed pet transfers and stops on full storage', () => {
+  const f = townFixture(); f.Town.begin(); f.Town.enter('store');
+  f.World.gp.storage = { npc: 60, phase: 'open', capacity: 1, items: [] }; f.World.gp.target = 60;
+  f.Town.store(); assert.equal(f.commands.at(-1).kind, 'cos-transfer');
+  f.advance(600); f.Town.store(); assert.equal(f.commands.filter(c => c.kind === 'cos-transfer').length, 1);
+  f.advance(15000); f.Town.store(); assert.equal(f.Hunt.running, false); assert.equal(f.Town.trip, null);
+  const g = townFixture(); g.Town.begin(); g.Town.enter('store');
+  g.World.gp.storage = { npc: 60, phase: 'open', capacity: 1, items: [{ slot: 0, refObjId: 999 }] }; g.World.gp.target = 60;
+  g.Town.store(); assert.match(g.Town.message, /Storage is full/); assert.equal(g.commands.some(c => c.kind === 'cos-transfer'), false);
+});
+test('town cycle rejects cached shops and waits for fresh catalogue acknowledgement', () => {
+  const f = townFixture(), gp = f.World.gp;
+  f.Town.begin(); f.Town.enter('open-vendor'); gp.target = 61; gp.targetCapabilities = 1; gp.shop = { npc: 61, offers: [] };
+  f.Town.tick(); f.advance(1000); f.Town.tick(); assert.equal(f.Town.trip.phase, 'open-vendor');
+  assert.equal(f.commands.filter(c => c.kind === 'shop-open').length, 1);
+  gp.shopCompletionRevision++; f.Town.tick(); assert.equal(f.Town.trip.phase, 'buy');
+});
+test('town cycle cancels on manual control, F8, disabled settings and unexpected travel', () => {
+  for (const change of [f => { f.Manual.lastAt++; f.Town.tick(); }, f => f.toggleBot(),
+      f => { f.Town.cfg().enabled = false; f.Town.tick(); }, f => f.Town.phase('reconnecting')]) {
+    const f = townFixture(); f.Town.tick(); change(f);
+    assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, false);
+  }
+});
+test('town scroll wait times out while outside world and wrong arrival never starts service', () => {
+  const f = townFixture(); f.Town.tick(); f.Town.phase('entering-world');
+  f.World.gp.pose.x = 500; f.Town.tick(); assert.equal(f.Town.trip.phase, 'recall-wait');
+  f.World.phase = 'entering-world'; f.advance(91000); f.Controller.tick();
+  assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, false); assert.match(f.Town.message, /timed out/);
+});
+test('town movement needs collision coverage and stops instead of blindly crossing obstacles', () => {
+  const f = townFixture(); f.Town.begin(); f.Town.enter('walk-storage'); f.Navigation.scene = null;
+  f.Town.tick(); assert.equal(f.commands.some(c => c.kind === 'move'), false);
+  f.advance(21000); f.Town.tick(); assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, false);
+});
+test('town purchase requires exact quantity gain and enough gold, without duplicate buys', () => {
+  const f = townFixture(), gp = f.World.gp;
+  f.Town.begin(); f.Town.enter('buy'); gp.target = 61;
+  gp.shop = { npc: 61, offers: [{ refObjId: 102, tab: 0, slot: 0, maxStack: 100, price: '10', previews: [{ refObjId: 102, typeFlags: 4332 }] }] };
+  f.Town.buy(); assert.equal(f.commands.at(-1).quantity, 49);
+  gp.inventory.find(i => i.refObjId === 102).quantity++; f.advance(1000); f.Town.buy();
+  assert.ok(f.Town.trip.pending); assert.equal(f.commands.filter(c => c.kind === 'shop-buy').length, 1);
+  f.advance(15000); f.Town.buy(); assert.equal(f.Town.trip, null);
+  const g = townFixture(); g.Town.begin(); g.Town.enter('buy'); g.World.gp.target = 61; g.World.gp.shop = gp.shop; g.World.gp.progression.gold = '1';
+  g.Town.buy(); assert.equal(g.commands.some(c => c.kind === 'shop-buy'), false); assert.match(g.Town.message, /gold/);
+});
+test('town repairs require restored durability and reverse return requires all final checks', () => {
+  const f = townFixture(), gp = f.World.gp;
+  f.Town.begin(); f.Town.enter('repair'); gp.target = 62; gp.shop = { npc: 62 };
+  f.Town.repair(); f.advance(1000); f.Town.repair(); assert.equal(f.Town.trip.phase, 'repair');
+  assert.equal(f.commands.filter(c => c.kind === 'shop-repair').length, 1);
+  f.advance(15000); f.Town.repair(); assert.equal(f.Town.trip, null);
+  const g = townFixture(); g.Town.begin(); g.Town.enter('reverse'); g.World.gp.target = 63; g.World.gp.targetCapabilities = 0x20000000;
+  g.Town.tick(); assert.equal(g.commands.some(c => c.kind === 'travel-gate'), false); assert.equal(g.Hunt.running, false);
+});
+test('town service keeps emergency potions active and prevents scroll actions in the same tick', () => {
+  const f = townFixture(); f.Town.begin(); f.World.gp.inventory.push({ slot: 20, refObjId: 101, typeFlags: 2284, quantity: 5 });
+  f.World.gp.vitals = [{ gid: 1, hp: 10, mp: 100, maxHp: 100, maxMp: 100 }];
+  f.Controller.tick(); assert.equal(f.commands.at(-1).kind, 'item-use'); assert.equal(f.commands.at(-1).slot, 20);
+  assert.equal(f.Town.trip.phase, 'recall'); assert.equal(f.commands.filter(c => c.kind === 'item-use').length, 1);
+});
+test('town scroll refill uses gold offers, rejects packages and requires a spare return scroll', () => {
+  const f = townFixture(), gp = f.World.gp;
+  gp.inventory.find(i => i.refObjId === 102).quantity = 50; gp.inventory = gp.inventory.filter(i => i.slot !== 13);
+  // A missing return scroll is detected before leaving a shop, rather than returning unprepared.
+  gp.inventory.push({ slot: 13, refObjId: 200, typeFlags: 0x09ec, quantity: 1 });
+  f.Town.begin(); f.Town.enter('buy'); gp.inventory = gp.inventory.filter(i => i.slot !== 13); gp.target = 61;
+  const offer = { refObjId: 200, tab: 0, slot: 3, maxStack: 50, price: '50', currency: 1, previews: [{ refObjId: 200, typeFlags: 0x09ec }] };
+  gp.shop = { npc: 61, offers: [offer] }; f.Town.buy(); assert.equal(f.commands.at(-1).quantity, 2); assert.equal(f.commands.at(-1).slot, 3);
+  gp.inventory.push({ slot: 13, refObjId: 200, typeFlags: 0x09ec, quantity: 2 }); f.advance(600); f.Town.buy(); assert.equal(f.Town.trip.phase, 'close-vendor');
+  const g = townFixture(); g.Town.begin(); g.Town.enter('buy'); g.World.gp.inventory.find(i => i.refObjId === 102).quantity = 50;
+  g.World.gp.inventory = g.World.gp.inventory.filter(i => i.slot !== 13); g.World.gp.target = 61;
+  g.World.gp.shop = { npc: 61, offers: [{ ...offer, contents: [{ refObjId: 200, quantity: 10 }] }] };
+  g.Town.buy(); assert.equal(g.commands.some(c => c.kind === 'shop-buy'), false); assert.equal(g.Hunt.running, false);
+});
+test('F8 requests native cancellation for an active town scroll cast', () => {
+  const f = townFixture(); f.Town.tick(); f.World.gp.returnScroll = { name: 'Return', startedAtMs: 100000, durationMs: 20000 };
+  f.toggleBot(); assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, false);
+  assert.equal(f.commands.filter(c => c.kind === 'return-cancel').length, 1);
+});
+test('town setup records reachable approach points and validates the merchant catalogue', () => {
+  const f = townFixture(), gp = f.World.gp;
+  f.Hunt.stop(); f.UI.draw = () => {}; gp.pose.x = 100;
+  gp.target = 61; gp.targetCapabilities = 1;
+  const old = f.Town.cfg().vendor; f.Town.save('vendor'); assert.equal(f.Town.cfg().vendor, old);
+  gp.shop = { npc: 61, offers: [{ refObjId: 103, previews: [{ refObjId: 103, typeFlags: 4332 }] }] };
+  f.Town.save('vendor'); assert.equal(f.Town.cfg().vendor.x, 100); assert.equal(f.Town.cfg().vendor.npc.x, 170);
+  assert.equal(f.Restock.cfg().mp.refObjId, 103); assert.equal(f.Town.npc('vendor').gid, 61);
+  gp.target = 60; gp.targetCapabilities = 4; gp.pose.x = 1000;
+  const warehouse = f.Town.cfg().storage; f.Town.save('storage'); assert.equal(f.Town.cfg().storage, warehouse);
+});
+test('unexpected world reset cancels service and independent party work continues during town travel', () => {
+  const f = townFixture(); f.UI.mount = f.UI.draw = f.UI.update = f.Ticker.start = () => {}; f.boot();
+  let calls = 0; f.Party.tick = () => calls++;
+  const g = townFixture(); g.UI.mount = g.UI.draw = g.UI.update = g.Ticker.start = () => {}; g.boot();
+  g.Town.begin(); g.Town.enter('walk-storage'); g.bus.emit('reset'); assert.equal(g.Town.trip, null); assert.equal(g.Hunt.running, false);
+  f.Town.tick(); f.bus.emit('reset'); assert.ok(f.Town.trip); assert.equal(f.Hunt.running, true);
+  f.Controller.tick(); assert.equal(calls, 1);
 });
 console.log(`${passed} lean integration tests passed.`);

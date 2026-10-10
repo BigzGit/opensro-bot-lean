@@ -3,7 +3,7 @@ Hunt.lootAllowed = e => Loot.allowed(e);
 Hunt.chooseLoot = () => Loot.choose();
 Hunt.tick = function () {
   if (!this.running) return;
-  if (Restock.tick()) { Loot.suspend(); return; }
+  if (!Town.cfg().enabled && Restock.tick()) { Loot.suspend(); return; }
   const H = this.cfg(), gp = World.gp;
   if (!World.inWorld()) { this.state = 'waiting'; return; }
   if (World.isDead()) {
@@ -67,10 +67,12 @@ Hunt.tick = function () {
 };
 
 function stopAll() {
+  const townActive = !!Town.trip;
+  Town.cancel();
   Resurrect.cancelTrip('', true);
   Resurrect.holdUntil = 0;
   Controller.resumeAfterRevive = false;
-  const active = Hunt.running || Restock.trip || WalkBack.active || Loot.active;
+  const active = townActive || Hunt.running || Restock.trip || WalkBack.active || Loot.active;
   WalkBack.cancel('', false);
   if (Hunt.running) Hunt.stop();
   Restock.trip = null;
@@ -83,10 +85,16 @@ const Controller = {
   tick() {
     try {
       Restock.sample();
+      if (Town.trip) {
+        if (World.inWorld()) Party.tick();
+        Potion.tick();
+        if (Town.tick()) { this.mode = 'town service'; return; }
+      }
       if (!World.inWorld()) { this.mode = 'waiting'; return; }
       Party.tick();
       Potion.tick();
       Loot.checkPetFull();
+      if (Town.tick()) { this.mode = 'town service'; return; }
       if (SpeedScroll.tick()) { this.mode = 'speed scroll'; return; }
       if (!WalkBack.active && !Restock.trip && !Restock.recording && !Controller.resumeAfterRevive &&
           !Restock.activeShop() && !World.gp.storage && Resurrect.tick()) {

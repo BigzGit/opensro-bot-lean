@@ -14,6 +14,8 @@ const DEFAULT_PROFILE = {
     prefer: { hp: 0, mp: 0, vigor: 0, cure: 0 }, delayMs: 350,
     restock: {
       enabled: false, vendor: null, route: [], offers: [],
+      town: { enabled: false, petFull: true, petFree: 1, arrival: null, storage: null, vendor: null, smith: null, gate: null,
+        keep: '', store: { equipment: true, elixirs: true, powders: true, alchemy: true, others: false } },
       hp: { on: true, refObjId: 0, low: 20, target: 200 },
       mp: { on: true, refObjId: 0, low: 20, target: 200 },
     },

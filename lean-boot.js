@@ -1,5 +1,5 @@
 function toggleBot() {
-  if (Hunt.running || WalkBack.active || Restock.trip || Resurrect.trip || Controller.resumeAfterRevive) stopAll();
+  if (Hunt.running || Town.trip || WalkBack.active || Restock.trip || Resurrect.trip || Controller.resumeAfterRevive) stopAll();
   else if (Restock.recording) UI.toast('Finish or cancel route recording before starting the bot.', 'warn');
   else Hunt.start();
 }
@@ -31,13 +31,17 @@ function boot() {
       Party.reset();
       SpeedScroll.reset();
       Resurrect.reset();
+      if (Town.phase(phase)) { Loot.reset(); return; }
       const revival = phase === 'entering-world' && Hunt.running && Hunt.cfg().onDeath === 'revive' && (Hunt.state === 'dead' || Hunt.revived);
       stopAll(); Restock.cancelRecording(); Loot.reset();
       Controller.resumeAfterRevive = revival;
     }
   });
   bus.on('failure', () => { stopAll(); Restock.cancelRecording(); UI.toast('Game connection failed; bot stopped.', 'warn'); });
-  bus.on('reset', () => { SpeedScroll.reset(); Party.reset(); Resurrect.reset(); Loot.reset(); Navigation.scene = null; Wardrobe.inv = Wardrobe.baseInv = Wardrobe.av = Wardrobe.baseAv = null; Wardrobe.body = ''; });
+  bus.on('reset', () => {
+    if (Town.trip && !['recall-wait', 'reverse-wait'].includes(Town.trip.phase)) Town.fail('Unexpected world reset during town service.');
+    SpeedScroll.reset(); Party.reset(); Resurrect.reset(); Loot.reset(); Navigation.scene = null; Wardrobe.inv = Wardrobe.baseInv = Wardrobe.av = Wardrobe.baseAv = null; Wardrobe.body = '';
+  });
   bus.on('attached', ({ late }) => { if (late) UI.toast('Attached after the game started. Reload for complete character data.', 'warn'); });
   bus.on('potion-empty', kind => UI.toast('Out of ' + kind.toUpperCase() + ' potions.', 'warn'));
   W.addEventListener('keydown', e => {
@@ -54,7 +58,7 @@ function boot() {
   Ticker.start(() => Controller.tick(), 100);
   setInterval(() => { Wardrobe.tick(); UI.update(); }, 500);
   W.SROLean = { version: VERSION, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, resurrect: Resurrect,
-    restock: Restock, walkBack: WalkBack, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, stop: stopAll, log: Log };
+    restock: Restock, town: Town, walkBack: WalkBack, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, stop: stopAll, log: Log };
   Log.info('OpenSRO Bot Lean ready. F8 starts/stops; F7 folds; Shift+F7 hides/shows the window.');
 }
 

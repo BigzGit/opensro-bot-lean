@@ -9,6 +9,7 @@ const SpeedScroll = {
     return effects.some(e => e?.gid === World.localGid() && World.skill(e.skill)?.speedBuff?.active && World.buffRemaining(e.skill) > 0);
   },
   tick() {
+    if (Town.trip) return false;
     if (!Settings.profile.potion.speedScroll) { this.message = 'Speed scroll off.'; return false; }
     if (!World.inWorld() || World.isDead()) return false;
     if (this.active()) {

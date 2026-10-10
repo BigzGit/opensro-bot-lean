@@ -272,6 +272,19 @@ const UI = {
         this.select(kind.toUpperCase() + ' potion', () => [[0, 'Record a merchant route first'], ...C().offers.filter(o => o.kind === kind).map(o => [o.refObjId, o.name])], () => C()[kind].refObjId, v => C()[kind].refObjId = Number(v)),
         this.number('Low stock ≤', () => C()[kind].low, v => C()[kind].low = v, 0, 9999), this.number('Refill to', () => C()[kind].target, v => C()[kind].target = v, 1, 10000));
       this.pane.append(shop);
+      const town = () => Town.cfg();
+      const services = this.group('Hotan scroll town cycle',
+        this.check('Use return scroll → town services → reverse return', () => town().enabled, v => town().enabled = v),
+        this.check('Return when pickup pet is nearly full', () => town().petFull, v => town().petFull = v),
+        this.number('Pet free slots ≤', () => town().petFree, v => town().petFree = v, 0, 10),
+        el('p', 'Bind your recall to Hotan in the game. While stopped, save the arrival point where a return scroll places you. Then stand near, select and save each town NPC; open the potion shop before saving its merchant. Saves your standing position for each approach. Uses collision-aware walking between services. Overrides the recorded walking restock while enabled.', 'muted'));
+      for (const [role, label] of [['arrival', 'Arrival point'], ['storage', 'Warehouse'], ['vendor', 'Potion merchant'], ['smith', 'Repair smith'], ['gate', 'Teleport NPC']]) services.append(
+        this.row(this.button('Save ' + label.toLowerCase(), () => Town.save(role)), el('span', town()[role]?.name || (town()[role] ? 'Saved' : 'Not saved'), 'muted')));
+      for (const [key, label] of [['equipment', 'Equipment'], ['elixirs', 'Elixirs'], ['powders', 'Powders'], ['alchemy', 'Other alchemy'], ['others', 'Other items']]) services.append(
+        this.check('Store pet: ' + label, () => town().store[key], v => town().store[key] = v));
+      services.append(this.text('Keep in pet (names)', () => town().keep, v => town().keep = v),
+        el('p', 'Uses the potion selections and refill thresholds above. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. Does not buy Item Mall scrolls. Failures stop the bot in place. F8 cancels.', 'muted'));
+      this.townNote = el('p', Town.message, 'muted'); services.append(this.townNote); this.pane.append(services);
     } else if (this.current === 'Wardrobe') {
       LeanWardrobe.draw(this.pane);
     } else {
@@ -315,6 +328,7 @@ const UI = {
     return (World.gp?.skills || []).map(id => { const s = World.skill(id); return `${id}:${s?.name}:${s?.icon}:${s?.level}`; }).join('|');
   },
   update() {
+    if (this.townNote) this.townNote.textContent = Town.message;
     if (this.current === 'Settings' && this.partyNote) {
       const notes = [Settings.profile.party.autoRecruit ? Party.message : 'Auto-recruit off.'];
       if (Settings.profile.party.autoRes) notes.push(Resurrect.message);

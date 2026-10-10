@@ -8,12 +8,12 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.14**.
+- Latest userscript release at this snapshot: **1.2.15**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **83 integration tests**, JavaScript syntax check and headless browser checks pass.
-- No active unfinished implementation at this handoff. The latest discussion diagnosed stale GitHub update metadata.
+- Latest validation: **99 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest work: opt-in Hotan recall/storage/refill/repair/reverse cycle. Live-account testing is still outstanding.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
 
@@ -37,6 +37,7 @@ The panel lives inside an open shadow root on `#sro-bot-lean`. Runtime diagnosti
 | `lean-loot.js` | Drop eligibility, categories, pet selection/setup, pickup confirmation/retries and full-bag alert. |
 | `lean-party.js` | Party-matching acceptance and saved-listing auto-recruit. |
 | `lean-speed-scroll.js` | Opt-in beginner +100% speed-scroll activation, buff confirmation and bounded retry. |
+| `lean-town.js` | Scroll-based town service, selective pet storage, refills, repairs and reverse return. |
 | `lean-resurrect.js` | Auto-resurrect fallen party members with a learned corpse-targeted skill. |
 | `lean-walkback.js` | Saved-spot return and optional hunting resume. |
 | `lean-navigation.js` | Collision-data capture and waypoint planning. |
@@ -194,3 +195,17 @@ A concurrent v1.2.12 implementation was found on origin and preserved. An unpubl
 `potion.speedScroll` defaults off. `lean-speed-scroll.js` uses only beginner scroll item 24198 (`ITEM_ETC_SPEED_UP_BASIC`), whose buff is skill 31107 (+100% for one hour); local game source confirms both. The code also recognizes the existing mall +100% buff 5411 and active catalogued speed buffs, without consuming paid items. It runs during hunting, walk-back, restock or res travel, after potion priority. Item dispatch is not confirmation: it waits for the buff, backs off on missing confirmation and caps attempts at three. Buff appearance rearms it; UI toggle resets attempts. Scrolls cannot interrupt an unobserved resurrection cast hold.
 
 83 VM integration tests and the isolated browser UI checks passed. New tests cover approach/cast/return, radius anchoring and changes, collision detours, blocked/missing coverage, cancellation, revived targets, return timeout, exact scroll identity, existing buffs, no paid consumption, gating, activation confirmation and bounded retries. Live trips, scroll activation and resurrection remain untested on the user account.
+
+## Hotan scroll town cycle: 1.2.15
+
+The user authorized the return-scroll → Hotan storage/refill/repair → reverse-return cycle. `lean-town.js` owns `Town.trip`; its opt-in settings live at `potion.restock.town`. Enabled town service takes precedence over the existing walking restock. It uses the HP/MP selections and low/refill counts already in Supplies. A pickup-pet trigger defaults to ≤1 free slot. Store filters cover equipment/elixirs/powders/alchemy, with Other off and Keep name exclusions. Potions, cures, selected supplies, travel scrolls and beginner speed scrolls are protected; existing character bag items are never selected for storage.
+
+Setup is deliberate: manually bind recall to Hotan, save the scroll arrival point, then stand near and select/save warehouse, potion merchant (shop must be open), smith and teleport NPC. Each service saves the user's reachable standing position plus the NPC identity/location. Town walking requires collision coverage, with no blind fallback. Arrival validates against the saved town point; no hardcoded Hotan NPC IDs and no automatic recall-binding change.
+
+Native contract verified in the separate game checkout: return item type `0x09ec` uses `item-use`; reverse type `0x19ec` is consumed through the teleport NPC menu, `travel-gate {gid,type:5,target:2}` (last recall point). This is not a bag item-use or premium-package command. Select NPC, request `npc-talk`, wait for matching `npcConversation.phase === 'menu'` and capability `0x20000000` before reverse. `action/reversereturn.go`, `foundation/ui/npc-talk.ts` and runtime UI/core show this flow.
+
+Pet storage requires `cos-transfer {gid,toCos:false,source,destination}` into one reserved character bag slot, then `storage-move {move:{type:2,source,destination,quantity:0,gold:0}}`. Correlated source disappearance and exact destination reference/quantity confirm each move. Staged items can remain in the character bag after failure; do not silently deposit other character items. Storage full stops before another transfer. Potion purchases require exact requested quantity gain. Travel scrolls refill to two only from single-item gold offers; if unavailable, spares must already be carried. No Item Mall buying. Repairs use `shop-repair {mode:2,slot:0}` and require restored durability, using native variance and magic-option maximum calculations.
+
+`Controller` gives town service priority while retaining independent Party and emergency Potion ticks. It suspends combat, loot, auto-res and speed-scroll activation during the trip. Expected entering-world/reset transitions during recall/reverse waits preserve the trip; disconnects, unexpected resets, manual control, settings/profile changes and F8 cancel. Scroll arrival has a 90-second timeout even outside world, town legs 20-second no-progress/120-second total bounds, inventory operations 15-second confirmation limits with no repeat sends, and the whole trip a 15-minute cap. Stop requests `return-cancel` for an observed owned scroll cast. Final supplies, spare travel scrolls and durability must be valid before returning. No unfinished trip survives a full page reload.
+
+99 integration tests, JavaScript syntax and isolated headless Edge checks passed. Sixteen new tests cover the full cycle, storage filters/protections, setup capture, bounded failures, fresh shop acknowledgement, exact quantity confirmation, scroll replenishment, repair confirmation, phase/reset persistence, manual/F8 cancellation and independent services. Browser tests exercise the actual toggle, saved arrival point, pet threshold and storage/Keep controls. Live-account travel, transfer fees and scroll/repair timing have not been tested. Update README/source/tests/build/artifacts in the development mirror and back up the Downloads install artifacts per the normal release workflow.
