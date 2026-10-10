@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.16
+// @version      1.2.17
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.16';
+const VERSION = '1.2.17';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -2427,8 +2427,8 @@ const Town = {
     if (role === 'arrival') c.arrival = { ...p };
     else {
       const npc = World.target(), cap = gp.targetCapabilities ?? 0;
-      const required = { storage: 4, vendor: 1, smith: 0x800, gate: 0x80 }[role];
-      if (!npc || npc.kind !== 'npc' || gp.targetPending || !(cap & required)) return UI.toast('Select the appropriate town NPC in the game first.', 'warn');
+      const required = { storage: 4, vendor: 1, smith: 8, gate: 0x80 }[role];
+      if (!this.serviceEntity(role, npc) || gp.targetPending || !(cap & required)) return UI.toast(role === 'gate' ? 'Select the world statue / teleport in the game first.' : role === 'smith' ? 'Select a merchant that offers equipment repair in the game first.' : 'Select the appropriate town NPC in the game first.', 'warn');
       if (dist2D(p, npc) > 200) return UI.toast('Stand within 20 m of the NPC before saving its approach point.', 'warn');
       if (!c.arrival || dist2D(p, c.arrival) > 3000) return UI.toast('Save the town arrival point nearby first.', 'warn');
       if (role === 'vendor') {
@@ -2441,6 +2441,7 @@ const Town = {
       c[role] = { ...p, refObjId: npc.refObjId, name: npc.name,
         npc: { regionId: npc.regionId, x: npc.x, y: npc.y, z: npc.z } };
     }
+    this.message = 'Town setup updated.';
     Settings.saveProfile(); UI.toast('Saved town ' + role + '.'); UI.draw();
   },
   eligible(item) {
@@ -2460,7 +2461,8 @@ const Town = {
   },
   validate() {
     const c = this.cfg(), supplies = Restock.supplies();
-    if (!c.arrival || !c.vendor || !c.smith || !c.gate || c.petFull && !c.storage) return 'Save the town arrival point, potion merchant, smith, teleport NPC and warehouse first.';
+    const missing = [['arrival', 'arrival point'], ['vendor', 'potion merchant'], ['smith', 'repair merchant'], ['gate', 'world statue / teleport'], ...(c.petFull ? [['storage', 'warehouse']] : [])].filter(([key]) => !c[key]).map(([, label]) => label);
+    if (missing.length) return 'Save missing town services: ' + missing.join(', ') + '.';
     if (!supplies.length || supplies.some(s => !s.refObjId || !Number.isInteger(s.low) || !Number.isInteger(s.target) || s.low < 0 || s.target <= s.low || s.target > 10000)) return 'Choose potions and valid low-stock/refill quantities.';
     if (!this.scroll(0x09ec) || !this.scroll(0x19ec)) return 'Carry a return scroll and a reverse return scroll before hunting.';
     if (World.freeBagSlots() < 1) return 'Keep one character bag slot free for pet-to-storage transfers.';
@@ -2517,9 +2519,10 @@ const Town = {
     else if (Cmd.move(step.point)) t.movedAt = now();
     return false;
   },
+  serviceEntity(role, entity) { return !!entity && (entity.kind === 'npc' || role === 'gate' && entity.kind === 'teleport'); },
   npc(role) {
     const saved = this.cfg()[role];
-    return [...World.ents.values()].find(e => e.kind === 'npc' && e.refObjId === saved.refObjId && dist2D(e, saved.npc || saved) < 100);
+    return [...World.ents.values()].find(e => this.serviceEntity(role, e) && e.refObjId === saved.refObjId && dist2D(e, saved.npc || saved) < 100);
   },
   open(role, kind) {
     const t = this.trip, gp = World.gp, npc = this.npc(role);
@@ -2530,15 +2533,17 @@ const Town = {
       if (Cmd.spaced('select')) Cmd.select(npc.gid);
       return false;
     }
-    const caps = { storage: 4, vendor: 1, smith: 0x800, gate: 0x20000000 };
+    const caps = { storage: 4, vendor: 1, smith: 8, gate: 0x20000000 };
     if (!(gp.targetCapabilities & caps[role])) { this.fail('Selected NPC does not offer ' + role + '.'); return false; }
+    // Selection itself opens the service menu. npc-talk requires the separate
+    // Talk capability and is invalid for teleport statues with no dialogue.
+    if (role === 'gate') return gp.npcConversation?.phase === 'menu' && gp.npcConversation.gid === npc.gid;
     if (!t.sent) {
       t.revision = gp.shopCompletionRevision;
       if (Cmd.raw({ kind, ...(kind === 'npc-talk' ? {} : { gid: npc.gid }) }, 'Town: open ' + role)) t.sent = true;
       return false;
     }
     if (role === 'storage') return gp.storage?.phase === 'open' && !gp.storage.guild && gp.storage.npc === npc.gid;
-    if (role === 'gate') return gp.npcConversation?.phase === 'menu' && gp.npcConversation.gid === npc.gid;
     return gp.shop?.npc === npc.gid && gp.shopCompletionRevision !== t.revision;
   },
   close(next) {
@@ -4691,8 +4696,8 @@ const UI = {
         this.check('Use return scroll → town services → reverse return', () => town().enabled, v => town().enabled = v),
         this.check('Return when pickup pet is nearly full', () => town().petFull, v => town().petFull = v),
         this.number('Pet free slots ≤', () => town().petFree, v => town().petFree = v, 0, 10),
-        el('p', 'Bind your recall to Hotan in the game. While stopped, save the arrival point where a return scroll places you. Then stand near, select and save each town NPC; open the potion shop before saving its merchant. Saves your standing position for each approach. Uses collision-aware walking between services. Overrides the recorded walking restock while enabled.', 'muted'));
-      for (const [role, label] of [['arrival', 'Arrival point'], ['storage', 'Warehouse'], ['vendor', 'Potion merchant'], ['smith', 'Repair smith'], ['gate', 'Teleport NPC']]) services.append(
+        el('p', 'Bind your recall to Hotan in the game. While stopped, save the arrival point where a return scroll places you. Stand near, select and save the warehouse, potion merchant, repair merchant and world statue / teleport. Open the potion shop before saving its merchant. Saves your standing position for each approach. Uses collision-aware walking between services. Overrides the recorded walking restock while enabled.', 'muted'));
+      for (const [role, label] of [['arrival', 'Arrival point'], ['storage', 'Warehouse'], ['vendor', 'Potion merchant'], ['smith', 'Repair merchant'], ['gate', 'World statue / teleport']]) services.append(
         this.row(this.button('Save ' + label.toLowerCase(), () => Town.save(role)), el('span', town()[role]?.name || (town()[role] ? 'Saved' : 'Not saved'), 'muted')));
       for (const [key, label] of [['equipment', 'Equipment'], ['elixirs', 'Elixirs'], ['powders', 'Powders'], ['alchemy', 'Other alchemy'], ['others', 'Other items']]) services.append(
         this.check('Store pet: ' + label, () => town().store[key], v => town().store[key] = v));

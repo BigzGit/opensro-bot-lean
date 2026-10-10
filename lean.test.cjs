@@ -725,7 +725,7 @@ function townFixture() {
   const f = fixture(), c = f.Town.cfg(), r = f.Restock.cfg(), gp = f.World.gp;
   c.enabled = true; c.arrival = { regionId: 1, x: 100, y: 0, z: 100 }; c.keep = 'favorite';
   for (const [index, role] of ['storage', 'vendor', 'smith', 'gate'].entries()) {
-    const npc = { gid: 60 + index, refObjId: 600 + index, kind: 'npc', name: role, regionId: 1, x: 130 + index * 40, y: 0, z: 100 };
+    const npc = { gid: 60 + index, refObjId: 600 + index, kind: role === 'gate' ? 'teleport' : 'npc', name: role, regionId: 1, x: 130 + index * 40, y: 0, z: 100 };
     c[role] = { ...npc }; f.World.ents.set(npc.gid, npc);
   }
   r.hp.on = false; r.mp.refObjId = 102; r.mp.low = 5; r.mp.target = 50;
@@ -763,7 +763,8 @@ test('town cycle recalls, confirms pet storage and purchases, repairs, reverses 
         gp.pose.x = 100; f.Navigation.install(navProduct());
       } else if (c.kind === 'move') gp.pose = { ...c.destination };
       else if (c.kind === 'select') {
-        gp.target = c.gid; gp.targetCapabilities = {60:4,61:1,62:0x801,63:0x20000080}[c.gid];
+        gp.target = c.gid; gp.targetCapabilities = {60:4,61:1,62:9,63:0x20000080}[c.gid];
+        if (c.gid === 63) gp.npcConversation = { gid: 63, phase: 'menu' };
       } else if (c.kind === 'storage-open') gp.storage = { npc: c.gid, phase: 'open', capacity: 30, items: [] };
       else if (c.kind === 'cos-transfer') {
         const i = f.pet.inventory.find(i => i.slot === c.source);
@@ -940,7 +941,29 @@ test('reserved town departure times out instead of returning to combat or repeat
 });
 test('town readiness explains disabled automation and missing prerequisites before the pet fills', () => {
   const f = townFixture(); f.Town.cfg().enabled = false; assert.match(f.Town.status(), /chime is an alert/);
-  f.Town.cfg().enabled = true; f.Town.cfg().gate = null; assert.match(f.Town.status(), /not ready:.*teleport NPC/);
+  f.Town.cfg().enabled = true; f.Town.cfg().gate = null; assert.match(f.Town.status(), /not ready:.*world statue/);
   f.Town.cfg().gate = { regionId: 1, x: 100, y: 0, z: 100 }; assert.match(f.Town.status(), /ready:/);
+});
+test('town recognizes the repair service bit and the Hotan teleport statue entity', () => {
+  const f = townFixture(), gp = f.World.gp; f.Hunt.stop(); f.UI.draw = () => {}; gp.pose.x = 200;
+  gp.target = 62; gp.targetCapabilities = 9; f.Town.cfg().smith = null;
+  f.Town.save('smith'); assert.ok(f.Town.cfg().smith, 'Shop + repair merchant must be accepted');
+  const statue = f.World.ents.get(63); statue.kind = 'teleport'; gp.target = 63; gp.targetCapabilities = 0x20000080; f.Town.cfg().gate = null;
+  f.Town.save('gate'); assert.ok(f.Town.cfg().gate, 'World statue must be accepted');
+  assert.equal(f.Town.npc('gate').gid, 63);
+  f.Hunt.start(); f.Town.begin(); f.Town.enter('open-smith'); gp.target = 62; gp.targetCapabilities = 9;
+  f.Town.tick(); assert.equal(f.commands.at(-1).kind, 'shop-open');
+  gp.shop = { npc: 62 }; gp.shopCompletionRevision++; f.Town.tick(); assert.equal(f.Town.trip.phase, 'repair');
+  f.Town.enter('open-gate'); gp.target = 63; gp.targetCapabilities = 0x20000080; gp.npcConversation = { gid: 63, phase: 'closed' };
+  f.Town.tick(); assert.equal(f.Town.trip.phase, 'open-gate');
+  gp.npcConversation = { gid: 63, phase: 'menu' };
+  f.Town.tick(); assert.equal(f.Town.trip.phase, 'reverse');
+  assert.equal(f.commands.some(c => c.kind === 'npc-talk'), false, 'Statue menu comes from selection, not Talk');
+});
+test('town rejects special-trade-only merchants as smiths and names only missing services', () => {
+  const f = townFixture(), gp = f.World.gp; f.Hunt.stop(); f.UI.draw = () => {}; gp.pose.x = 200;
+  gp.target = 62; gp.targetCapabilities = 0x801; f.Town.cfg().smith = null; f.Town.cfg().gate = null;
+  f.Town.save('smith'); assert.equal(f.Town.cfg().smith, null);
+  assert.equal(f.Town.validate(), 'Save missing town services: repair merchant, world statue / teleport.');
 });
 console.log(`${passed} lean integration tests passed.`);

@@ -8,11 +8,11 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.16**.
+- Latest userscript release at this snapshot: **1.2.17**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **102 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest validation: **104 integration tests**, JavaScript syntax check and headless browser checks pass.
 - Latest work: opt-in Hotan recall/storage/refill/repair/reverse cycle. Live-account testing is still outstanding.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
@@ -215,3 +215,9 @@ Pet storage requires `cos-transfer {gid,toCos:false,source,destination}` into on
 User reported the pet-full chime without a return. Reproduced a controller starvation bug with a failing regression test: Town.tick returned false before creating a trip whenever World.isCasting or inventoryPending was true, handing control back to hunting and allowing it to perpetuate those busy states. Town now latches a trip immediately on the enabled trigger, stops worker attack/movement with a move to current pose, then waits in recall phase for cast/inventory settlement. No more combat/loot ticks run during that wait. A 30-second settlement timeout fails safely. Existing opt-in, manual/travel exclusions and preflight prerequisites remain. This confirms a code defect, not the user's exact live settings; an asynchronous question requested their town-toggle state/status.
 
 Town.status() reports disabled automation, readiness or missing setup/scrolls before triggering. Full-pet toast explains that the chime alone does not enable automatic return. Three new tests cover full-pet latching during casts/pending pickups, settlement timeout and readiness messages. Total 102 integration tests plus syntax and isolated browser checks pass. Live return remains unverified.
+
+## Repair merchant and world statue: 1.2.17
+
+User's screenshot showed arrival/warehouse/potion merchant saved, with smith and gate missing. User then reported Hotan's weapon merchant was rejected and the teleport target is a world statue. A new regression test failed before fixing the smith bit: native `NpcTalkFlagRepair` is `0x8`, whereas previous code incorrectly used special-trade `0x800`. Both save and open now require the repair bit. `serviceEntity` admits native `teleport` entities for gate save/lookup, preserving NPC support. The full-cycle fixture now uses an actual teleport-kind gate and smith capability `9`.
+
+Native selection opens `npcConversation` directly. `npc-talk` requires capability `2` and is invalid on a statue that offers teleport/reverse only. Gate opening now waits for confirmed selection, reverse capability and matching menu without dispatching Talk. Evidence: game `npccapability.go`, worker `entities/entities.ts`, `gameplay/npc/npc.ts` and `gameplay.ts` selection/talk handling. UI labels are Repair merchant and World statue / teleport. Validation lists only missing services, and saving a service clears an old failure status. Existing saved points remain compatible. 104 integration tests, syntax and isolated browser checks passed; no live-account validation.
