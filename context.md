@@ -8,11 +8,11 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.34**.
+- Latest userscript release at this snapshot: **1.2.35**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **166 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest validation: **171 integration tests**, JavaScript syntax check and headless browser checks pass.
 - Latest work: opt-in Hotan recall/storage/refill/repair/reverse cycle. Live-account testing is still outstanding.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
@@ -349,3 +349,12 @@ Added lean-update.js. Updates.start runs at boot once, checks immediately and ev
 Requests omit credentials/referrer and use no-store; a 15-second AbortController bounds the two-request check, with no overlapping checks. Offline failures, HTTP errors, rate limits and malformed replies stay silent and leave any previously valid notice intact. Checks need page fetch access to api.github.com and raw.githubusercontent.com; verified API HTTP 200 with CORS * from this environment, but the live game's policy/network and Tampermonkey installation prompt remain unverified. Tests mock network responses rather than use the user's account.
 
 Four new integration checks cover numeric comparisons, pinned metadata/installer URL and manual opening, malformed/offline recovery and retained notice, overlap prevention and exactly one 15-minute schedule. Browser checks mock a newer release and click the real header button, verifying the exact install URL; desktop/mobile screenshots inspected. All 166 integration tests, syntax, browser and whitespace checks pass. Update module is included by build-lean.py and exposed as SROLean.updates for diagnostics. README adds one sentence about updates.
+
+
+## Waiting reasons and shareable bug reports: 1.2.35
+
+Added lean-diagnostics.js and a persistent Copy diagnostics button below the main status. Waiting lines explain hunting/manual/shop waits, pet setup/potion/inventory/pickup-confirmation waits, party listing/leadership/capacity/expiry/correlation gates, missing town service points and scrolls. During buying, shows current HP/MP stock versus trip target. This observes existing state and never submits gameplay commands or changes automation gates. A sent party acceptance is described as waiting for confirmation, not confirmed membership. Generic messages are used when exact native causes are unknown.
+
+Reports include version, a current snapshot, at most 30 recent changed snapshots and 12 error categories. Selected settings are numeric/boolean only. Snapshot fields include capacity, pending transactions, safe phase enums, clock/deadline state and attempt counts. Raw profiles, logs, errors, chat, names, account/character IDs, listing text, name filters, locations, inventory items and target IDs are excluded. Error/warning events are reduced to a small category allowlist (or unclassified-error); raw text is never retained in this report. Read-only snapshots are sampled by the existing UI update timer and tolerate missing game state. History remains in memory across bot toggles and clears on page reload. Existing Supplies return-diagnostics download remains separate and unchanged.
+
+Copy uses the browser clipboard only on explicit click. Success says Copied—paste this into your bug report. If permission/access is blocked, a read-only selected textarea appears near the top of the panel with Close report; nothing is sent externally. Added five tests for party gates, pet and refill reasons, privacy with injected identifying strings, bounded/toggle-retained/missing-state history, and clipboard success/fallback. Browser checks exercise real Copy diagnostics and fallback selection/close at desktop and mobile widths. Initial fallback placement below the settings pane failed the close-button viewport test; moved above the pane. All 171 integration tests, syntax, browser and whitespace checks pass. Live-account stall diagnosis still awaits real reports; simulated tests do not prove reported stalls are fixed.

@@ -37,6 +37,8 @@ If protected items fill a bag, the bot stays in town and asks you to free space.
 
 Leave **Revive in town and reverse to last scroll point** enabled under the town-cycle settings. With the town cycle enabled, the bot revives, completes town services and reverses back to hunt. Hunting resumes within 30 metres of the last scroll point, or within your saved hunting area after death. Carry reverse scrolls.
 
+If something stalls, click **Copy diagnostics** and send the report with what happened. Reports omit names, chat, account details and locations. If clipboard access is blocked, copy the selected report manually.
+
 ## Controls
 
 | Control | Action |

@@ -60,3 +60,6 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;max-height:130px;
 .wardrobe-item>.slot{flex:0 0 34px}.wardrobe-item>span:last-child{overflow:hidden;max-height:36px;overflow-wrap:anywhere}
 .wardrobe-item[aria-pressed=true]{color:#ffe08a;outline:1px solid #ffe08a;outline-offset:-2px}
 @media(max-width:500px){:host{right:4px;top:70px;width:calc(100vw - 8px)}.body{margin:0 13px}.pane{max-height:62vh}.field input[type=text]{width:150px}.skill-row{gap:4px}.controls{gap:2px}}
+
+.waiting{white-space:pre-line;color:#c8d9ae;margin:4px 0}
+textarea{width:100%;color:inherit;background:#151916;font:11px monospace}

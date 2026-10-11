@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Diagnostics, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [];
@@ -1709,6 +1709,57 @@ test('stopping death return before arrival never resumes hunting', () => {
   assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, false);
   assert.equal(f.commands.some(c => c.kind === 'attack'), false);
 });
+test('diagnostics identify party acceptance gates without changing party commands', () => {
+  const f = fixture(), m = partyApplication(f);
+  f.World.gp.social.members = Array.from({ length: 5 }, (_, n) => ({ id: 10 + n }));
+  assert.match(f.Diagnostics.party(), /ready for acceptance/);
+  m.own = null; assert.match(f.Diagnostics.party(), /listing missing/);
+  m.own = { type: 1 }; f.World.gp.social.leader = 99; assert.match(f.Diagnostics.party(), /not the leader/);
+  f.World.gp.social.leader = 10; f.World.gp.social.options = 0; assert.match(f.Diagnostics.party(), /party full/);
+  f.World.gp.social.options = 1; m.request.expires = 99999; assert.match(f.Diagnostics.party(), /expired/);
+  m.request.expires = 110000; f.Controller.tick(); assert.match(f.Diagnostics.party(), /acceptance sent/);
+  const count = f.commands.length; f.Diagnostics.report(); assert.equal(f.commands.length, count);
+});
+
+test('diagnostics show real pet transaction and potion waits plus town refill progress', () => {
+  const f = fixture(); pickupPet(f); f.Hunt.running = true;
+  f.World.gp.inventoryPending = true; assert.match(f.Diagnostics.pet(), /inventory transaction/);
+  f.World.gp.inventoryPending = false; f.Potion.lastUse = 100000; assert.match(f.Diagnostics.pet(), /potion use/);
+  f.advance(500); assert.match(f.Diagnostics.pet(), /eligible drops/);
+  const t = townFixture(); t.Restock.cfg().mp.target = 1000; t.Town.begin(); t.Town.enter('buy');
+  t.World.gp.inventory.find(i => i.refObjId === 15).quantity = 650;
+  assert.equal(t.Diagnostics.main(), 'Refilling MP: 650 / 1000');
+  t.Town.trip = null; t.World.gp.inventory = t.World.gp.inventory.filter(i => i.refObjId !== 201);
+  assert.match(t.Diagnostics.town(), /reverse scroll missing/);
+});
+
+test('diagnostic reports omit names, raw errors, chat, locations and sensitive settings', () => {
+  const f = fixture(); partyApplication(f); pickupPet(f);
+  const secret = 'PRIVATE_USER_SECRET';
+  f.World.charName = secret; f.World.gp.chat = [secret]; f.World.gp.error = secret;
+  f.World.gp.partyMatching.request.member.name = secret;
+  f.Settings.profile.party.title = secret; f.Settings.profile.hunt.pickup.include = secret;
+  f.Town.cfg().keep = secret; f.Town.cfg().vendor = { name: secret, x: 123456789 };
+  f.Loot.active = { name: secret, gid: 912345, petGid: 50 };
+  f.Diagnostics.start(); f.Diagnostics.start();
+  f.bus.emit('game-error', 'Inventory busy: ' + secret);
+  f.bus.emit('log', { level: 'warn', text: secret });
+  const text = f.Diagnostics.report(), report = JSON.parse(text);
+  assert.equal(text.includes(secret), false); assert.equal(text.includes('123456789'), false); assert.equal(text.includes('912345'), false);
+  assert.equal(report.current.settings.mpTarget, 300);
+  assert.deepEqual(report.recentErrors.map(e => e.code), ['inventory-busy', 'unclassified-error']);
+  assert.equal(report.app, 'OpenSRO Bot Lean');
+});
+
+test('diagnostic history is bounded, retained across stops and tolerates incomplete state', () => {
+  const f = fixture();
+  for (let n = 0; n < 50; n++) { f.Settings.profile.potion.restock.mp.target = n; f.advance(1000); f.Diagnostics.sample(); f.Diagnostics.error('error ' + n); }
+  assert.equal(f.Diagnostics.history.length, 30); assert.equal(f.Diagnostics.errors.length, 12);
+  f.stopAll(); assert.equal(f.Diagnostics.history.length, 30);
+  f.World.gp = null; assert.doesNotThrow(() => JSON.parse(f.Diagnostics.report()));
+  f.World.simOffset = null; assert.doesNotThrow(() => f.Diagnostics.sample());
+});
+
 async function updateTests() {
   async function check(name, fn) { await fn(); passed++; console.log('PASS ' + name); }
   const sha = 'a'.repeat(40), base = 'https://raw.githubusercontent.com/nixxane/opensro-bot-lean/' + sha + '/bot.lean.';
@@ -1724,7 +1775,7 @@ async function updateTests() {
   await check('updates compare numeric version components and ignore malformed versions', async () => {
     const f = fixture();
     for (const v of ['1.2.100', '1.3.0', '2.0.0']) assert.equal(f.Updates.newer(v), true);
-    for (const v of ['1.2.9', '1.2.34', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
+    for (const v of ['1.2.9', '1.2.35', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
   });
   await check('updates pin metadata and user-initiated installer to the same trusted commit', async () => {
     const f = fixture(), calls = updater(f); f.UI.updateButton = {};
@@ -1755,6 +1806,16 @@ async function updateTests() {
     let checks = 0; f.Updates.check = async () => { checks++; };
     f.Updates.start(); f.Updates.start(); assert.equal(checks, 1); assert.equal(f.intervals.length, 1);
     assert.equal(f.intervals[0].ms, 900000); f.intervals[0].fn(); assert.equal(checks, 2);
+  });
+  await check('diagnostics copy only on request and offer selectable fallback when clipboard is blocked', async () => {
+    const f = fixture(); let copied = '', fallback = '';
+    f.win.navigator = { clipboard: { writeText: async text => { copied = text; } } };
+    f.UI.showDiagnostics = text => { fallback = text; };
+    assert.equal(copied, ''); await f.Diagnostics.copy(); assert.equal(JSON.parse(copied).app, 'OpenSRO Bot Lean');
+    assert.match(f.notices.at(-1), /paste this into your bug report/); assert.equal(fallback, '');
+    f.win.navigator.clipboard.writeText = async () => { throw Error('denied'); };
+    await f.Diagnostics.copy(); assert.equal(JSON.parse(fallback).app, 'OpenSRO Bot Lean');
+    assert.equal(f.commands.length, 0);
   });
   console.log('Total integration tests: ' + passed);
 }

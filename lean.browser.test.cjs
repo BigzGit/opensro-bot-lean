@@ -82,6 +82,19 @@ const server = http.createServer((req, res) => {
     await updateButton.click();
     assert.deepEqual(await page.evaluate(() => window.updateOpened), ['https://raw.githubusercontent.com/nixxane/opensro-bot-lean/' + updateSha + '/bot.lean.user.js', '_blank', 'noopener,noreferrer']);
     await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => { window.copiedDiagnostics = text; } } });
+    });
+    await page.getByRole('button', { name: 'Copy diagnostics', exact: true }).click();
+    const reportCopy = JSON.parse(await page.evaluate(() => window.copiedDiagnostics));
+    assert.equal(reportCopy.app, 'OpenSRO Bot Lean');
+    await page.evaluate(() => { navigator.clipboard.writeText = async () => { throw Error('blocked'); }; });
+    await page.getByRole('button', { name: 'Copy diagnostics', exact: true }).click();
+    const reportField = page.getByRole('textbox', { name: 'Bug report diagnostics', exact: true });
+    await reportField.waitFor();
+    assert.equal(JSON.parse(await reportField.inputValue()).app, 'OpenSRO Bot Lean');
+    assert.equal(await reportField.evaluate(node => node.readOnly && node.selectionEnd === node.value.length), true);
+    await page.getByRole('button', { name: 'Close report', exact: true }).click();
+    await page.evaluate(() => {
       const code = `onmessage = e => { if(e.data.kind === 'fixture') postMessage(e.data.message); else if(e.data.kind === 'session') postMessage({ kind: 'observed-command', command: e.data.command.command }); };`;
       window.testCommands = [];
       window.testSim = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })), { name: 'sro-simulation' });
@@ -307,6 +320,9 @@ const server = http.createServer((req, res) => {
       return r.left >= 0 && r.right <= innerWidth;
     }), true);
     await page.screenshot({ path: __dirname + '/lean-mobile.png', fullPage: true });
+    await page.getByRole('button', { name: 'Copy diagnostics', exact: true }).click();
+    await page.getByRole('textbox', { name: 'Bug report diagnostics', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Close report', exact: true }).click();
     assert.deepEqual(errors, []);
     assert.equal(assets.filter(url => url.includes('/assets/packs/manifest.json')).length, 1);
     for (const image of images.slice(0, 3)) assert.equal(assets.filter(url => url.endsWith(image.transport)).length, 1);

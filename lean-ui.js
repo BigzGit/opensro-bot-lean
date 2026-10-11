@@ -15,6 +15,18 @@ const UI = {
     clearTimeout(this.toastTimer);
     this.toastTimer = setTimeout(() => { if (this.feedback) this.feedback.textContent = ''; }, ms);
   },
+  showDiagnostics(text) {
+    if (!this.diagnosticBox) {
+      this.diagnosticBox = this.group('Bug report', el('p', 'Clipboard unavailable. Select and copy this report, then send it with a description of the problem.', 'muted'));
+      this.diagnosticText = el('textarea'); this.diagnosticText.readOnly = true; this.diagnosticText.rows = 8;
+      this.diagnosticText.setAttribute('aria-label', 'Bug report diagnostics');
+      this.diagnosticBox.append(this.diagnosticText, this.button('Close report', () => { this.diagnosticBox.hidden = true; }));
+      this.body.insertBefore(this.diagnosticBox, this.waitNote.nextSibling);
+    }
+    this.diagnosticBox.hidden = false; this.diagnosticText.value = text;
+    this.diagnosticText.focus(); this.diagnosticText.select();
+    this.toast('Clipboard unavailable—copy the selected report.');
+  },
   exportDiagnostics() {
     Town.record('export');
     const url = URL.createObjectURL(new Blob([JSON.stringify({ version: VERSION, history: Town.history }, null, 2)], { type: 'application/json' }));
@@ -91,7 +103,8 @@ const UI = {
     this.nav = el('nav'); this.nav.setAttribute('aria-label', 'Bot settings');
     for (const name of ['Combat', 'Loot', 'Supplies', 'Wardrobe', 'Settings']) this.nav.append(this.button(name, () => { this.current = name; this.draw(); }));
     this.pane = el('div', null, 'pane'); this.feedback = el('div', null, 'feedback'); this.feedback.setAttribute('role', 'status');
-    this.body.append(this.status, controls, this.nav, this.pane, this.feedback);
+    this.waitNote = el('div', '', 'waiting'); this.waitNote.setAttribute('role', 'status');
+    this.body.append(this.status, this.waitNote, this.row(this.button('Copy diagnostics', () => { void Diagnostics.copy(); })), controls, this.nav, this.pane, this.feedback);
     for (const corner of ['lu', 'mu', 'ru', 'ls', 'rs', 'ld', 'md', 'rd']) panel.append(el('div', null, 'frame ' + corner));
     panel.append(header, this.body); this.root.append(style, panel);
     this.tip = el('div', null, 'skill-tip'); this.tip.hidden = true; this.root.append(this.tip);
@@ -339,6 +352,8 @@ const UI = {
     return (World.gp?.skills || []).map(id => { const s = World.skill(id); return `${id}:${s?.name}:${s?.icon}:${s?.level}`; }).join('|');
   },
   update() {
+    const diagnosticState = Diagnostics.sample();
+    if (this.waitNote) this.waitNote.textContent = Diagnostics.lines(diagnosticState);
     if (this.townNote) this.townNote.textContent = Town.status();
     if (this.current === 'Settings' && this.partyNote) {
       const notes = [Settings.profile.party.autoRecruit ? Party.message : 'Auto-recruit off.'];
