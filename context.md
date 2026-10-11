@@ -12,7 +12,7 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **157 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest validation: **160 integration tests**, JavaScript syntax check and headless browser checks pass.
 - Latest work: opt-in Hotan recall/storage/refill/repair/reverse cycle. Live-account testing is still outstanding.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
@@ -326,3 +326,10 @@ User reports Auto-recruit needs toggling off/on to form a party. Reproduced the 
 Read-only party-matching.ts verification confirms register sets pending:'register'; a rejection clears matching pending and returns result, while success publishes own immediately. Native request admission rejects both an outstanding request and an existing owned listing. Auto-recruit still runs with hunting stopped and accepts applicants through the existing correlated matching path; it does not invite arbitrary players or fabricate party members. UI describes automatic recovery rather than requiring a toggle.
 
 Four new regressions cover fresh rejection recovery at the 30-second boundary, pending/stale/incomplete state and applications/joins, repeated bounded retries plus disabling, and leadership/capacity/settings revalidation. The first regression failed before the fix (one registration instead of two). All 157 integration tests, syntax and isolated browser checks pass. Live account registration and party formation remain unverified. Publish and mirror through the usual workflow; README remains simple and unchanged.
+
+
+## Shared-EXP join cutoff investigation: 2026-10-11
+
+User reports matching acceptance stopped after four people were in the party and confirms Share EXP was enabled. Could not reproduce on 1.2.32 in isolated simulation. Added three regression tests: successive correlated applications from one through eight members for all shared-EXP option combinations (1, 3, 5, 7), using either Auto-recruit alone or the separate acceptance switch; a full eight-member party losing a member and accepting a replacement; and native party options overriding contrary saved recruitment settings. Successive requests also cover no observed intervening request:null snapshot and repeated ticks without duplicate acceptance. All 160 integration tests pass. Read-only native party-matching.ts confirms capacity is eight with options bit 1 set and four otherwise; social.ts member snapshots include the entire roster.
+
+No runtime change or userscript version bump: these tests pass against the existing published 1.2.32. This does not reproduce or resolve the reported live failure. Further diagnosis needs live party/matching state during the stall (owned listing, native sharing options, leader identity, incoming correlated request and its deadline); a Share EXP checkbox alone does not identify which gate blocked acceptance. No live-account interaction was performed.

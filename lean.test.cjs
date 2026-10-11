@@ -499,6 +499,56 @@ test('party matching respects four and eight member capacity', () => {
   }
 });
 
+test('shared EXP accepts successive applicants past four through eight without toggling', () => {
+  for (const options of [1, 3, 5, 7]) for (const autoRecruit of [false, true]) {
+    const f = fixture(); partyApplication(f);
+    Object.assign(f.Settings.profile.party, { autoRecruit, autoAcceptMatching: !autoRecruit });
+    let members = [{ id: 10 }];
+    const own = { id: 5, type: options };
+    for (let size = 1; size <= 8; size++) {
+      const request = { a: 40, b: 50 + size, expires: f.World.simNow() + 10000, member: { name: 'Applicant' + size } };
+      // Fresh native-style snapshots, including consecutive requests where the
+      // bot never observes the intervening request:null acknowledgement.
+      f.World.applyGameplay({ ...f.World.gp,
+        social: { self: 10, leader: 10, options, members },
+        partyMatching: { own, pending: null, request } });
+      f.Controller.tick(); f.Controller.tick();
+      assert.equal(f.commands.length, Math.min(size, 7), `options=${options}, recruit=${autoRecruit}, members=${size}`);
+      if (size < 8) {
+        assert.equal(f.commands.at(-1).b, request.b);
+        members = [...members, { id: 100 + size }];
+      }
+      f.advance(500);
+    }
+    assert.equal(f.commands.every(c => c.kind === 'party-match-answer' && c.answer === 1), true);
+  }
+});
+
+test('shared EXP resumes accepting after a full party loses a member', () => {
+  const f = fixture(); partyApplication(f);
+  f.Settings.profile.party.autoAcceptMatching = false; f.Settings.profile.party.autoRecruit = true;
+  const social = { self: 10, leader: 10, options: 3, members: Array.from({ length: 8 }, (_, n) => ({ id: 10 + n })) };
+  const matching = { ...f.World.gp.partyMatching, own: { id: 5, type: 3 }, pending: null };
+  f.World.applyGameplay({ ...f.World.gp, social, partyMatching: matching });
+  f.Controller.tick(); assert.equal(f.commands.length, 0);
+  assert.match(f.Party.message, /Party full/);
+  f.advance(500);
+  f.World.applyGameplay({ ...f.World.gp, social: { ...social, members: social.members.slice(0, 7) },
+    partyMatching: { ...matching, request: { ...matching.request, b: 99, expires: f.World.simNow() + 10000 } } });
+  f.Controller.tick(); assert.equal(f.commands.length, 1); assert.equal(f.commands[0].b, 99);
+  assert.match(f.Party.message, /accepting applicants/);
+});
+
+test('native party sharing controls capacity even when saved recruitment settings differ', () => {
+  for (const options of [0, 1]) {
+    const f = fixture(); partyApplication(f);
+    Object.assign(f.Settings.profile.party, { autoRecruit: true, expShare: !options });
+    f.World.gp.social.options = options;
+    f.World.gp.social.members = Array.from({ length: 5 }, (_, n) => ({ id: 10 + n }));
+    f.Controller.tick(); assert.equal(f.commands.length, options ? 1 : 0);
+  }
+});
+
 test('party matching leaves invitations and expired or unclocked requests alone', () => {
   const f = fixture(), m = partyApplication(f), request = m.request;
   m.request = null; f.World.gp.social.invitation = { type: 2, gid: 99 };
