@@ -8,12 +8,12 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.36**.
+- Latest userscript release at this snapshot: **1.2.37**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **185 integration tests**, JavaScript syntax check and headless browser checks pass.
-- Latest work: opt-in Hotan recall/storage/refill/repair/reverse cycle. Live-account testing is still outstanding.
+- Latest validation: **189 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest work: native alchemy window cleanup on stop; the reported ground-click freeze still needs live confirmation.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
 
@@ -372,3 +372,12 @@ Only runs while hunting/travel/recording/revival and collection are stopped, ali
 Weapon locked by bag slot/ref/type/variance plus full mutable fingerprint between attempts. Confirmed result may legitimately change plus/durability/magic protection charges, so refresh the fingerprint only after a matching reinforcement result AND exactly one consumed elixir/powder, with inventoryPending false and verified expected plus change. Success must increase plus by one; failure may retain/reduce plus. Acknowledgement can occur entirely between ticks: material and result proof handles this without requiring an observed pending:true snapshot. Stale flags, wrong result slot/mode, inconsistent plus, changed identity, ambiguous consumption, unknown responses and 15-second timeout never authorize another spend. Stops leave a sent attempt pending until confirmed or world reset; reinforcement cannot be cancelled natively. Confirmed destruction clears selection. Window opening is sent once and times out after five seconds. After a confirmed result, wait one second before the next attempt. Native rejection stops without auto retry. Settings/manual/character changes stop; reset clears selection and unresolved local state. No persistent item UID is exposed by the native bag mirror, so manual interference stops rather than relocating/following a weapon.
 
 Fourteen new integration tests cover native slot order, confirmation and failure/downgrade, targets/limits, validation and matching materials, stale/partial/pending state, timeout/rejection/destruction, item identity/edit/manual/character guards, Stop/F8 and late results, reset/death, window opening, material depletion/stack rollover, mismatched result and dispatch failure. Browser tests select a weapon, set controls and powder, click Start, verify exact command, apply a native-shaped result and verify target stop/counters; desktop/mobile Alchemy screenshots inspected. Diagnostics include only numeric/boolean alchemy fields, with no weapon names/IDs. All 185 integration tests, syntax and browser checks pass. Actual live enhancement and material consumption remain unverified; tests did not spend real items.
+
+
+## Alchemy stop cleanup: 1.2.37
+
+User confirms enhancement works live in 1.2.36, but ground clicks fail after stopping. Their copied report shows alchemyActive:false, alchemyPending:false and inventoryPending:false; the report does not support an outstanding enhancement transaction as the movement blocker. Repeated travel-error categories hide the original messages; the user had played further and could not recover them. Do not claim the movement freeze is reproduced or definitively resolved.
+
+Reproduced a cleanup defect with a failing regression: Stop never sent alchemy-close. Track a native session only after a successful open/start dispatch, and close it once on manual stop, target/attempt completion, refusal or timeout. Queue close even while open acknowledgement is outstanding. The read-only native alchemy contract confirms close hides the window without cancelling reinforcement, so retain and confirm any sent attempt as before. Do not close an unrelated native compound/advanced/dissolve process or dispatch cleanup into a reset/different character. No movement commands, inventory-state clearing, game/server or original-bot edits.
+
+Copy diagnostics now includes allowlisted native alchemy mode, window visibility, native pending, queued movement and active return-scroll booleans. Four new integration tests cover stop/late results/idempotence, target completion/open ordering, unrelated processes/reset and diagnostic privacy. Existing timeout and no-resend assertions now distinguish close from material-spending commands. Browser test verifies native close dispatch after target completion. All 189 integration tests, syntax and isolated browser checks pass. README unchanged. Publish/mirror/back up installation copies through the usual workflow; live ground-click recovery remains unverified.

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.36
+// @version      1.2.37
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.36';
+const VERSION = '1.2.37';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -4649,7 +4649,7 @@ const LeanWardrobe = {
 
 // Native reinforce only. Never resend an unconfirmed material-spending request.
 const Alchemy = {
-  selected: null, run: null, pending: null, result: null, message: 'Select a bag weapon to begin.', started: false,
+  windowOwner: null, selected: null, run: null, pending: null, result: null, message: 'Select a bag weapon to begin.', started: false,
   cfg() { return Settings.profile.alchemy; },
   weapon(i) { return i && i.slot >= 13 && i.slot <= 255 && (i.typeFlags & 0x7e) === 0x2c && ((i.typeFlags >>> 7) & 15) === 6 && Number.isInteger(i.plus) && i.plus >= 0; },
   degree(i) { const n = i?.tooltip?.fields?.itemClass; return Number.isInteger(n) && n > 0 ? Math.floor((n - 1) / 3) + 1 : 0; },
@@ -4704,8 +4704,12 @@ const Alchemy = {
     this.result = this.run; this.message = 'Preparing alchemy.';
   },
   stop(reason = 'Alchemy stopped. An attempt already sent may still finish.') {
-    if (!this.run) return;
-    this.run = null; this.message = reason;
+    if (this.run) { this.run = null; this.message = reason; }
+    // Close only a session we opened/used, on the same character. Native close
+    // does not cancel reinforcement; keep the pending result until confirmed.
+    const owner = this.windowOwner; this.windowOwner = null;
+    if (owner && owner.character === World.charName && World.inWorld() && World.gp?.alchemy?.mode === 'reinforce')
+      Cmd.raw({ kind: 'alchemy-close' }, 'Close alchemy');
   },
   init() {
     if (this.started) return; this.started = true;
@@ -4713,7 +4717,7 @@ const Alchemy = {
     // Our own Cmd.raw bypasses these observers, as with combat/manual pause.
     Hook.observers.push(command => { if (command.kind === 'gameplay' && this.run) this.stop('Alchemy stopped by manual game control.'); });
     bus.on('game-error', text => { if (this.run && /alchemy|inventory process/i.test(String(text))) this.stop('Alchemy stopped after a game refusal; wait for the inventory to settle.'); });
-    bus.on('reset', () => { this.stop('Alchemy stopped after world reset.'); this.pending = null; this.selected = null; });
+    bus.on('reset', () => { this.windowOwner = null; this.stop('Alchemy stopped after world reset.'); this.pending = null; this.selected = null; });
   },
   observe() {
     const p = this.pending, gp = World.gp, a = gp?.alchemy;
@@ -4764,7 +4768,9 @@ const Alchemy = {
     if (gp.inventoryPending || gp.alchemy.pending || Loot.pressed()) { this.message = 'Alchemy waiting for inventory or potion use.'; return; }
     if (!gp.alchemy.visible) {
       if (r.opening !== null) { if (now() - r.opening > 5000) this.stop('Alchemy window did not open.'); return; }
-      if (Cmd.spaced('alchemy-open') && Cmd.raw({ kind: 'alchemy-open' }, 'Open alchemy')) r.opening = now();
+      if (Cmd.spaced('alchemy-open') && Cmd.raw({ kind: 'alchemy-open' }, 'Open alchemy')) {
+        r.opening = now(); this.windowOwner = { character: r.character };
+      }
       return;
     }
     if (r.opening !== null) r.opening = null;
@@ -4774,6 +4780,7 @@ const Alchemy = {
     const slots = [item.slot, elixir.slot, ...(powder ? [powder.slot] : [])];
     if (slots.some(slot => !Number.isInteger(slot) || slot < 13 || slot > 255) || new Set(slots).size !== slots.length) return this.stop('Invalid material slots.');
     if (Cmd.raw({ kind: 'alchemy-start', mode: 'reinforce', slots }, 'Alchemy: enhance selected weapon')) {
+      this.windowOwner = { character: r.character };
       r.attempts++;
       this.pending = { run: r, state: gp, before: gp.alchemy, at: now(), plus: item.plus,
         elixir: { ref: elixir.refObjId, before: Restock.count(elixir.refObjId) },
@@ -4967,7 +4974,10 @@ const Diagnostics = {
       alchemyTarget: this.number(Alchemy.run?.cfg.target), alchemySuccesses: this.number(Alchemy.result?.successes),
       alchemyFailures: this.number(Alchemy.result?.failures), alchemyElixirsUsed: this.number(Alchemy.result?.elixirs),
       alchemyPowdersUsed: this.number(Alchemy.result?.powders), alchemyResultFlags: this.number(gp?.alchemy?.flags),
-      alchemyError: this.number(gp?.alchemy?.error),
+      alchemyError: this.number(gp?.alchemy?.error), alchemyWindowVisible: !!gp?.alchemy?.visible,
+      nativeAlchemyPending: !!gp?.alchemy?.pending,
+      nativeAlchemyMode: ['reinforce', 'attribute', 'magic', 'compound', 'advanced', 'dissolve'].includes(gp?.alchemy?.mode) ? gp.alchemy.mode : null,
+      movementPending: !!gp?.pendingMoves, returnScrollActive: !!gp?.returnScroll,
       running: !!Hunt.running, inWorld: World.inWorld(), dead: World.isDead(),
       inventoryPending: !!gp?.inventoryPending, casting: World.isCasting(),
       freeBagSlots: this.number(World.freeBagSlots()), hpPotions: Potion.count('hp'), mpPotions: Potion.count('mp'),

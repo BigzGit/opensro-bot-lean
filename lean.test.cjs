@@ -1732,6 +1732,38 @@ function alchemyFixture(powder = false) {
   return { ...f, result };
 }
 
+test('alchemy closes its native window on stop without cancelling a sent reinforcement', () => {
+  const f = alchemyFixture(); f.Alchemy.start(); f.Controller.tick();
+  f.World.applyGameplay({ ...f.World.gp, alchemy: { ...f.World.gp.alchemy, pending: true, slot: 13 } });
+  f.Alchemy.stop();
+  assert.equal(f.commands.at(-1).kind, 'alchemy-close');
+  assert.ok(f.Alchemy.pending); assert.equal(f.Alchemy.run, null);
+  f.Alchemy.stop(); assert.equal(f.commands.filter(c => c.kind === 'alchemy-close').length, 1);
+  f.result(0x10, 1); assert.equal(f.Alchemy.pending, null);
+  f.advance(2000); f.Controller.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'alchemy-start').length, 1);
+});
+
+test('alchemy closes after reaching its target and orders close after an unfinished open', () => {
+  const f = alchemyFixture(); f.Settings.profile.alchemy.target = 1;
+  f.Alchemy.start(); f.Controller.tick(); f.result(0x10, 1);
+  assert.equal(f.commands.at(-1).kind, 'alchemy-close');
+  const opening = alchemyFixture(); opening.World.gp.alchemy.visible = false;
+  opening.Alchemy.start(); opening.Controller.tick(); opening.Alchemy.stop();
+  assert.deepEqual(Array.from(opening.commands, c => c.kind), ['alchemy-open', 'alchemy-close']);
+  opening.World.applyGameplay({ ...opening.World.gp, alchemy: { ...opening.World.gp.alchemy, visible: false } });
+  opening.Controller.tick(); assert.equal(opening.commands.length, 2);
+});
+
+test('alchemy cleanup leaves unrelated native processes and a new world untouched', () => {
+  const idle = alchemyFixture(); idle.Alchemy.stop(); assert.equal(idle.commands.length, 0);
+  const f = alchemyFixture(); f.Alchemy.start(); f.Controller.tick();
+  f.World.gp.alchemy.mode = 'compound'; f.Alchemy.stop();
+  assert.equal(f.commands.some(c => c.kind === 'alchemy-close'), false);
+  const r = alchemyFixture(); r.Alchemy.start(); r.Controller.tick(); r.bus.emit('reset');
+  assert.equal(r.commands.some(c => c.kind === 'alchemy-close'), false);
+});
+
 test('alchemy sends native reinforcement slots and confirms success and failure before continuing', () => {
   const f = alchemyFixture(true); f.Alchemy.start(); f.Controller.tick();
   assert.deepEqual(JSON.parse(JSON.stringify(f.commands[0])), { kind: 'alchemy-start', mode: 'reinforce', slots: [13, 14, 15] });
@@ -1777,7 +1809,8 @@ test('alchemy does not accept stale flags or material consumption alone as a res
   f.Controller.tick(); assert.ok(f.Alchemy.pending); assert.equal(f.Alchemy.result.elixirs, 0);
   f.advance(16000); f.Controller.tick(); assert.equal(f.Alchemy.run, null); assert.ok(f.Alchemy.pending);
   assert.match(f.Alchemy.message, /unconfirmed/); f.Alchemy.start(); assert.equal(f.Alchemy.run, null);
-  f.Controller.tick(); assert.equal(f.commands.length, 1);
+  f.Controller.tick(); assert.equal(f.commands.filter(c => c.kind === 'alchemy-start').length, 1);
+  assert.equal(f.commands.at(-1).kind, 'alchemy-close');
 });
 
 test('alchemy waits for pending inventory to settle even after a matching result', () => {
@@ -1834,7 +1867,7 @@ test('alchemy waits for a visible window once and times out without spending', (
   f.World.applyGameplay({ ...f.World.gp, alchemy: { ...f.World.gp.alchemy, visible: true } }); f.Controller.tick();
   assert.equal(f.commands.at(-1).kind, 'alchemy-start');
   const t = alchemyFixture(); t.World.gp.alchemy.visible = false; t.Alchemy.start(); t.Controller.tick();
-  t.advance(6000); t.Controller.tick(); assert.equal(t.Alchemy.run, null); assert.equal(t.commands.length, 1);
+  t.advance(6000); t.Controller.tick(); assert.equal(t.Alchemy.run, null); assert.deepEqual(Array.from(t.commands, c => c.kind), ['alchemy-open', 'alchemy-close']);
 });
 
 test('alchemy blocks hunting and travel and stops when supplies run out', () => {
@@ -1860,7 +1893,7 @@ test('alchemy rejects mismatched results and unexpected plus changes without ano
     const gp = f.World.gp, a = { ...gp.alchemy, slot: 13, flags: 0x10 }; change(a);
     f.World.applyGameplay({ ...gp, alchemy: a,
       inventory: gp.inventory.map(i => i.slot === 13 ? { ...i, plus: 1 } : i.slot === 14 ? { ...i, quantity: 9 } : i) });
-    f.advance(16000); f.Controller.tick(); assert.equal(f.Alchemy.run, null); assert.ok(f.Alchemy.pending); assert.equal(f.commands.length, 1);
+    f.advance(16000); f.Controller.tick(); assert.equal(f.Alchemy.run, null); assert.ok(f.Alchemy.pending); assert.equal(f.commands.filter(c => c.kind === 'alchemy-start').length, 1);
   }
   const f = alchemyFixture(); f.Alchemy.start(); f.Controller.tick(); f.result(0x10, 5);
   assert.equal(f.Alchemy.run, null); assert.ok(f.Alchemy.pending); assert.match(f.Alchemy.message, /Unexpected enhancement/);
@@ -1872,6 +1905,17 @@ test('alchemy dispatch failure spends no attempt and manual refusal stops a pend
   f.Cmd.raw = raw; f.Controller.tick(); assert.equal(f.Alchemy.result.attempts, 1);
   f.bus.emit('game-error', 'Alchemy operation unavailable'); assert.equal(f.Alchemy.run, null); assert.ok(f.Alchemy.pending);
   f.result(0x10, 1); assert.equal(f.Alchemy.pending, null); f.advance(1000); f.Controller.tick(); assert.equal(f.commands.filter(c => c.kind === 'alchemy-start').length, 1);
+});
+
+test('diagnostics distinguish native alchemy windows and pending movement without exporting arbitrary modes', () => {
+  const f = alchemyFixture(); f.World.gp.pendingMoves = 2; f.World.gp.returnScroll = {};
+  let s = f.Diagnostics.snapshot();
+  assert.equal(s.alchemyWindowVisible, true); assert.equal(s.nativeAlchemyPending, false);
+  assert.equal(s.nativeAlchemyMode, 'reinforce'); assert.equal(s.movementPending, true); assert.equal(s.returnScrollActive, true);
+  f.World.gp.alchemy = { visible: false, pending: true, mode: 'private injected text' };
+  s = f.Diagnostics.snapshot(); assert.equal(s.nativeAlchemyMode, null);
+  assert.equal(s.nativeAlchemyPending, true); assert.equal(s.alchemyWindowVisible, false);
+  assert.equal(JSON.stringify(s).includes('private injected text'), false);
 });
 
 test('diagnostics identify party acceptance gates without changing party commands', () => {

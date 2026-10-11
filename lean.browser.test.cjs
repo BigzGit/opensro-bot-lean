@@ -411,6 +411,7 @@ const server = http.createServer((req, res) => {
         alchemy: { visible: true, pending: false, mode: 'reinforce', flags: 0x10, error: null, slot: 13 } });
     });
     await page.getByText(/Target reached: \+1\./).waitFor();
+    await page.waitForFunction(() => testCommands.some(c => c.kind === 'alchemy-close'));
     assert.equal(await page.evaluate(() => SROLean.alchemy.result.elixirs), 1);
     assert.equal(await page.evaluate(() => SROLean.alchemy.result.powders), 1);
     assert.equal(await page.evaluate(() => testCommands.filter(c => c.kind === 'alchemy-start').length), 1);
