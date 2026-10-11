@@ -77,7 +77,7 @@ const Diagnostics = {
     if (!World.inWorld()) return 'Waiting for game world.';
     if (World.isDead()) return 'Character dead; waiting for recovery.';
     if (Town.trip) {
-      if (Town.trip.phase === 'buy') return Town.trip.supplies.map(s => `Refilling ${s.kind === 'hp' ? 'HP' : 'MP'}: ${Restock.count(s.refObjId)} / ${s.target}`).join(' · ');
+      if (Town.trip.phase === 'buy') return Town.trip.supplies.map(s => `Refilling ${s.kind === 'hp' ? 'HP' : s.kind === 'mp' ? 'MP' : 'abnormal pills'}: ${Restock.count(s.refObjId)} / ${s.target}`).join(' · ');
       if (World.gp?.inventoryPending) return 'Town services: waiting for inventory transaction.';
       const phases = { recall: 'stopping combat for recall', 'recall-wait': 'waiting for recall arrival', 'reverse-wait': 'waiting for reverse arrival', 'revive-arrival': 'waiting for town revival', store: 'depositing pet loot', sell: 'selling pet loot', repair: 'repairing equipment', reverse: 'opening reverse return' };
       return 'Town services: ' + (phases[Town.trip.phase] || 'travelling between or opening services') + '.';
@@ -107,7 +107,7 @@ const Diagnostics = {
       movementPending: !!gp?.pendingMoves, returnScrollActive: !!gp?.returnScroll,
       running: !!Hunt.running, inWorld: World.inWorld(), dead: World.isDead(),
       inventoryPending: !!gp?.inventoryPending, casting: World.isCasting(),
-      freeBagSlots: this.number(World.freeBagSlots()), hpPotions: Potion.count('hp'), mpPotions: Potion.count('mp'),
+      curePills: Restock.count(58), freeBagSlots: this.number(World.freeBagSlots()), hpPotions: Potion.count('hp'), mpPotions: Potion.count('mp'),
       petFreeSlots: pet ? this.number(pet.rec.status - pet.rec.inventory.length) : null,
       pickupPending: !!Loot.active, pickupRetry: !!Loot.active?.retryAt, pickupAttempts: this.number(Loot.active?.attempts),
       petSetupAttempts: this.number(Loot.petSetup?.attempts), speedScrollPending: !!SpeedScroll.pending,
@@ -127,6 +127,7 @@ const Diagnostics = {
         townCycle: !!Town.cfg().enabled, revive: !!Town.cfg().revive, petFullReturn: !!Town.cfg().petFull,
         walkingRestock: !!Restock.cfg().enabled, buyHP: !!Restock.cfg().hp.on, buyMP: !!Restock.cfg().mp.on,
         hpTarget: this.number(Restock.cfg().hp.target), mpTarget: this.number(Restock.cfg().mp.target),
+        buyCure: !!Restock.cfg().cure.on, cureTarget: this.number(Restock.cfg().cure.target), cureLow: this.number(Restock.cfg().cure.low),
         hpLow: this.number(Restock.cfg().hp.low), mpLow: this.number(Restock.cfg().mp.low),
         collectDrops: !!c.hunt.pickup.enabled, petCollector: Loot.petMode(), pickupRadius: this.number(c.hunt.pickup.radius / 10),
         finishFight: !!c.hunt.pickup.afterKillOnly, speedScroll: !!c.potion.speedScroll }

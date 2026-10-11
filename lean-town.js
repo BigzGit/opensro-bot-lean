@@ -65,7 +65,7 @@ const Town = {
   },
   cfg() { return Restock.cfg().town; },
   // Native X-Large HP/MP IDs 8/15, both authored with 50 potions per stack.
-  supplies() { return Restock.supplies().map(s => ({ ...s, refObjId: s.kind === 'hp' ? 8 : 15 })); },
+  supplies() { return Restock.supplies().map(s => ({ ...s, refObjId: s.kind === 'hp' ? 8 : s.kind === 'mp' ? 15 : s.refObjId })); },
   status() {
     if (this.trip || this.message.startsWith('Town cycle stopped:')) return this.message;
     if (!this.cfg().enabled) return 'Town cycle off. The pet-full chime is an alert; enable the scroll town cycle to return automatically.';
@@ -325,7 +325,7 @@ const Town = {
     }
     if (!s) { this.enter('close-vendor'); return; }
     const offer = shop.offers.find(o => o.refObjId === s.refObjId && (s.kind === 'scroll' || Restock.offerKind(o) === s.kind));
-    if (!offer || !(offer.maxStack > 0)) return this.fail(s.kind === 'scroll' ? 'Selected scroll is unavailable here.' : 'X-Large ' + s.kind.toUpperCase() + ' potion is unavailable here.');
+    if (!offer || !(offer.maxStack > 0)) return this.fail(s.kind === 'scroll' ? 'Selected scroll is unavailable here.' : s.kind === 'cure' ? 'Special Universal Pill (small) is unavailable here.' : 'X-Large ' + s.kind.toUpperCase() + ' potion is unavailable here.');
     const before = Restock.count(s.refObjId), room = World.items().filter(i => i.refObjId === s.refObjId).reduce((n, i) => n + Math.max(0, offer.maxStack - (i.quantity ?? 1)), 0);
     const quantity = Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, room + Math.max(0, World.freeBagSlots() - 1) * offer.maxStack);
     if (quantity < 1) return this.fail('Not enough bag space for refill and a spare transfer slot.');

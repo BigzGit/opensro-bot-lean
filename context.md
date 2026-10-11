@@ -8,12 +8,12 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.37**.
+- Latest userscript release at this snapshot: **1.2.38**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **189 integration tests**, JavaScript syntax check and headless browser checks pass.
-- Latest work: native alchemy window cleanup on stop; the reported ground-click freeze still needs live confirmation.
+- Latest validation: **194 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest work: opt-in best abnormal-pill restocking in Supplies; live purchase validation and alchemy ground-click recovery remain unconfirmed.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
 
@@ -381,3 +381,12 @@ User confirms enhancement works live in 1.2.36, but ground clicks fail after sto
 Reproduced a cleanup defect with a failing regression: Stop never sent alchemy-close. Track a native session only after a successful open/start dispatch, and close it once on manual stop, target/attempt completion, refusal or timeout. Queue close even while open acknowledgement is outstanding. The read-only native alchemy contract confirms close hides the window without cancelling reinforcement, so retain and confirm any sent attempt as before. Do not close an unrelated native compound/advanced/dissolve process or dispatch cleanup into a reset/different character. No movement commands, inventory-state clearing, game/server or original-bot edits.
 
 Copy diagnostics now includes allowlisted native alchemy mode, window visibility, native pending, queued movement and active return-scroll booleans. Four new integration tests cover stop/late results/idempotence, target completion/open ordering, unrelated processes/reset and diagnostic privacy. Existing timeout and no-resend assertions now distinguish close from material-spending commands. Browser test verifies native close dispatch after target completion. All 189 integration tests, syntax and isolated browser checks pass. README unchanged. Publish/mirror/back up installation copies through the usual workflow; live ground-click recovery remains unverified.
+
+
+## Best abnormal-pill restocking: 1.2.38
+
+User requested automatic buying of the best abnormal-status pills, without cheaper substitutes. Verified read-only local retail itemdata_5000.txt and textdataname.txt: ref 58, ITEM_ETC_CURE_ALL_04, English name Special Universal Pill (small), cure power 172 versus ordinary large ref 57 power 108 (small/medium refs 55/56 power 36/68). Native type flags 12652 are the universal-cure category. refshopgoods.txt lists PACKAGE_ITEM_ETC_CURE_ALL_04 in Hotan potion merchant STORE_KT_POTION_TAB1. Purification/random pills are a different family and are not selected. No game/server/original-bot edits.
+
+Supplies adds Buy abnormal pills (best), Pills low stock and Pills refill to. Defaults off, low 10, target 50; existing profiles acquire these defaults without changing HP/MP settings. Enabled supplies always resolve cure to ref 58 even if an imported profile supplies a cheaper ID. Both town and recorded walking restock share the cure threshold/target; low pills trigger a refill and full-bag/revival trips also top them up. Count existing best pills, respect stack/space/gold limits, require normal single-item gold offers and stop with a specific message if the best pill is unavailable. Existing Use cure pills switch remains separate. Existing cure protection prevents pet pills from being sold.
+
+Walking purchases now retain requested quantity and wait for the complete expected stock increase, with the existing 12-second timeout and no repeat while unconfirmed; partial gains no longer authorize another purchase. Town already uses complete quantity confirmation. Diagnostics reports best-pill stock, switch, threshold and target and labels pill refill progress correctly. Five new integration tests cover defaults/profile preservation, fixed best selection and invalid offers, missing-amount town buying/settlement, missing best pills/gold, walking low-stock and partial confirmation, plus all town triggers with frozen trip targets (combined assertions across five tests). Browser checks toggle the new switch and edit thresholds/targets. All 194 integration tests, syntax and isolated browser checks pass. README unchanged. Live purchases remain unverified; publish/mirror/back up through the usual workflow.

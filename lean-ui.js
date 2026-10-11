@@ -293,6 +293,10 @@ const UI = {
       for (const kind of ['hp', 'mp']) shop.append(this.check('Buy ' + kind.toUpperCase(), () => C()[kind].on, v => C()[kind].on = v),
         this.select(kind.toUpperCase() + ' potion', () => [[0, 'Record a merchant route first'], ...C().offers.filter(o => o.kind === kind).map(o => [o.refObjId, o.name])], () => C()[kind].refObjId, v => C()[kind].refObjId = Number(v)),
         this.number('Low stock ≤', () => C()[kind].low, v => C()[kind].low = v, 0, 9999), this.number(kind.toUpperCase() + ' refill to', () => C()[kind].target, v => C()[kind].target = v, 1, 10000));
+      shop.append(this.check('Buy abnormal pills (best)', () => C().cure.on, v => C().cure.on = v),
+        this.number('Pills low stock ≤', () => C().cure.low, v => C().cure.low = v, 0, 9999),
+        this.number('Pills refill to', () => C().cure.target, v => C().cure.target = v, 1, 10000),
+        el('p', 'Buys only Special Universal Pill (small), the strongest universal cure. No cheaper substitute. Uses the same refill trips as HP/MP. Use cure pills above controls automatic use.', 'muted'));
       shop.append(el('p', 'Refill targets are total potion counts, including what is already in your bag. Used for low-supply, full-bag and revival trips, and walking-route restock. Set MP refill to 1000 for 1,000 MP potions. Changes apply to the next trip.', 'muted'));
       this.pane.append(shop);
       const town = () => Town.cfg();

@@ -19,6 +19,7 @@ const DEFAULT_PROFILE = {
         keep: '', store: { equipment: true, elixirs: true, powders: true, alchemy: true, others: false } },
       hp: { on: true, refObjId: 0, low: 20, target: 100 },
       mp: { on: true, refObjId: 0, low: 20, target: 300 },
+      cure: { on: false, refObjId: 58, low: 10, target: 50 },
     },
   },
   hunt: {

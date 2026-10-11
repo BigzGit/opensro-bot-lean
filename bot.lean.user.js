@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.37
+// @version      1.2.38
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.37';
+const VERSION = '1.2.38';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -202,6 +202,7 @@ const DEFAULT_PROFILE = {
         keep: '', store: { equipment: true, elixirs: true, powders: true, alchemy: true, others: false } },
       hp: { on: true, refObjId: 0, low: 20, target: 100 },
       mp: { on: true, refObjId: 0, low: 20, target: 300 },
+      cure: { on: false, refObjId: 58, low: 10, target: 50 },
     },
   },
   hunt: {
@@ -1348,7 +1349,7 @@ const Restock = {
     // Only single-item gold offers; package quantities have different purchase semantics.
     if (o.currency !== undefined && o.currency !== 1) return '';
     if (o.contents?.length && (o.contents.length !== 1 || o.contents[0].refObjId !== o.refObjId || o.contents[0].quantity !== 1)) return '';
-    return cat === 1 ? 'hp' : cat === 2 ? 'mp' : '';
+    return cat === 1 ? 'hp' : cat === 2 ? 'mp' : o.refObjId === 58 && ItemType.isCure(item?.typeFlags ?? 0) ? 'cure' : '';
   },
   activeShop() {
     const gp = World.gp;
@@ -1396,7 +1397,8 @@ const Restock = {
     Settings.saveProfile();
     this.tell(T('Rota ve av merkezi kaydedildi. İksirleri ve miktarları seçip otomatik alımı açın.', 'Route and hunt centre saved. Choose potions and quantities, then enable auto buying.'));
   },
-  supplies() { return ['hp', 'mp'].filter(k => this.cfg()[k].on).map(k => ({ kind: k, ...this.cfg()[k] })); },
+  // Fixed retail Special Universal Pill (small): strongest universal cure, ref 58.
+  supplies() { return ['hp', 'mp', 'cure'].filter(k => this.cfg()[k].on).map(k => ({ kind: k, ...this.cfg()[k], ...(k === 'cure' ? { refObjId: 58 } : {}) })); },
   validate() {
     const c = this.cfg(), s = this.supplies();
     if (!c.vendor || c.route.length < 2) return 'Record a merchant-to-hunt route first.';
@@ -1485,7 +1487,7 @@ const Restock = {
       if (t.pending) {
         if (now() - t.pending.at > 12000) { this.fail('Purchase was not confirmed; no repeat purchase sent.'); return true; }
         if (gp.inventoryPending || now() - t.pending.at < 500) return true;
-        if (this.count(t.pending.ref) <= t.pending.before) { this.fail('Purchase refused or inventory did not increase.'); return true; }
+        if (this.count(t.pending.ref) < t.pending.before + t.pending.quantity) return true;
         t.pending = null;
       }
       if (gp.inventoryPending) return true;
@@ -1498,14 +1500,14 @@ const Restock = {
         return true;
       }
       const offer = shop.offers.find(o => o.refObjId === s.refObjId && this.offerKind(o) === s.kind);
-      if (!offer) { this.fail('Selected potion is unavailable at this merchant.'); return true; }
+      if (!offer) { this.fail(s.kind === 'cure' ? 'Special Universal Pill (small) is unavailable at this merchant.' : 'Selected potion is unavailable at this merchant.'); return true; }
       const before = this.count(s.refObjId);
       const stackRoom = World.items().filter(i => i.refObjId === s.refObjId).reduce((n, i) => n + Math.max(0, offer.maxStack - (i.quantity ?? 1)), 0);
       const quantity = Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, stackRoom + World.freeBagSlots() * offer.maxStack);
       if (quantity < 1) { this.fail('Inventory full; make room for potions.'); return true; }
       const gold = gp.progression?.gold;
       if (gold === undefined || toBigInt(offer.price) * BigInt(quantity) > toBigInt(gold)) { this.fail('Not enough gold for the potion refill.'); return true; }
-      if (Cmd.raw({ kind: 'shop-buy', tab: offer.tab, slot: offer.slot, quantity }, `Auto buy: ${offer.name} x${quantity}`)) t.pending = { ref: s.refObjId, before, at: now() };
+      if (Cmd.raw({ kind: 'shop-buy', tab: offer.tab, slot: offer.slot, quantity }, `Auto buy: ${offer.name} x${quantity}`)) t.pending = { ref: s.refObjId, before, quantity, at: now() };
       return true;
     }
     return true;
@@ -2533,7 +2535,7 @@ const Town = {
   },
   cfg() { return Restock.cfg().town; },
   // Native X-Large HP/MP IDs 8/15, both authored with 50 potions per stack.
-  supplies() { return Restock.supplies().map(s => ({ ...s, refObjId: s.kind === 'hp' ? 8 : 15 })); },
+  supplies() { return Restock.supplies().map(s => ({ ...s, refObjId: s.kind === 'hp' ? 8 : s.kind === 'mp' ? 15 : s.refObjId })); },
   status() {
     if (this.trip || this.message.startsWith('Town cycle stopped:')) return this.message;
     if (!this.cfg().enabled) return 'Town cycle off. The pet-full chime is an alert; enable the scroll town cycle to return automatically.';
@@ -2793,7 +2795,7 @@ const Town = {
     }
     if (!s) { this.enter('close-vendor'); return; }
     const offer = shop.offers.find(o => o.refObjId === s.refObjId && (s.kind === 'scroll' || Restock.offerKind(o) === s.kind));
-    if (!offer || !(offer.maxStack > 0)) return this.fail(s.kind === 'scroll' ? 'Selected scroll is unavailable here.' : 'X-Large ' + s.kind.toUpperCase() + ' potion is unavailable here.');
+    if (!offer || !(offer.maxStack > 0)) return this.fail(s.kind === 'scroll' ? 'Selected scroll is unavailable here.' : s.kind === 'cure' ? 'Special Universal Pill (small) is unavailable here.' : 'X-Large ' + s.kind.toUpperCase() + ' potion is unavailable here.');
     const before = Restock.count(s.refObjId), room = World.items().filter(i => i.refObjId === s.refObjId).reduce((n, i) => n + Math.max(0, offer.maxStack - (i.quantity ?? 1)), 0);
     const quantity = Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, room + Math.max(0, World.freeBagSlots() - 1) * offer.maxStack);
     if (quantity < 1) return this.fail('Not enough bag space for refill and a spare transfer slot.');
@@ -4950,7 +4952,7 @@ const Diagnostics = {
     if (!World.inWorld()) return 'Waiting for game world.';
     if (World.isDead()) return 'Character dead; waiting for recovery.';
     if (Town.trip) {
-      if (Town.trip.phase === 'buy') return Town.trip.supplies.map(s => `Refilling ${s.kind === 'hp' ? 'HP' : 'MP'}: ${Restock.count(s.refObjId)} / ${s.target}`).join(' · ');
+      if (Town.trip.phase === 'buy') return Town.trip.supplies.map(s => `Refilling ${s.kind === 'hp' ? 'HP' : s.kind === 'mp' ? 'MP' : 'abnormal pills'}: ${Restock.count(s.refObjId)} / ${s.target}`).join(' · ');
       if (World.gp?.inventoryPending) return 'Town services: waiting for inventory transaction.';
       const phases = { recall: 'stopping combat for recall', 'recall-wait': 'waiting for recall arrival', 'reverse-wait': 'waiting for reverse arrival', 'revive-arrival': 'waiting for town revival', store: 'depositing pet loot', sell: 'selling pet loot', repair: 'repairing equipment', reverse: 'opening reverse return' };
       return 'Town services: ' + (phases[Town.trip.phase] || 'travelling between or opening services') + '.';
@@ -4980,7 +4982,7 @@ const Diagnostics = {
       movementPending: !!gp?.pendingMoves, returnScrollActive: !!gp?.returnScroll,
       running: !!Hunt.running, inWorld: World.inWorld(), dead: World.isDead(),
       inventoryPending: !!gp?.inventoryPending, casting: World.isCasting(),
-      freeBagSlots: this.number(World.freeBagSlots()), hpPotions: Potion.count('hp'), mpPotions: Potion.count('mp'),
+      curePills: Restock.count(58), freeBagSlots: this.number(World.freeBagSlots()), hpPotions: Potion.count('hp'), mpPotions: Potion.count('mp'),
       petFreeSlots: pet ? this.number(pet.rec.status - pet.rec.inventory.length) : null,
       pickupPending: !!Loot.active, pickupRetry: !!Loot.active?.retryAt, pickupAttempts: this.number(Loot.active?.attempts),
       petSetupAttempts: this.number(Loot.petSetup?.attempts), speedScrollPending: !!SpeedScroll.pending,
@@ -5000,6 +5002,7 @@ const Diagnostics = {
         townCycle: !!Town.cfg().enabled, revive: !!Town.cfg().revive, petFullReturn: !!Town.cfg().petFull,
         walkingRestock: !!Restock.cfg().enabled, buyHP: !!Restock.cfg().hp.on, buyMP: !!Restock.cfg().mp.on,
         hpTarget: this.number(Restock.cfg().hp.target), mpTarget: this.number(Restock.cfg().mp.target),
+        buyCure: !!Restock.cfg().cure.on, cureTarget: this.number(Restock.cfg().cure.target), cureLow: this.number(Restock.cfg().cure.low),
         hpLow: this.number(Restock.cfg().hp.low), mpLow: this.number(Restock.cfg().mp.low),
         collectDrops: !!c.hunt.pickup.enabled, petCollector: Loot.petMode(), pickupRadius: this.number(c.hunt.pickup.radius / 10),
         finishFight: !!c.hunt.pickup.afterKillOnly, speedScroll: !!c.potion.speedScroll }
@@ -5330,6 +5333,10 @@ const UI = {
       for (const kind of ['hp', 'mp']) shop.append(this.check('Buy ' + kind.toUpperCase(), () => C()[kind].on, v => C()[kind].on = v),
         this.select(kind.toUpperCase() + ' potion', () => [[0, 'Record a merchant route first'], ...C().offers.filter(o => o.kind === kind).map(o => [o.refObjId, o.name])], () => C()[kind].refObjId, v => C()[kind].refObjId = Number(v)),
         this.number('Low stock ≤', () => C()[kind].low, v => C()[kind].low = v, 0, 9999), this.number(kind.toUpperCase() + ' refill to', () => C()[kind].target, v => C()[kind].target = v, 1, 10000));
+      shop.append(this.check('Buy abnormal pills (best)', () => C().cure.on, v => C().cure.on = v),
+        this.number('Pills low stock ≤', () => C().cure.low, v => C().cure.low = v, 0, 9999),
+        this.number('Pills refill to', () => C().cure.target, v => C().cure.target = v, 1, 10000),
+        el('p', 'Buys only Special Universal Pill (small), the strongest universal cure. No cheaper substitute. Uses the same refill trips as HP/MP. Use cure pills above controls automatic use.', 'muted'));
       shop.append(el('p', 'Refill targets are total potion counts, including what is already in your bag. Used for low-supply, full-bag and revival trips, and walking-route restock. Set MP refill to 1000 for 1,000 MP potions. Changes apply to the next trip.', 'muted'));
       this.pane.append(shop);
       const town = () => Town.cfg();

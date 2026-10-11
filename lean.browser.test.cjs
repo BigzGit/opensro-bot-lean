@@ -166,6 +166,18 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.evaluate(() => SROLean.settings.profile.potion.restock.mp.target), 1000);
     await page.getByLabel('MP refill to', { exact: true }).fill('300');
     await page.getByLabel('MP refill to', { exact: true }).dispatchEvent('change');
+    const pillToggle = page.getByLabel('Buy abnormal pills (best)', { exact: true });
+    assert.equal(await pillToggle.isChecked(), false);
+    await pillToggle.check();
+    await page.getByLabel('Pills low stock ≤', { exact: true }).fill('15');
+    await page.getByLabel('Pills low stock ≤', { exact: true }).dispatchEvent('change');
+    await page.getByLabel('Pills refill to', { exact: true }).fill('100');
+    await page.getByLabel('Pills refill to', { exact: true }).dispatchEvent('change');
+    assert.deepEqual(await page.evaluate(() => {
+      const c = SROLean.settings.profile.potion.restock.cure;
+      return { on: c.on, low: c.low, target: c.target, refObjId: c.refObjId };
+    }), { on: true, low: 15, target: 100, refObjId: 58 });
+    await pillToggle.uncheck();
     const arrivalTolerance = page.getByLabel('Town arrival tolerance (m)', { exact: true });
     assert.equal(await arrivalTolerance.inputValue(), '50');
     await arrivalTolerance.fill('80'); await arrivalTolerance.dispatchEvent('change');

@@ -17,7 +17,7 @@ const Restock = {
     // Only single-item gold offers; package quantities have different purchase semantics.
     if (o.currency !== undefined && o.currency !== 1) return '';
     if (o.contents?.length && (o.contents.length !== 1 || o.contents[0].refObjId !== o.refObjId || o.contents[0].quantity !== 1)) return '';
-    return cat === 1 ? 'hp' : cat === 2 ? 'mp' : '';
+    return cat === 1 ? 'hp' : cat === 2 ? 'mp' : o.refObjId === 58 && ItemType.isCure(item?.typeFlags ?? 0) ? 'cure' : '';
   },
   activeShop() {
     const gp = World.gp;
@@ -65,7 +65,8 @@ const Restock = {
     Settings.saveProfile();
     this.tell(T('Rota ve av merkezi kaydedildi. İksirleri ve miktarları seçip otomatik alımı açın.', 'Route and hunt centre saved. Choose potions and quantities, then enable auto buying.'));
   },
-  supplies() { return ['hp', 'mp'].filter(k => this.cfg()[k].on).map(k => ({ kind: k, ...this.cfg()[k] })); },
+  // Fixed retail Special Universal Pill (small): strongest universal cure, ref 58.
+  supplies() { return ['hp', 'mp', 'cure'].filter(k => this.cfg()[k].on).map(k => ({ kind: k, ...this.cfg()[k], ...(k === 'cure' ? { refObjId: 58 } : {}) })); },
   validate() {
     const c = this.cfg(), s = this.supplies();
     if (!c.vendor || c.route.length < 2) return 'Record a merchant-to-hunt route first.';
@@ -151,7 +152,7 @@ const Restock = {
       if (t.pending) {
         if (now() - t.pending.at > 12000) { this.fail('Purchase was not confirmed; no repeat purchase sent.'); return true; }
         if (gp.inventoryPending || now() - t.pending.at < 500) return true;
-        if (this.count(t.pending.ref) <= t.pending.before) { this.fail('Purchase refused or inventory did not increase.'); return true; }
+        if (this.count(t.pending.ref) < t.pending.before + t.pending.quantity) return true;
         t.pending = null;
       }
       if (gp.inventoryPending) return true;
@@ -164,14 +165,14 @@ const Restock = {
         return true;
       }
       const offer = shop.offers.find(o => o.refObjId === s.refObjId && this.offerKind(o) === s.kind);
-      if (!offer) { this.fail('Selected potion is unavailable at this merchant.'); return true; }
+      if (!offer) { this.fail(s.kind === 'cure' ? 'Special Universal Pill (small) is unavailable at this merchant.' : 'Selected potion is unavailable at this merchant.'); return true; }
       const before = this.count(s.refObjId);
       const stackRoom = World.items().filter(i => i.refObjId === s.refObjId).reduce((n, i) => n + Math.max(0, offer.maxStack - (i.quantity ?? 1)), 0);
       const quantity = Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, stackRoom + World.freeBagSlots() * offer.maxStack);
       if (quantity < 1) { this.fail('Inventory full; make room for potions.'); return true; }
       const gold = gp.progression?.gold;
       if (gold === undefined || toBigInt(offer.price) * BigInt(quantity) > toBigInt(gold)) { this.fail('Not enough gold for the potion refill.'); return true; }
-      if (Cmd.raw({ kind: 'shop-buy', tab: offer.tab, slot: offer.slot, quantity }, `Auto buy: ${offer.name} x${quantity}`)) t.pending = { ref: s.refObjId, before, at: now() };
+      if (Cmd.raw({ kind: 'shop-buy', tab: offer.tab, slot: offer.slot, quantity }, `Auto buy: ${offer.name} x${quantity}`)) t.pending = { ref: s.refObjId, before, quantity, at: now() };
       return true;
     }
     return true;

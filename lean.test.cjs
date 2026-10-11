@@ -1021,6 +1021,85 @@ test('town cycle recalls, confirms pet storage and purchases, repairs, reverses 
   assert.equal(commands.filter(c => c.kind === 'travel-gate').length, 1);
   assert.match(f.Town.message, /complete/);
 });
+test('abnormal pill restocking uses only the strongest universal pill and preserves existing profiles', () => {
+  const f = fixture(), r = f.Restock.cfg();
+  assert.equal(r.cure.on, false); assert.equal(r.cure.target, 50);
+  f.storage.set('sroAsistan:v7:profile:default', JSON.stringify({ potion: { restock: { mp: { target: 1000 } } } }));
+  f.Settings.importOriginal();
+  assert.equal(f.Restock.cfg().mp.target, 1000); assert.equal(f.Restock.cfg().cure.on, false);
+  assert.equal(f.Restock.cfg().cure.target, 50);
+  const current = f.Restock.cfg();
+  Object.assign(current.cure, { on: true, low: 10, target: 100 });
+  Object.assign(current.cure, { on: true, refObjId: 55, low: 10, target: 100 });
+  assert.equal(f.Restock.supplies().find(s => s.kind === 'cure').refObjId, 58);
+  assert.equal(f.Town.supplies().find(s => s.kind === 'cure').refObjId, 58);
+  const offer = refObjId => ({ refObjId, previews: [{ refObjId, typeFlags: 12652 }] });
+  assert.equal(f.Restock.offerKind(offer(58)), 'cure');
+  for (const ref of [55, 56, 57, 10371]) assert.equal(f.Restock.offerKind(offer(ref)), '');
+  assert.equal(f.Restock.offerKind({ ...offer(58), currency: 2 }), '');
+  assert.equal(f.Restock.offerKind({ ...offer(58), contents: [{ refObjId: 58, quantity: 10 }] }), '');
+});
+
+test('town refills best abnormal pills by exact missing amount and waits for settlement', () => {
+  const f = townFixture(), gp = f.World.gp;
+  gp.inventory.find(i => i.refObjId === 15).quantity = 50;
+  gp.inventory.push({ slot: 20, refObjId: 58, typeFlags: 12652, quantity: 40 });
+  Object.assign(f.Restock.cfg().cure, { on: true, low: 10, target: 50 });
+  f.Town.begin(); f.Town.enter('buy'); gp.target = 61;
+  gp.shop = { npc: 61, offers: [{ refObjId: 58, tab: 0, slot: 7, maxStack: 50, price: '260', previews: [{ refObjId: 58, typeFlags: 12652 }] }] };
+  f.Town.buy(); assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'shop-buy', tab: 0, slot: 7, quantity: 10 });
+  f.advance(1000); f.Town.buy(); assert.equal(f.commands.filter(c => c.kind === 'shop-buy').length, 1);
+  gp.inventory.find(i => i.refObjId === 58).quantity = 50; f.Town.buy();
+  assert.equal(f.Town.trip.phase, 'close-vendor'); assert.equal(f.commands.filter(c => c.kind === 'shop-buy').length, 1);
+});
+
+test('town refuses cheaper pills and insufficient gold without a substitute purchase', () => {
+  for (const cheapOnly of [true, false]) {
+    const f = townFixture(), gp = f.World.gp;
+    gp.inventory.find(i => i.refObjId === 15).quantity = 50;
+    Object.assign(f.Restock.cfg().cure, { on: true, low: 10, target: 50 });
+    f.Town.begin(); f.Town.enter('buy'); gp.target = 61;
+    const ref = cheapOnly ? 57 : 58;
+    gp.shop = { npc: 61, offers: [{ refObjId: ref, tab: 0, slot: 7, maxStack: 50, price: '260', previews: [{ refObjId: ref, typeFlags: 12652 }] }] };
+    if (!cheapOnly) gp.progression.gold = '1';
+    f.Town.buy(); assert.equal(f.commands.some(c => c.kind === 'shop-buy'), false); assert.equal(f.Town.trip, null);
+    assert.match(f.Town.message, cheapOnly ? /Special Universal Pill/ : /gold/);
+  }
+});
+
+test('walking restock triggers on low best pills and never repeats a partially confirmed purchase', () => {
+  const f = fixture(), r = f.Restock.cfg(), gp = f.World.gp;
+  r.enabled = true; r.hp.on = r.mp.on = false;
+  Object.assign(r.cure, { on: true, low: 10, target: 50 });
+  r.vendor = { gid: 7, refObjId: 99, name: 'Merchant', kind: 'npc', regionId: 1, x: 100, y: 0, z: 100 };
+  r.route = [{ ...r.vendor }, { ...r.vendor, x: 140 }]; f.World.ents.set(7, r.vendor);
+  f.Restock.tick(); assert.ok(f.Restock.trip); assert.equal(f.Restock.trip.supplies[0].refObjId, 58);
+  f.Restock.trip.phase = 'buy'; gp.target = 7;
+  gp.shop = { npc: 7, offers: [{ refObjId: 58, tab: 0, slot: 7, maxStack: 50, price: '260', previews: [{ refObjId: 58, typeFlags: 12652 }] }] };
+  f.Restock.tick(); assert.equal(f.commands.at(-1).quantity, 50);
+  gp.inventory = [{ slot: 13, refObjId: 58, typeFlags: 12652, quantity: 1 }];
+  f.advance(600); f.Restock.tick(); assert.ok(f.Restock.trip.pending);
+  assert.equal(f.commands.filter(c => c.kind === 'shop-buy').length, 1);
+  gp.inventory[0].quantity = 50; f.Restock.tick(); assert.equal(f.Restock.trip.phase, 'return');
+  assert.equal(f.commands.filter(c => c.kind === 'shop-buy').length, 1);
+  assert.equal(f.commands.at(-1).kind, 'npc-close');
+});
+
+test('best pills participate in low-stock, full-bag and revival town trips with shared targets', () => {
+  for (const mode of ['low', 'full', 'revival']) {
+    const f = townFixture(), gp = f.World.gp; f.pet.inventory = [];
+    gp.inventory.find(i => i.refObjId === 15).quantity = 50;
+    Object.assign(f.Restock.cfg().cure, { on: true, low: 10, target: 100 });
+    if (mode === 'full') f.World.freeBagSlots = () => 1;
+    assert.equal(f.Town.reason(), mode === 'full' ? 'character bag nearly full' : 'potions running low');
+    f.Town.begin(mode === 'revival');
+    assert.ok(f.Town.trip); const supply = f.Town.trip.supplies.find(s => s.kind === 'cure');
+    assert.equal(supply.refObjId, 58); assert.equal(supply.target, 100);
+    f.Restock.cfg().cure.target = 200; assert.equal(supply.target, 100);
+    assert.equal(f.Town.disposable({ refObjId: 58, typeFlags: 12652 }), false);
+  }
+});
+
 test('town preflight stops before consuming scrolls when setup, scrolls or gold are missing', () => {
   for (const change of [f => f.Town.cfg().gate = null, f => f.World.gp.inventory = f.World.gp.inventory.filter(i => i.slot !== 14),
       f => f.World.gp.progression.gold = '0']) {
