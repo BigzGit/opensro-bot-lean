@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -2243,6 +2243,131 @@ test('buff gear resets recovery on character or profile change without touching 
   }
 });
 
+
+function sessionFixture() {
+  const f=fixture();f.Stats.init();
+  f.World.gp.progression={...f.World.gp.progression,level:1,experience:'100',gold:'1000'};
+  f.Stats.levels={1:{expRequired:'118'},2:{expRequired:'470'},3:{expRequired:'1058'}};
+  f.Hunt.running=true;f.Stats.huntStart();return f;
+}
+
+test('session stats accumulate hunting time across pauses without including stopped gains',()=>{
+  const f=sessionFixture();f.advance(60000);f.Stats.sample();
+  assert.equal(f.Stats.session.ms,60000);
+  f.Hunt.stop();f.advance(120000);f.World.gp.progression.experience='10000';f.World.gp.progression.gold='20000';f.Stats.sample();
+  assert.equal(f.Stats.session.ms,60000);assert.equal(f.Stats.session.xp,0n);assert.equal(f.Stats.session.gold,0n);
+  f.Hunt.start();f.advance(30000);f.World.gp.progression.experience='10050';f.Stats.sample();
+  assert.equal(f.Stats.session.ms,90000);assert.equal(f.Stats.session.xp,50n);
+});
+
+test('session XP gains handle single and multiple level rollovers without counting losses',()=>{
+  const f=sessionFixture();
+  for(const [level,experience] of [[1,'110'],[2,'20'],[4,'10']]){
+    f.World.applyGameplay({...f.World.gp,progression:{...f.World.gp.progression,level,experience}});
+  }
+  assert.equal(f.Stats.session.xp,1556n);
+  f.World.applyGameplay({...f.World.gp,progression:{...f.World.gp.progression,experience:'5'}});
+  assert.equal(f.Stats.session.xp,1556n);
+  f.World.applyGameplay({...f.World.gp,progression:{...f.World.gp.progression,experience:'15'}});
+  assert.equal(f.Stats.session.xp,1566n);
+});
+
+test('session stats use exact BigInt XP and signed net gold including supply spending',()=>{
+  const f=sessionFixture();f.Stats.reset();
+  f.World.gp.progression.gold='9007199254740993000';f.World.gp.progression.experience='9007199254740993000';f.Stats.baseline=null;f.Stats.sample();
+  f.World.applyGameplay({...f.World.gp,progression:{...f.World.gp.progression,gold:'9007199254740993900',experience:'9007199254740993123'}});
+  f.World.applyGameplay({...f.World.gp,progression:{...f.World.gp.progression,gold:'9007199254740992500'}});
+  assert.equal(f.Stats.session.xp,123n);assert.equal(f.Stats.session.gold,-500n);assert.equal(f.Stats.display().gold,'-500');
+  assert.equal(f.commands.length,0);
+});
+
+test('session XP rate waits thirty seconds and uses active time only',()=>{
+  const f=sessionFixture();f.World.gp.progression.experience='200';f.advance(29000);f.Stats.sample();
+  assert.equal(f.Stats.display().rate,'—');f.advance(1000);f.Stats.sample();assert.equal(f.Stats.display().rate,'12,000');
+  f.Hunt.stop();f.advance(3600000);f.Stats.sample();assert.equal(f.Stats.display().rate,'12,000');assert.equal(f.Stats.display().time,'00:00:30');
+});
+
+test('session kills require local or owned pet fatal results and deduplicate multi-hit updates',()=>{
+  const f=sessionFixture();
+  for(const gid of [10,11,12,13])f.World.ents.set(gid,{gid,kind:'monster'});
+  f.World.ents.set(50,{gid:50,kind:'cos',ownerGid:1});f.World.ents.set(51,{gid:51,kind:'cos',ownerGid:2});
+  const c={caster:1,target:10,fatal:true,results:[{target:10,impacts:[{fatal:true},{fatal:true}]},{target:11,impacts:[{fatal:true}]}]};
+  f.bus.emit('cast',c);f.bus.emit('cast',c);assert.equal(f.Stats.session.kills,2);
+  f.bus.emit('cast',{caster:2,target:12,fatal:true});f.bus.emit('cast',{caster:51,target:12,fatal:true});
+  f.bus.emit('cast',{caster:1,target:1,fatal:true});assert.equal(f.Stats.session.kills,2);
+  f.bus.emit('cast',{caster:50,target:12,fatal:true});assert.equal(f.Stats.session.kills,3);
+  f.Stats.reset();f.bus.emit('cast',c);assert.equal(f.Stats.session.kills,0);
+  f.bus.emit('spawn',{gid:10});f.bus.emit('cast',{caster:1,target:10,fatal:true});assert.equal(f.Stats.session.kills,1);
+  f.Hunt.stop();f.bus.emit('cast',{caster:1,target:13,fatal:true});assert.equal(f.Stats.session.kills,1);
+});
+
+test('session deaths count once per alive-to-dead transition and not while stopped',()=>{
+  const f=sessionFixture();const local=f.World.local();local.appearanceState=[2,0,0];f.bus.emit('death',local);
+  f.Stats.sample();f.Stats.sample();assert.equal(f.Stats.session.deaths,1);
+  local.appearanceState=[0,0,0];f.Stats.sample();local.appearanceState=[2,0,0];f.Stats.sample();assert.equal(f.Stats.session.deaths,2);
+  f.Hunt.stop();local.appearanceState=[0,0,0];f.Stats.sample();local.appearanceState=[2,0,0];f.Stats.sample();assert.equal(f.Stats.session.deaths,2);
+});
+
+test('session potions count inventory-confirmed consumption rather than dispatch or unrelated loss',()=>{
+  const f=sessionFixture(),item={slot:13,refObjId:101,typeFlags:2284,quantity:10};f.World.gp.inventory=[item];
+  assert.equal(f.Potion.use('hp'),true);assert.equal(f.Stats.session.potions,0);
+  f.advance(1000);f.Stats.sample();assert.equal(f.Stats.session.potions,0);
+  item.quantity=9;f.Stats.sample();assert.equal(f.Stats.session.potions,1);f.Stats.sample();assert.equal(f.Stats.session.potions,1);
+  item.quantity=8;f.Stats.sample();assert.equal(f.Stats.session.potions,1);
+});
+
+
+test('session potion confirmation ignores missing inventory snapshots',()=>{
+  const f=sessionFixture(),item={slot:13,refObjId:101,quantity:10};f.World.gp.inventory=[item];f.Stats.potion(item);
+  f.World.gp.inventory=undefined;f.Stats.sample();assert.equal(f.Stats.session.potions,0);
+  f.World.gp.inventory=[{...item,quantity:9}];f.Stats.sample();assert.equal(f.Stats.session.potions,1);
+});
+
+test('session potion confirmations allocate only observed decreases and expire stale sends',()=>{
+  const f=sessionFixture(),item={slot:13,refObjId:101,quantity:10};f.World.gp.inventory=[item];
+  f.Stats.potion(item);f.Stats.potion(item);item.quantity=9;f.Stats.sample();assert.equal(f.Stats.session.potions,1);
+  f.advance(15001);item.quantity=8;f.Stats.sample();assert.equal(f.Stats.session.potions,1);
+  f.Hunt.stop();f.Stats.potion(item);item.quantity=7;f.Stats.sample();assert.equal(f.Stats.session.potions,1);
+});
+
+test('session pickup units require inventory gain and distinguish gold from items',()=>{
+  const f=sessionFixture(),drop=f.drop();f.Loot.begin(drop);f.World.ents.delete(drop.gid);f.Loot.tick();assert.equal(f.Stats.session.items,0);
+  f.World.gp.inventory=[{slot:13,refObjId:101,quantity:7}];f.Loot.tick();assert.equal(f.Stats.session.items,7);f.Loot.tick();assert.equal(f.Stats.session.items,7);
+  f.advance(500);const gold=f.drop(21,748);assert.equal(f.Loot.begin(gold),true);f.World.gp.progression.gold='1050';f.Loot.tick();assert.equal(f.Stats.session.items,7);assert.equal(f.Stats.values.loot,2);
+  const p=sessionFixture();pickupPet(p);const elixir=p.drop(20,3436);p.Loot.begin(elixir);
+  p.World.gp.cosRecords[0].inventory.push({slot:0,refObjId:101,quantity:3});p.Loot.tick();assert.equal(p.Stats.session.items,3);
+});
+
+test('session reset clears totals while preserving the current tracking state and deduplication',()=>{
+  const f=sessionFixture();f.advance(60000);f.World.gp.progression.gold='1050';f.Stats.sample();f.Stats.session.items=5;
+  f.Stats.reset();assert.equal(f.Stats.session.ms,0);assert.equal(f.Stats.session.gold,0n);assert.equal(f.Stats.session.items,0);assert.equal(f.Stats.active,true);
+  f.advance(1000);f.Stats.sample();assert.equal(f.Stats.session.ms,1000);
+  f.Hunt.stop();f.Stats.reset();assert.equal(f.Stats.active,false);assert.equal(f.Stats.session.ms,0);
+});
+
+test('session stats rebase after disconnect and world reset without counting bootstrap balances',()=>{
+  const f=sessionFixture();f.advance(1000);f.World.phase='login';f.bus.emit('phase','login');f.advance(60000);f.Stats.sample();
+  f.World.gp.progression={level:70,experience:'10000000',gold:'90000000'};f.World.phase='world';f.bus.emit('phase','world');
+  assert.equal(f.Stats.session.gold,0n);assert.equal(f.Stats.session.xp,0n);assert.equal(f.Stats.session.ms,1000);
+  f.World.epoch++;f.World.gp.progression.gold='1';f.Stats.sample();assert.equal(f.Stats.session.gold,0n);
+});
+
+test('session stats reset on character change and tolerate missing or invalid progression',()=>{
+  const f=sessionFixture();f.Stats.session.kills=5;f.Stats.session.xp=300n;f.bus.emit('character','Other');
+  assert.equal(f.Stats.session.kills,0);assert.equal(f.Stats.session.xp,0n);
+  f.World.gp.progression={};f.Stats.reset();assert.equal(f.Stats.display().xp,'—');assert.equal(f.Stats.display().gold,'—');
+  for(const experience of [null,'oops',-1,1.5,Number.MAX_SAFE_INTEGER+2]){
+    f.World.gp.progression={level:1,experience,gold:experience};f.Stats.sample();assert.equal(f.Stats.session.xp,0n);assert.equal(f.Stats.session.gold,0n);
+  }
+});
+
+test('session XP keeps unresolved level transitions bounded and marked partial',()=>{
+  const f=sessionFixture();f.Stats.levels=null;f.World.gp.progression={level:2,experience:'20',gold:'1000'};f.Stats.sample();
+  assert.equal(f.Stats.session.xp,0n);assert.match(f.Stats.display().xp,/partial/);assert.equal(f.Stats.pendingXP.length,1);
+  f.World.gp.progression={level:3,experience:'30',gold:'1000'};f.Stats.sample();assert.equal(f.Stats.pendingXP.length,2);
+  f.Stats.reset();assert.equal(f.Stats.pendingXP.length,0);
+});
+
 async function updateTests() {
   async function check(name, fn) { await fn(); passed++; console.log('PASS ' + name); }
   const sha = 'a'.repeat(40), base = 'https://raw.githubusercontent.com/nixxane/opensro-bot-lean/' + sha + '/bot.lean.';
@@ -2384,6 +2509,16 @@ async function updateTests() {
     assert.match(f.UI.reportStatus.textContent,/Nothing was uploaded/);
     delete f.win.navigator.mediaDevices; await r.capture(); assert.match(f.UI.reportStatus.textContent,/unavailable/);
     r.describe('a'.repeat(2000)); assert.equal(r.draft.description.length,1000);
+  });
+
+  await check('session level data resolves delayed rollover totals without storage or uploads', async()=>{
+    const f=sessionFixture();f.Stats.levels=null;f.win.location={origin:'https://opensro.online'};
+    let resolve,requests=0;f.Icons.request=(path,op)=>{assert.equal(path,'/assets/data/levelData.json');assert.equal(op,'json');requests++;return new Promise(done=>resolve=done);};
+    f.Stats.loadLevels();f.World.gp.progression={level:2,experience:'20',gold:'1000'};f.Stats.sample();
+    assert.equal(requests,1);assert.equal(f.Stats.pendingXP.length,1);
+    resolve({1:{expRequired:'118'}});await f.Stats.loading;
+    assert.equal(f.Stats.session.xp,38n);assert.equal(f.Stats.pendingXP.length,0);assert.equal(f.Stats.display().xp,'38');
+    assert.equal(f.storage.size,0);assert.equal(f.commands.length,0);
   });
   console.log('Total integration tests: ' + passed);
 }

@@ -161,7 +161,7 @@ const Loot = {
     if (!a.petGid) Hunt.state = 'loot';
     const e = World.ents.get(a.gid);
     if (this.gained(a)) {
-      Stats.count('loot');
+      Stats.pickup(a);
       // If inventory updates precede despawn, don't request this same drop again.
       this.skips.set(a.gid, { until: now() + 3000, bag: null });
       this.failureCounts.delete(a.gid);

@@ -88,11 +88,6 @@ const Settings = {
     } catch (e) { UI.toast('Could not import profile: ' + e.message, 'warn'); }
   },
 };
-const Stats = {
-  values: { loot: 0, casts: 0, potions: 0, deaths: 0 },
-  count(kind) { if (kind in this.values) this.values[kind]++; },
-  huntStart() {}, huntStop() {},
-};
 // Only the pet-full alert is audible; existing combat/UI calls stay silent.
 const Sound = {
   ctx: null,

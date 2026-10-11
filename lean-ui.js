@@ -347,6 +347,7 @@ const UI = {
     } else if (this.current === 'Wardrobe') {
       LeanWardrobe.draw(this.pane);
     } else {
+      Stats.draw(this.pane);
       this.pane.append(this.group('Behaviour',
         this.select('On death', [['stop', 'Stop'], ['wait', 'Wait'], ['revive', 'Revive and walk back']], () => H().onDeath, v => H().onDeath = v),
         this.check('Rest when low', () => H().sit.enabled, v => H().sit.enabled = v),
@@ -388,6 +389,7 @@ const UI = {
     return (World.gp?.skills || []).map(id => { const s = World.skill(id); return `${id}:${s?.name}:${s?.icon}:${s?.level}`; }).join('|');
   },
   update() {
+    Stats.sample(); Stats.render();
     Alchemy.refresh();
     if (this.current === 'Combat' && this.combatTab === 'Buffs & imbue' && BuffGear.note) BuffGear.note.textContent = BuffGear.status();
     Reports.render();

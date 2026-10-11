@@ -15,7 +15,7 @@ Hunt.tick = function () {
   if (World.isDead()) {
     Loot.suspend();
     this.state = 'dead';
-    if (!this.deathAt) { this.deathAt = now(); Stats.count('deaths'); }
+    if (!this.deathAt) { this.deathAt = now(); }
     if ((Town.autoRevive() || H.onDeath === 'revive') && !this.revived && now() - this.deathAt > 5000) {
       if (Cmd.rebirth(1)) this.revived = true;
     } else if (!Town.autoRevive() && H.onDeath === 'stop') this.stop('character died');
@@ -145,6 +145,7 @@ const Controller = {
       this.mode = 'error';
     } finally {
       Town.record();
+      Stats.sample();
     }
   },
 };

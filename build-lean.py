@@ -43,7 +43,7 @@ commands = commands.replace('return now() - (this.last[kind] || 0) >= gap;', 're
 # replaces the press gid with the selection intent the caster just set.
 commands = commands.replace('if (!e || !World.isAlive(e)) return false;', 'if (!e || !World.isAlive(e) && !(info?.targets & 128)) return false;')
 ticker = section('const Ticker =', '// ---- Potion ')
-potion = section('const Potion =', '// Same rule as the client')
+potion = section('const Potion =', '// Same rule as the client').replace("Stats.count('potions');", 'Stats.potion(item);')
 combat = section('const Combat =', '// ---- Assist:')
 combat = combat.replace('return Assets.skillMeta.get(id) || null;', 'return World.skill(id) || null;')
 combat = combat.replace('return !m || !m.mp || m.mp <= me.mp;', 'return !m || (m.mp ?? 0) + Math.trunc(me.maxMp * (m.mpPercent ?? 0) / 100) <= me.mp;')
@@ -68,7 +68,7 @@ icon_loader += '''  self.onmessage = async e => {
     const msg = e.data || {};
     if (msg.op === 'init') { ORIGIN = String(msg.origin || ''); self.postMessage({ ready: true }); return; }
     try {
-      const allowed = ['/assets/data/skillData.json', '/assets/text/textdataname.en.json', '/assets/data/missionPresentation.json', '/assets/char/roster.json', '/assets/npc/manifest.json'];
+      const allowed = ['/assets/data/levelData.json', '/assets/data/skillData.json', '/assets/text/textdataname.en.json', '/assets/data/missionPresentation.json', '/assets/char/roster.json', '/assets/npc/manifest.json'];
       if (msg.op !== 'blob' && !(msg.op === 'json' && allowed.includes(msg.path))) throw fail('op', 'Unsupported asset request');
       const { bytes, mime } = await bytesOf(msg.path);
       const result = msg.op === 'json' ? JSON.parse(new TextDecoder().decode(bytes)) : new Blob([bytes], { type: mime || 'image/png' });
@@ -89,7 +89,7 @@ skin += '\nconst LEAN_CSS = ' + __import__('json').dumps((base / 'lean-skin.css'
 header = '''// ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.41
+// @version      1.2.42
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -109,7 +109,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.41';
+const VERSION = '1.2.42';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -119,6 +119,7 @@ parts = [header, utils, (base / 'lean-settings.js').read_text(encoding='utf-8'),
          hook, display, world, commands, ticker, potion, attackable, combat, restock, hunt,
          (base / 'lean-navigation.js').read_text(encoding='utf-8'), walkback,
          (base / 'lean-loot.js').read_text(encoding='utf-8'),
+         (base / 'lean-stats.js').read_text(encoding='utf-8'),
          (base / 'lean-party.js').read_text(encoding='utf-8'),
          (base / 'lean-resurrect.js').read_text(encoding='utf-8'),
          (base / 'lean-speed-scroll.js').read_text(encoding='utf-8'),

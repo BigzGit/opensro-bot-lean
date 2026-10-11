@@ -8,12 +8,12 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.41**.
+- Latest userscript release at this snapshot: **1.2.42**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **219 integration tests**, JavaScript syntax check and headless browser checks pass.
-- Latest work: multiple opt-in buff weapon sets, per-buff assignment, confirmed inventory swaps and combat-gear restoration. Isolated validation passes; live-server swapping remains unconfirmed.
+- Latest validation: **234 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest work: local hunting session stats under Settings, with active time, level-aware XP/hour, net gold and confirmed event counters. Isolated validation passes; live-server counter accuracy and earlier buff swapping remain unconfirmed.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
 
@@ -32,7 +32,8 @@ The panel lives inside an open shadow root on `#sro-bot-lean`. Runtime diagnosti
 | `build-lean.py` | Extracts selected original core code, applies Lean adaptations, assembles modules and emits release files. Runs the wardrobe generator first. |
 | `vendor/bot.js` | Original reviewed assistant; preserve it. Contains retained world, commands, combat, potion and utility code. |
 | `build-wardrobe.py` | Generates the retained wardrobe core. |
-| `lean-settings.js` | Defaults, per-character persistence/import, statistics and pet-alert audio. |
+| `lean-settings.js` | Defaults, per-character persistence/import and pet-alert audio. |
+| `lean-stats.js` | Page-local hunting session time, progression deltas and confirmed event counters. |
 | `lean-controller.js` | Coordinates hunting, restocking, return, loot and independent services. |
 | `lean-loot.js` | Drop eligibility, categories, pet selection/setup, pickup confirmation/retries and full-bag alert. |
 | `lean-alchemy.js` | Single bag-weapon reinforcement with native result confirmation and bounded attempts. |
@@ -438,3 +439,14 @@ Buff casts wait for an observed cast event or active buff, plus authored actionM
 Party and emergency potions continue during swaps. Combat, town, walk-back, resurrection, collection and alchemy yield; new travel/hunting/alchemy starts are refused while gear restoration/review is outstanding. Stop/F8/feature-disable finishes pending moves/casts then restores without further buffs. Manual control/equipment commands, death, disconnect and world reset stop hunting and preserve a manual recovery snapshot in this page; Restore combat gear retries only when explicitly clicked with settled state, Use current gear clears recovery after inspection. Character/profile change or reload discards recovery without touching new gear. Missing gear, ambiguous copies, capacity failures or unconfirmed restoration never resume hunting automatically.
 
 219 integration tests, syntax and isolated Edge browser checks pass. New tests cover two alternate sets, arbitrary combat gear/ammunition, exact confirmation, stale/busy inventory, action holds, disabled paths, missing/full/duplicate gear, interrupted/rejected restoration, death/manual/profile isolation, independent services, cast timeout and lost-buff suppression. Browser tests save two sets and assign/remove them through actual controls. No live game/account equipment was changed; native swapping and buff survival need user confirmation. Publish and mirror through the standing workflow.
+
+
+## Local session stats: 1.2.42
+
+Settings → Session stats shows hunting time, XP gained and XP/hour, signed net gold, confirmed kills, deaths, confirmed potion uses and item pickup units. Tracks while Hunt.running and World.inWorld, pauses across stops/disconnects and retains totals across toggles. Town services count while hunting stays enabled; separate walking returns can pause hunting. Reset session, character changes and reload clear totals. No persistence, telemetry, uploads or new gameplay commands. Existing diagnostic-report contents are unchanged.
+
+lean-stats.js owns Stats. Samples native progression experience/gold with BigInt, rebases across stopped periods/world epochs and lazily loads the verified local /assets/data/levelData.json for level rollovers. XP counts positive observed gains rather than net death losses; unresolved transitions are bounded and labelled partial. XP/hour appears after 30 active seconds. Net gold includes observed purchases and repairs. Missing progression displays unavailable rather than invented totals.
+
+Kill counts require a monster fatal cast result from the local player or their owned COS, deduplicated until respawn; party XP and despawns are not kill proof. Potion counts require inventory decreases correlated with recent bot Potion.use dispatches; expired/stopped/unconfirmed requests do not count. HP/MP/vigor/cure share this counter. Items count confirmed bot pickup quantity gains in character/pet inventory; gold drops are excluded. These are observed correlations, not transaction-ID receipts; unobserved/manual actions are not comprehensive gameplay accounting.
+
+Fifteen new integration tests cover active/paused time, multi-level XP and exact large integers, signed supply spending, rates, fatal-result ownership/deduplication, death transitions, potion settlement/expiry/missing inventory, item units, reset, character/world isolation and bounded pending asset resolution. Browser tests exercise Start/F8, rendered values and Reset session in actual Settings controls. All 234 integration tests, syntax and isolated Edge browser checks pass, with zero page errors. No live character was used; live counter accuracy still needs user confirmation. Publish/mirror/back up through the standing release workflow.

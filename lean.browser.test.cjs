@@ -23,6 +23,7 @@ const manifest = { groups: [], assets: images.map((image, i) => {
 const skillRow = Array(79).fill('0');
 Object.assign(skillRow, { 0:'3404',1:'334',2:'13',3:'1',18:'skill\\test\\skill3.ddj',19:'SN_THUNDER',24:'0',78:'0' });
 const jsonFixtures = {
+  '/assets/data/levelData.json': {1:{expRequired:'118'},2:{expRequired:'470'}},
   '/assets/data/skillData.json': { rows:[skillRow.join('\t')] },
   '/assets/text/textdataname.en.json': { entries: { SN_THUNDER:'Thunderdragon force', SN_ITEM_CH_SWORD_09_A:'Test Sword', SN_ITEM_CH_SWORD_09_C_RARE_HONOR:'Honor Sword' } },
   '/assets/char/roster.json': { dress: { equipment: {
@@ -155,6 +156,31 @@ const server = http.createServer((req, res) => {
     await page.getByLabel('Swap weapons for assigned buffs',{exact:true}).uncheck();
     await page.evaluate(()=>{SROLean.world.gp.inventory=SROLean.world.gp.inventory.filter(i=>i.refObjId!==11);SROLean.world.gp.inventory.find(i=>i.refObjId===10).slot=6;});
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
+
+    assert.equal(await page.getByLabel('Session',{exact:true}).textContent(),'Paused');
+    await page.evaluate(()=>{
+      window.statsOriginalProgression=SROLean.world.gp.progression;
+      SROLean.world.gp.progression={...SROLean.world.gp.progression,level:1,experience:'100',gold:'5000'};
+      SROLean.stats.reset();
+    });
+    await page.getByRole('button',{name:'Start / stop · F8',exact:true}).click();
+    await page.evaluate(()=>{
+      SROLean.stats.lastAt=performance.now()-60000;
+      SROLean.world.applyGameplay({...SROLean.world.gp,progression:{...SROLean.world.gp.progression,experience:'150',gold:'4800'}});
+      SROLean.stats.render();
+    });
+    assert.equal(await page.getByLabel('Session',{exact:true}).textContent(),'Tracking');
+    assert.equal(await page.getByLabel('XP gained',{exact:true}).textContent(),'50');
+    assert.equal(await page.getByLabel('Net gold',{exact:true}).textContent(),'-200');
+    assert.match(await page.getByLabel('Hunting time',{exact:true}).textContent(),/^00:01:0\d$/);
+    assert.match(await page.getByLabel('XP / hour',{exact:true}).textContent(),/^[\d,]+$/);
+    await page.getByRole('group',{name:'Session stats',exact:true}).screenshot({path:__dirname+'/lean-session-stats-preview.png'});
+    await page.getByRole('button',{name:'Reset session',exact:true}).click();
+    assert.equal(await page.getByLabel('XP gained',{exact:true}).textContent(),'0');
+    assert.equal(await page.getByLabel('Net gold',{exact:true}).textContent(),'0');
+    await page.getByRole('button',{name:'Start / stop · F8',exact:true}).click();
+    await page.evaluate(()=>{SROLean.world.gp.progression=window.statsOriginalProgression;SROLean.stats.reset();});
+    assert.equal(await page.getByLabel('Session',{exact:true}).textContent(),'Paused');
     assert.equal(await page.getByLabel('Maximum res distance from hunt spot (m)', { exact: true }).inputValue(), '30');
     await page.getByLabel('Maximum res distance from hunt spot (m)', { exact: true }).fill('40');
     await page.getByLabel('Maximum res distance from hunt spot (m)', { exact: true }).dispatchEvent('change');

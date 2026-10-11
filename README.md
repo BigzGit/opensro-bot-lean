@@ -53,6 +53,10 @@ Leave **Revive in town and reverse to last scroll point** enabled under the town
 
 If something stalls, use **Settings → Send bug report**. Preview the diagnostics, optionally add an explanation and screenshot, then click **Send to developer**. Check screenshots for private details. Nothing sends automatically. **Copy diagnostics** remains available.
 
+## Session stats
+
+Open **Settings → Session stats** for hunting time, XP/hour, net gold, confirmed kills, deaths, potion use and pickups. Totals pause when hunting stops and stay across toggles. **Reset session**, reloading or changing character clears them. Stats stay local to the page.
+
 ## Controls
 
 | Control | Action |
