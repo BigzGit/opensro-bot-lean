@@ -3,13 +3,13 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Alchemy, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
-  const storage = new Map(), commands = [], notices = [], intervals = [];
+  const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
   const win = { addEventListener() {}, localStorage: { getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v) } };
   const context = { window: win, performance: { now: () => time }, console,
-    setTimeout: () => 1, clearTimeout() {}, setInterval(fn, ms) { intervals.push({ fn, ms }); }, AbortController, Map, Set, Date, ArrayBuffer, DataView, atob };
+    setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout() {}, setInterval(fn, ms) { intervals.push({ fn, ms }); }, AbortController, Blob, FormData, URL, Map, Set, Date, ArrayBuffer, DataView, atob };
   vm.createContext(context); vm.runInContext(isolated, context);
   const b = context.bot;
   b.UI.toast = message => notices.push(message);
@@ -28,7 +28,7 @@ function fixture() {
     const e = { gid, kind: 'ground-item', refObjId: 101, name: 'HP potion', regionId: 1, x: 200, y: 0, z: 100, groundItem: { typeFlags: tf, goldAmount: 0 } };
     b.World.ents.set(gid, e); return e;
   }
-  return { ...b, commands, notices, storage, drop, win, intervals, advance: ms => { time += ms; } };
+  return { ...b, commands, notices, storage, drop, win, intervals, timers, advance: ms => { time += ms; } };
 }
 let passed = 0;
 function pickupPet(f, commandMode = 7) {
@@ -2104,6 +2104,91 @@ async function updateTests() {
     f.win.navigator.clipboard.writeText = async () => { throw Error('denied'); };
     await f.Diagnostics.copy(); assert.equal(JSON.parse(fallback).app, 'OpenSRO Bot Lean');
     assert.equal(f.commands.length, 0);
+  });
+  function reporting(f) {
+    f.UI.showReport = () => {};
+    f.UI.reportStatus = { textContent: '' };
+    f.Reports.open();
+    return f.Reports;
+  }
+  await check('report preview freezes redacted diagnostics and sends only on explicit request', async () => {
+    const f = fixture(); let calls = [];
+    f.World.gp.characterName = 'PRIVATE_NAME';
+    f.win.fetch = async (...args) => { calls.push(args); return { ok: true, status: 200, json: async () => ({ ok: true }) }; };
+    const r = reporting(f), original = r.text();
+    assert.equal(calls.length, 0); assert.ok(!original.includes('PRIVATE_NAME'));
+    f.World.gp.inventoryPending = true; f.Diagnostics.sample(); assert.equal(r.text(), original);
+    r.describe('It stopped after alchemy.');
+    const preview = r.text(); await r.send();
+    assert.equal(calls.length, 1); const [url, options] = calls[0];
+    assert.equal(url, 'https://nixbot.nixxane.workers.dev/report');
+    assert.equal(options.body.get('report'), preview); assert.equal(options.body.get('screenshot'), null);
+    assert.equal(options.credentials, 'omit'); assert.equal(options.referrerPolicy, 'no-referrer');
+    assert.equal(options.redirect, 'error'); assert.equal(options.method, 'POST');
+    assert.equal(JSON.parse(preview).description, 'It stopped after alchemy.');
+    assert.equal(r.draft.sent, true); await r.send(); assert.equal(calls.length, 1);
+    assert.equal(f.commands.length, 0); assert.equal(f.storage.size, 0);
+    r.close(); assert.equal(r.draft, null);
+  });
+  await check('report uploads do not overlap or retry automatically and retain uncertain drafts', async () => {
+    const f = fixture(), r = reporting(f); let reject, calls = 0;
+    f.win.fetch = () => { calls++; return new Promise((_, no) => { reject = no; }); };
+    const pending = r.send(); const before = r.text();
+    await r.send(); r.describe('changed'); r.close(); assert.equal(r.text(), before);
+    assert.equal(calls, 1); reject(Error('private error')); await pending;
+    assert.equal(r.sending, false); assert.equal(r.draft.sent, false);
+    assert.match(f.UI.reportStatus.textContent, /could not be confirmed/);
+    assert.ok(!f.UI.reportStatus.textContent.includes('private error')); assert.equal(calls, 1);
+    f.win.fetch = async (_, o) => { calls++; assert.equal(o.body.get('report'), before); return {ok:true,status:200,json:async()=>({ok:true})}; };
+    await r.send(); assert.equal(calls, 2);
+  });
+  await check('report rate limits persist across preview closes and expire without automatic sending', async () => {
+    for (const header of ['60', null, 'garbage']) {
+      const f = fixture(), r = reporting(f); let calls = 0;
+      f.win.fetch = async () => { calls++; return {status:429,headers:{get:()=>header}}; };
+      await r.send(); assert.equal(r.cooldownUntil, 160000); r.close(); r.open();
+      await r.send(); f.advance(59999); await r.send(); assert.equal(calls, 1);
+      f.advance(1); assert.equal(calls, 1); await r.send(); assert.equal(calls, 2);
+    }
+  });
+  await check('report timeout aborts once and validation/service failures never trigger retries', async () => {
+    const f = fixture(), r = reporting(f); let signal, calls = 0;
+    f.win.fetch = (_, options) => { calls++; signal = options.signal; return new Promise((_, reject) => signal.addEventListener('abort', () => reject(Error('timeout')))); };
+    const pending = r.send(); const timeout = f.timers.find(t => t.ms === 20000); assert.ok(timeout); timeout.fn(); await pending;
+    assert.equal(signal.aborted, true); assert.equal(calls, 1); assert.equal(r.sending, false);
+    assert.match(f.UI.reportStatus.textContent, /could not be confirmed/);
+    for (const status of [400, 413, 403, 503, 502]) {
+      f.win.fetch = async () => ({status,ok:false}); await r.send();
+      assert.equal(r.draft.sent, false); assert.equal(r.sending, false);
+    }
+    f.win.fetch = async () => ({status:200,ok:true,json:async()=>({ok:false})}); await r.send(); assert.equal(r.draft.sent, false);
+    r.draft.base.large = 'x'.repeat(128 * 1024); f.win.fetch = () => { throw Error('must not upload'); };
+    await r.send(); assert.match(f.UI.reportStatus.textContent, /too large/);
+  });
+  await check('screenshots require a click, stop every track, and send only the reviewed attachment', async () => {
+    const f = fixture(), r = reporting(f); let selected = 0, stopped = 0, uploads = 0;
+    const stream = {getTracks:()=>[{stop:()=>stopped++},{stop:()=>stopped++}]};
+    f.win.navigator = { mediaDevices: { getDisplayMedia: async options => { selected++; assert.equal(options.audio,false); return stream; } } };
+    r.frame = async () => new Blob(['test screenshot'],{type:'image/jpeg'});
+    assert.equal(selected,0); await r.capture(); assert.equal(selected,1); assert.equal(stopped,2);
+    assert.ok(r.draft.url.startsWith('blob:')); const image = r.draft.image;
+    f.win.fetch = async (_, options) => { uploads++; const file=options.body.get('screenshot'); assert.equal(file.name,'screenshot.jpg'); assert.equal(await file.text(),await image.text()); return {ok:true,status:200,json:async()=>({ok:true})}; };
+    assert.equal(uploads,0); await r.send(); assert.equal(uploads,1); assert.equal(r.draft.image,null); assert.equal(r.draft.url,'');
+    assert.equal(f.commands.length,0);
+  });
+  await check('cancelled, failed, and closed screenshot captures cannot upload or leave a stream open', async () => {
+    const f = fixture(), r = reporting(f); let stopped = 0, resolve;
+    f.win.navigator = {mediaDevices:{getDisplayMedia:()=>new Promise(done=>{resolve=done;})}};
+    r.frame = async () => { throw Error('capture broke'); };
+    let pending = r.capture(); await r.capture(); r.close();
+    resolve({getTracks:()=>[{stop:()=>stopped++}]}); await pending;
+    assert.equal(stopped,1); assert.equal(r.draft,null); assert.equal(r.capturing,false);
+    r.open(); f.win.navigator.mediaDevices.getDisplayMedia=async()=>({getTracks:()=>[{stop:()=>stopped++}]});
+    await r.capture(); assert.equal(stopped,2); assert.equal(r.draft.image,null); assert.equal(r.capturing,false);
+    f.win.navigator.mediaDevices.getDisplayMedia=async()=>{throw Error('denied');}; await r.capture();
+    assert.match(f.UI.reportStatus.textContent,/Nothing was uploaded/);
+    delete f.win.navigator.mediaDevices; await r.capture(); assert.match(f.UI.reportStatus.textContent,/unavailable/);
+    r.describe('a'.repeat(2000)); assert.equal(r.draft.description.length,1000);
   });
   console.log('Total integration tests: ' + passed);
 }

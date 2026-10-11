@@ -63,3 +63,5 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;max-height:130px;
 
 .waiting{white-space:pre-line;color:#c8d9ae;margin:4px 0}
 textarea{width:100%;color:inherit;background:#151916;font:11px monospace}
+
+.report-preview{max-height:55vh;overflow:auto}.report-preview .field{display:block}.report-preview .field>span{display:block;margin-bottom:4px}.report-image{display:block;width:100%;height:auto;margin:6px 0;border:1px solid #5d5034}

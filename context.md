@@ -8,12 +8,12 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.38**.
+- Latest userscript release at this snapshot: **1.2.39**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **194 integration tests**, JavaScript syntax check and headless browser checks pass.
-- Latest work: opt-in best abnormal-pill restocking in Supplies; live purchase validation and alchemy ground-click recovery remain unconfirmed.
+- Latest validation: **200 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest work: manual bug-report preview and optional screenshot upload through the deployed Cloudflare receiver; real game-to-Discord reporting, pill purchases and alchemy ground-click recovery remain unconfirmed.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
 
@@ -46,6 +46,7 @@ The panel lives inside an open shadow root on `#sro-bot-lean`. Runtime diagnosti
 | `lean-skills.js`, `lean-icons.js` | Learned-skill metadata recovery and verified asset/icon loading. |
 | `lean-wardrobe-core.js` | Generated wardrobe appearance core; edit its generator/input adaptation, not generated output alone. |
 | `lean-wardrobe.js` | Compact wardrobe browser. |
+| `lean-reports.js` | Manual frozen report preview, optional one-frame screen capture and bounded uploads to the report receiver. |
 | `lean-ui.js`, `lean-skin.css` | Controls, shadow-DOM panel, refresh and styling. |
 | `lean-boot.js` | Initialization, lifecycle resets, hotkeys and keyboard isolation. |
 | `lean.test.cjs` | VM-based integration tests against the generated userscript. |
@@ -390,3 +391,16 @@ User requested automatic buying of the best abnormal-status pills, without cheap
 Supplies adds Buy abnormal pills (best), Pills low stock and Pills refill to. Defaults off, low 10, target 50; existing profiles acquire these defaults without changing HP/MP settings. Enabled supplies always resolve cure to ref 58 even if an imported profile supplies a cheaper ID. Both town and recorded walking restock share the cure threshold/target; low pills trigger a refill and full-bag/revival trips also top them up. Count existing best pills, respect stack/space/gold limits, require normal single-item gold offers and stop with a specific message if the best pill is unavailable. Existing Use cure pills switch remains separate. Existing cure protection prevents pet pills from being sold.
 
 Walking purchases now retain requested quantity and wait for the complete expected stock increase, with the existing 12-second timeout and no repeat while unconfirmed; partial gains no longer authorize another purchase. Town already uses complete quantity confirmation. Diagnostics reports best-pill stock, switch, threshold and target and labels pill refill progress correctly. Five new integration tests cover defaults/profile preservation, fixed best selection and invalid offers, missing-amount town buying/settlement, missing best pills/gold, walking low-stock and partial confirmation, plus all town triggers with frozen trip targets (combined assertions across five tests). Browser checks toggle the new switch and edit thresholds/targets. All 194 integration tests, syntax and isolated browser checks pass. README unchanged. Live purchases remain unverified; publish/mirror/back up through the usual workflow.
+
+
+## Manual reports and optional screenshots: 1.2.39
+
+Settings → Send bug report opens an in-memory preview of the existing allowlisted diagnostics snapshot/history. Optional explanation is capped at 1000 characters and appears in the JSON preview; it is user-entered text, not automatically scrubbed. Game state changes never silently replace the preview. Only Send to developer uploads the exact displayed JSON and selected screenshot to https://nixbot.nixxane.workers.dev/report. No automatic reports, capture, retries, persistent identifier, local storage or settings change. Existing Copy diagnostics and return-diagnostics export remain available. Close discards the draft; successful sends prevent duplicate sending of that draft and release its screenshot.
+
+Optional Add screenshot invokes getDisplayMedia directly from the click with audio:false. The user chooses a tab/window/screen in the browser permission picker each time. A single decoded frame is resized to at most 1280px on its longest side and JPEG encoded at 0.85 quality (PNG fallback accepted), capped at 2 MiB. Screenshot preview and removal are provided; the UI explicitly warns that explanation/screenshots may contain private names/chat/details. Every acquired track is stopped on success, failure or close, including a picker resolving after close. Frame preparation is bounded by 10 seconds after selection. Unsupported/denied capture still permits diagnostics-only reports. No real screen is captured during tests.
+
+Uploads use multipart report and optional screenshot, omit credentials/referrer, reject redirects and have a 20-second abort timeout. No overlap, no automatic retry, no gameplay commands. Only HTTP success with JSON ok:true confirms delivery. HTTP 429 honors Retry-After (default60s, capped3600s) with a countdown disabled Send button; cooldown persists across closing/reopening the preview in this page. Ambiguous network/timeout/server replies retain the draft and warn users to check with the developer before manually resending. Other validation/service failures show generic messages, never raw server errors. Browser/game CSP and actual Discord delivery remain unverified in a live game.
+
+Separate receiver source/config lives at C:\sroserver\opensro-bot-reports-worker, not in the bot repository. Cloudflare nixbot Worker receiverVersion2 is deployed with ready:true and spamProtection:cloudflare-rate-limits. Existing production DISCORD_WEBHOOK_URL stays only in Cloudflare; it is not included in the userscript or repo. Limits are 3 attempts/minute/IP and 20 attempts/minute/Cloudflare location, approximate and local to the location. Receiver refuses uploads if bindings fail/missing. Health/preflight were checked live; no Discord test reports were sent.
+
+Six new integration tests cover frozen/redacted previews, exact multipart payload and send consent, duplicate/overlap protection, uncertain delivery and timeout, rate-limit recovery across preview close, capture cleanup/cancellation and late picker resolution, plus size/description bounds. Browser tests exercise actual UI, real canvas-generated JPEG capture/resizing with synthetic media tracks, track shutdown, removal, diagnostics-only and attached-image uploads, rate-limit feedback and desktop/mobile bounds. All 200 integration tests, syntax and isolated browser checks pass. Every reporting upload is mocked in tests; no real Discord messages or personal screenshots are sent. Publish/mirror/back up through the normal release workflow.

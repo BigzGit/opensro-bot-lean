@@ -432,6 +432,73 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.evaluate(() => { const r = document.querySelector('#sro-bot-lean').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; }), true);
     await page.screenshot({ path: __dirname + '/lean-alchemy-mobile.png', fullPage: true });
     assert.deepEqual(errors,[]);
-    console.log('PASS browser boot, collision routing, skills and missing Thunderdragon metadata; wardrobe honor and paid avatar skins, all-slot browsing, pagination, slot mapping, search, glow, presets and real-inventory isolation; controls and desktop/mobile bounds; zero page errors.');
+    // All reporting traffic is intercepted; capture uses a synthetic canvas, never the user's screen.
+    await page.setViewportSize({width:1200,height:1000});
+    let reportRequests = [], reportStatus = 200;
+    await page.route('https://nixbot.nixxane.workers.dev/report', async route => {
+      reportRequests.push(route.request().postDataBuffer().toString());
+      await route.fulfill({status:reportStatus,headers:{'Access-Control-Allow-Origin':'*','Retry-After':'60','Access-Control-Expose-Headers':'Retry-After'},json:reportStatus===200?{ok:true}:{error:'rate limited'}});
+    });
+    await page.getByRole('button',{name:'Settings',exact:true}).click();
+    await page.getByRole('button',{name:'Send bug report',exact:true}).click();
+    const preview = page.getByRole('textbox',{name:'Report preview',exact:true});
+    await preview.waitFor(); assert.equal(reportRequests.length,0);
+    assert.equal(JSON.parse(await preview.inputValue()).app,'OpenSRO Bot Lean');
+    await page.getByRole('textbox',{name:'What happened? (optional)',exact:true}).fill('Movement stopped after alchemy.');
+    assert.equal(JSON.parse(await preview.inputValue()).description,'Movement stopped after alchemy.');
+    await page.evaluate(() => {
+      const canvas=document.createElement('canvas'); canvas.width=3000;canvas.height=1600;
+      const ctx=canvas.getContext('2d');
+      const paint=()=>{ctx.fillStyle='#15304b';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle='white';ctx.font='60px sans-serif';ctx.fillText('Synthetic screenshot preview',80,180);}; paint();
+      window.reportCaptureCalls=0;
+      Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getDisplayMedia:async options=>{
+        if(options.audio!==false) throw Error('audio must be off');
+        reportCaptureCalls++; window.reportTestStream=canvas.captureStream(10);
+        window.reportPaintTimer=setInterval(paint,30); return reportTestStream;
+      }}});
+    });
+    assert.equal(await page.evaluate(()=>reportCaptureCalls),0);
+    await page.getByRole('button',{name:'Add screenshot (optional)',exact:true}).click();
+    const imagePreview=page.getByAltText('Screenshot preview',{exact:true}); await imagePreview.waitFor();
+    await page.waitForFunction(()=>SROLean.reports.capturing===false);
+    assert.equal(await page.evaluate(()=>reportTestStream.getTracks().every(t=>t.readyState==='ended')),true);
+    await page.evaluate(()=>clearInterval(reportPaintTimer));
+    assert.equal(await imagePreview.evaluate(img=>img.naturalWidth),1280);
+    assert.equal(reportRequests.length,0);
+    await page.screenshot({path:__dirname+'/lean-report-desktop.png',fullPage:true});
+    await page.setViewportSize({width:390,height:844});
+    assert.equal(await page.evaluate(()=>{const r=document.querySelector('#sro-bot-lean').getBoundingClientRect();return r.left>=0&&r.right<=innerWidth;}),true);
+    await page.getByRole('button',{name:'Send to developer',exact:true}).scrollIntoViewIfNeeded();
+    const sendBounds=await page.getByRole('button',{name:'Send to developer',exact:true}).boundingBox();
+    assert.ok(sendBounds.x>=0&&sendBounds.x+sendBounds.width<=390&&sendBounds.y+sendBounds.height<=844);
+    await page.screenshot({path:__dirname+'/lean-report-mobile.png',fullPage:true});
+    await page.getByRole('button',{name:'Remove screenshot',exact:true}).click(); await imagePreview.waitFor({state:'hidden'});
+    await page.getByRole('button',{name:'Send to developer',exact:true}).click();
+    await page.getByText('Report sent to the developer’s Discord. Thank you.',{exact:true}).waitFor();
+    assert.equal(reportRequests.length,1); assert.ok(!reportRequests[0].includes('name="screenshot"'));
+    assert.ok(reportRequests[0].includes('Movement stopped after alchemy.'));
+    await page.getByRole('button',{name:'Close preview',exact:true}).click();
+    await preview.waitFor({state:'hidden'});
+    await page.getByRole('button',{name:'Send bug report',exact:true}).click();
+    // Capture again to exercise the actual browser-generated JPEG multipart upload.
+    await page.getByRole('button',{name:'Add screenshot (optional)',exact:true}).click();
+    await imagePreview.waitFor(); await page.waitForFunction(()=>!SROLean.reports.capturing);
+    await page.evaluate(()=>clearInterval(reportPaintTimer));
+    assert.equal(await page.evaluate(()=>reportTestStream.getTracks().every(t=>t.readyState==='ended')),true);
+    await page.getByRole('button',{name:'Send to developer',exact:true}).click();
+    await page.getByText('Report sent to the developer’s Discord. Thank you.',{exact:true}).waitFor();
+    assert.equal(reportRequests.length,2); assert.ok(reportRequests[1].includes('name="screenshot"; filename="screenshot.jpg"'));
+    assert.ok(reportRequests[1].includes('Content-Type: image/jpeg'));
+    await page.getByRole('button',{name:'Close preview',exact:true}).click();
+    await page.getByRole('button',{name:'Send bug report',exact:true}).click(); reportStatus=429;
+    await page.getByRole('button',{name:'Send to developer',exact:true}).click();
+    await page.getByText('Too many reports. Wait before trying again.',{exact:true}).waitFor();
+    assert.equal(await page.getByRole('button',{name:/^Wait \d+s$/}).isDisabled(),true); assert.equal(reportRequests.length,3);
+    await page.getByRole('button',{name:'Close preview',exact:true}).click();
+    await page.getByRole('button',{name:'Send bug report',exact:true}).click();
+    assert.equal(await page.getByRole('button',{name:/^Wait \d+s$/}).isDisabled(),true);
+    await page.getByRole('button',{name:'Close preview',exact:true}).click();
+    assert.deepEqual(errors,[]);
+    console.log('PASS browser boot, collision routing, skills and missing Thunderdragon metadata; wardrobe honor and paid avatar skins, all-slot browsing, pagination, slot mapping, search, glow, presets and real-inventory isolation; controls and desktop/mobile bounds; manual reports, synthetic screenshot preview/cleanup/upload and rate limits; zero page errors.');
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; }).finally(() => server.close());

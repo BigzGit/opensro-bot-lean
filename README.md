@@ -43,7 +43,7 @@ Stops at the target, attempt limit or missing materials. Failures can reduce +, 
 
 Leave **Revive in town and reverse to last scroll point** enabled under the town-cycle settings. With the town cycle enabled, the bot revives, completes town services and reverses back to hunt. Hunting resumes within 30 metres of the last scroll point, or within your saved hunting area after death. Carry reverse scrolls.
 
-If something stalls, click **Copy diagnostics** and send the report with what happened. Reports omit names, chat, account details and locations. If clipboard access is blocked, copy the selected report manually.
+If something stalls, use **Settings → Send bug report**. Preview the diagnostics, optionally add an explanation and screenshot, then click **Send to developer**. Check screenshots for private details. Nothing sends automatically. **Copy diagnostics** remains available.
 
 ## Controls
 

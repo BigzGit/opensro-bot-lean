@@ -27,6 +27,31 @@ const UI = {
     this.diagnosticText.focus(); this.diagnosticText.select();
     this.toast('Clipboard unavailable—copy the selected report.');
   },
+  showReport() {
+    if (!this.reportBox) {
+      this.reportText = el('textarea'); this.reportText.readOnly = true; this.reportText.rows = 6;
+      this.reportText.setAttribute('aria-label', 'Report preview');
+      this.reportDescription = el('textarea'); this.reportDescription.rows = 2; this.reportDescription.maxLength = 1000;
+      this.reportDescription.setAttribute('aria-label', 'What happened? (optional)');
+      this.reportDescription.addEventListener('input', () => Reports.describe(this.reportDescription.value));
+      this.reportCapture = this.button('Add screenshot (optional)', () => { void Reports.capture(); });
+      this.reportRemove = this.button('Remove screenshot', () => Reports.removeImage());
+      this.reportSend = this.button('Send to developer', () => { void Reports.send(); });
+      this.reportClose = this.button('Close preview', () => Reports.close());
+      this.reportImage = el('img'); this.reportImage.alt = 'Screenshot preview'; this.reportImage.className = 'report-image'; this.reportImage.hidden = true;
+      this.reportStatus = el('p', '', 'muted'); this.reportStatus.setAttribute('role', 'status');
+      this.reportBox = this.group('Preview bug report',
+        el('p', 'Only Send to developer uploads this preview through Cloudflare to the developer’s Discord. Diagnostics omit names, chat and locations. Your explanation and screenshot may show private details; check them first. Nothing is sent automatically.', 'muted'),
+        this.field('What happened? (optional)', this.reportDescription), this.reportText,
+        this.row(this.reportCapture, this.reportRemove), this.reportImage, this.reportStatus,
+        this.row(this.reportSend, this.reportClose));
+      this.reportBox.classList.add('report-preview');
+      this.body.insertBefore(this.reportBox, this.waitNote.nextSibling);
+    }
+    this.reportBox.hidden = false;
+    this.reportDescription.value = Reports.draft.description;
+    this.reportStatus.textContent = Reports.draft.sent ? 'Report already sent. Close this preview to prepare another.' : 'Review the report before sending. Screenshot is optional.';
+  },
   exportDiagnostics() {
     Town.record('export');
     const url = URL.createObjectURL(new Blob([JSON.stringify({ version: VERSION, history: Town.history }, null, 2)], { type: 'application/json' }));
@@ -350,6 +375,7 @@ const UI = {
           const url = URL.createObjectURL(new Blob([JSON.stringify({ app: 'sro-bot-lean', version: VERSION, profile: Settings.profile }, null, 2)], { type: 'application/json' }));
           const link = el('a'); link.href = url; link.download = 'sro-bot-lean-settings.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
         })));
+      this.pane.append(this.group('Bug reports', el('p', 'Preview diagnostics and optionally a screenshot, then send them to the developer. Nothing sends automatically.', 'muted'), this.button('Send bug report', () => Reports.open())));
       this.logs = el('pre'); this.pane.append(this.group('Recent activity', this.logs));
     }
     this.update();
@@ -359,6 +385,7 @@ const UI = {
   },
   update() {
     Alchemy.refresh();
+    Reports.render();
     const diagnosticState = Diagnostics.sample();
     if (this.waitNote) this.waitNote.textContent = Diagnostics.lines(diagnosticState);
     if (this.townNote) this.townNote.textContent = Town.status();
