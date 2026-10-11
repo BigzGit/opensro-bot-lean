@@ -8,7 +8,7 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.28**.
+- Latest userscript release at this snapshot: **1.2.29**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
@@ -296,3 +296,8 @@ User confirms revival, services and reverse travel succeed but hunting does not 
 Also removed the global potion cooldown guard from command-free recall/reverse/revival arrival confirmation; fresh emergency potion use could otherwise postpone the hunting handoff indefinitely. Guards for transition, inventoryPending, active returnScroll and fresh local entity remain. Five regressions cover actual native attack dispatch after off-center arrival, potion starvation, stale remembered points, negative travel/area cases and manual stop. 144 integration tests, syntax and isolated browser checks pass. Exact live stalled status was not observed. Keep README simple; no release history there.
 
 Browser validation initially failed at download.path with the reused test profile. A fresh isolated profile passed the complete suite; the browser harness now creates a fresh run directory under ignored browser-test-profile/ and explicitly enables downloads.
+
+
+## Reverse arrival tolerance: 1.2.29
+
+User requested 30 m arrival tolerance. Changed reverse-wait radius from 120 to 300 game units (12 to 30 m), applying to normal and death town trips. Death-trip hunting-area acceptance and all travel/settlement checks remain. Town recall tolerance remains independently configurable (50 m default). Existing 144 integration tests and JavaScript syntax check pass.

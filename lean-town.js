@@ -417,7 +417,7 @@ const Town = {
       else this.message = 'Waiting for revival at the saved town arrival area.';
     } else if (['recall-wait', 'reverse-wait'].includes(t.phase)) {
       const dest = t.phase === 'recall-wait' ? c.arrival : t.origin;
-      const radius = t.phase === 'recall-wait' ? clamp(Number(c.arrivalRadius) || 500, 100, 1500) : 120;
+      const radius = t.phase === 'recall-wait' ? clamp(Number(c.arrivalRadius) || 500, 100, 1500) : 300;
       const distance = dist2D(World.pose(), dest);
       // After death the game's last scroll point need not equal the saved
       // hunt center (or an older remembered scroll point). Accept the saved
