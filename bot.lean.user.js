@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         OpenSRO Bot Lean
+// @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.39
+// @version      1.2.40
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -18,10 +18,10 @@
 'use strict';
 const W = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
-  console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
+  console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.39';
+const VERSION = '1.2.40';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -114,7 +114,7 @@ class Emitter {
       try {
         fn(...args);
       } catch (e) {
-        console.error('[SRO Asistan]', ev, e);
+        console.error('[nixxane bot]', ev, e);
       }
     }
   }
@@ -132,7 +132,7 @@ const Log = {
     const entry = { at: Date.now(), level, text: String(text) };
     this.lines.push(entry);
     if (this.lines.length > 400) this.lines.splice(0, this.lines.length - 400);
-    if (level === 'error') console.warn('[SRO Asistan]', text);
+    if (level === 'error') console.warn('[nixxane bot]', text);
     bus.emit('log', entry);
   },
   info(t) { this.add('info', t); },
@@ -469,7 +469,7 @@ function installWorkerHook() {
           attachSimulation(this, false);
         }
       } catch (e) {
-        console.error('[SRO Asistan] hook', e);
+        console.error('[nixxane bot] hook', e);
       }
     }
   }
@@ -5024,7 +5024,7 @@ const Diagnostics = {
   },
   report() {
     const current = this.sample(), relative = entries => entries.map(({ at, ...entry }) => ({ secondsAgo: Math.max(0, Math.round((now() - at) / 1000)), ...entry }));
-    return JSON.stringify({ app: 'OpenSRO Bot Lean', version: VERSION,
+    return JSON.stringify({ app: 'nixxane bot', version: VERSION,
       privacy: 'Names, chat, account details, locations and raw logs are omitted. Error categories replace original messages.',
       current, recentStates: relative(this.history), recentErrors: relative(this.errors) }, null, 2);
   },
@@ -5231,7 +5231,7 @@ const UI = {
   exportDiagnostics() {
     Town.record('export');
     const url = URL.createObjectURL(new Blob([JSON.stringify({ version: VERSION, history: Town.history }, null, 2)], { type: 'application/json' }));
-    const link = el('a'); link.href = url; link.download = 'sro-bot-return-diagnostics.json'; link.click();
+    const link = el('a'); link.href = url; link.download = 'nixxane-bot-return-diagnostics.json'; link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   },
   button(text, action) {
@@ -5296,7 +5296,7 @@ const UI = {
     header.title = 'Shift+F7 hides or shows the whole window; F7 folds it.';
     this.updateButton = this.button('Update', () => Updates.open());
     this.updateButton.className = 'update'; this.updateButton.hidden = true;
-    header.append(el('strong', 'OpenSRO Bot Lean ' + VERSION), this.updateButton, fold);
+    header.append(el('strong', 'nixxane bot ' + VERSION), this.updateButton, fold);
     Updates.render();
     this.body = el('div', null, 'body'); this.status = el('div', 'Waiting for game…', 'status'); this.status.setAttribute('role', 'status');
     const controls = this.row(this.button('Start / stop · F8', () => toggleBot()), this.button('Walk back', () => WalkBack.start()), this.button('Return & hunt', () => WalkBack.start(true)), this.button('Stop all', () => stopAll()));
@@ -5547,9 +5547,9 @@ const UI = {
         el('p', 'Works during hunting and while stopped. Walks into skill range for visible dead members within the maximum radius, casts Rebirth, then returns. During hunting the radius is measured from the saved hunt spot; while stopped it uses your starting position. Collision data is required for walking. Travel stops after 30 seconds or 12 seconds without progress per leg. The member must accept the revival. Travel, shopping and manual control take priority.', 'muted')));
       this.pane.append(this.group('Profiles', el('p', 'Settings are saved separately for each character. Import copies only bot settings from the original assistant.', 'muted'),
         this.button('Import original bot settings', () => Settings.importOriginal()),
-        this.button('Export Lean settings', () => {
+        this.button('Export nixxane bot settings', () => {
           const url = URL.createObjectURL(new Blob([JSON.stringify({ app: 'sro-bot-lean', version: VERSION, profile: Settings.profile }, null, 2)], { type: 'application/json' }));
-          const link = el('a'); link.href = url; link.download = 'sro-bot-lean-settings.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+          const link = el('a'); link.href = url; link.download = 'nixxane-bot-settings.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
         })));
       this.pane.append(this.group('Bug reports', el('p', 'Preview diagnostics and optionally a screenshot, then send them to the developer. Nothing sends automatically.', 'muted'), this.button('Send bug report', () => Reports.open())));
       this.logs = el('pre'); this.pane.append(this.group('Recent activity', this.logs));
@@ -5654,7 +5654,7 @@ function boot() {
   setInterval(() => { Wardrobe.tick(); UI.update(); }, 500);
   W.SROLean = { version: VERSION, updates: Updates, diagnostics: Diagnostics, reports: Reports, alchemy: Alchemy, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, resurrect: Resurrect,
     restock: Restock, town: Town, walkBack: WalkBack, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, stop: stopAll, log: Log };
-  Log.info('OpenSRO Bot Lean ready. F8 starts/stops; F7 folds; Shift+F7 hides/shows the window.');
+  Log.info('nixxane bot ready. F8 starts/stops; F7 folds; Shift+F7 hides/shows the window.');
 }
 
 installWorkerHook();

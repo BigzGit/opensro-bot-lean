@@ -55,7 +55,7 @@ const UI = {
   exportDiagnostics() {
     Town.record('export');
     const url = URL.createObjectURL(new Blob([JSON.stringify({ version: VERSION, history: Town.history }, null, 2)], { type: 'application/json' }));
-    const link = el('a'); link.href = url; link.download = 'sro-bot-return-diagnostics.json'; link.click();
+    const link = el('a'); link.href = url; link.download = 'nixxane-bot-return-diagnostics.json'; link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   },
   button(text, action) {
@@ -120,7 +120,7 @@ const UI = {
     header.title = 'Shift+F7 hides or shows the whole window; F7 folds it.';
     this.updateButton = this.button('Update', () => Updates.open());
     this.updateButton.className = 'update'; this.updateButton.hidden = true;
-    header.append(el('strong', 'OpenSRO Bot Lean ' + VERSION), this.updateButton, fold);
+    header.append(el('strong', 'nixxane bot ' + VERSION), this.updateButton, fold);
     Updates.render();
     this.body = el('div', null, 'body'); this.status = el('div', 'Waiting for game…', 'status'); this.status.setAttribute('role', 'status');
     const controls = this.row(this.button('Start / stop · F8', () => toggleBot()), this.button('Walk back', () => WalkBack.start()), this.button('Return & hunt', () => WalkBack.start(true)), this.button('Stop all', () => stopAll()));
@@ -371,9 +371,9 @@ const UI = {
         el('p', 'Works during hunting and while stopped. Walks into skill range for visible dead members within the maximum radius, casts Rebirth, then returns. During hunting the radius is measured from the saved hunt spot; while stopped it uses your starting position. Collision data is required for walking. Travel stops after 30 seconds or 12 seconds without progress per leg. The member must accept the revival. Travel, shopping and manual control take priority.', 'muted')));
       this.pane.append(this.group('Profiles', el('p', 'Settings are saved separately for each character. Import copies only bot settings from the original assistant.', 'muted'),
         this.button('Import original bot settings', () => Settings.importOriginal()),
-        this.button('Export Lean settings', () => {
+        this.button('Export nixxane bot settings', () => {
           const url = URL.createObjectURL(new Blob([JSON.stringify({ app: 'sro-bot-lean', version: VERSION, profile: Settings.profile }, null, 2)], { type: 'application/json' }));
-          const link = el('a'); link.href = url; link.download = 'sro-bot-lean-settings.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+          const link = el('a'); link.href = url; link.download = 'nixxane-bot-settings.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
         })));
       this.pane.append(this.group('Bug reports', el('p', 'Preview diagnostics and optionally a screenshot, then send them to the developer. Nothing sends automatically.', 'muted'), this.button('Send bug report', () => Reports.open())));
       this.logs = el('pre'); this.pane.append(this.group('Recent activity', this.logs));

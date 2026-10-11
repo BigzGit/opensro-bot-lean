@@ -2036,7 +2036,7 @@ test('diagnostic reports omit names, raw errors, chat, locations and sensitive s
   assert.equal(text.includes(secret), false); assert.equal(text.includes('123456789'), false); assert.equal(text.includes('912345'), false);
   assert.equal(report.current.settings.mpTarget, 300);
   assert.deepEqual(report.recentErrors.map(e => e.code), ['inventory-busy', 'unclassified-error']);
-  assert.equal(report.app, 'OpenSRO Bot Lean');
+  assert.equal(report.app, 'nixxane bot');
 });
 
 test('diagnostic history is bounded, retained across stops and tolerates incomplete state', () => {
@@ -2099,10 +2099,10 @@ async function updateTests() {
     const f = fixture(); let copied = '', fallback = '';
     f.win.navigator = { clipboard: { writeText: async text => { copied = text; } } };
     f.UI.showDiagnostics = text => { fallback = text; };
-    assert.equal(copied, ''); await f.Diagnostics.copy(); assert.equal(JSON.parse(copied).app, 'OpenSRO Bot Lean');
+    assert.equal(copied, ''); await f.Diagnostics.copy(); assert.equal(JSON.parse(copied).app, 'nixxane bot');
     assert.match(f.notices.at(-1), /paste this into your bug report/); assert.equal(fallback, '');
     f.win.navigator.clipboard.writeText = async () => { throw Error('denied'); };
-    await f.Diagnostics.copy(); assert.equal(JSON.parse(fallback).app, 'OpenSRO Bot Lean');
+    await f.Diagnostics.copy(); assert.equal(JSON.parse(fallback).app, 'nixxane bot');
     assert.equal(f.commands.length, 0);
   });
   function reporting(f) {

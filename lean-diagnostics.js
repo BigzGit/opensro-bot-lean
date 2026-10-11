@@ -149,7 +149,7 @@ const Diagnostics = {
   },
   report() {
     const current = this.sample(), relative = entries => entries.map(({ at, ...entry }) => ({ secondsAgo: Math.max(0, Math.round((now() - at) / 1000)), ...entry }));
-    return JSON.stringify({ app: 'OpenSRO Bot Lean', version: VERSION,
+    return JSON.stringify({ app: 'nixxane bot', version: VERSION,
       privacy: 'Names, chat, account details, locations and raw logs are omitted. Error categories replace original messages.',
       current, recentStates: relative(this.history), recentErrors: relative(this.errors) }, null, 2);
   },

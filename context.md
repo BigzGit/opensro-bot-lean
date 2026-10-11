@@ -1,4 +1,4 @@
-# OpenSRO Bot Lean: project context and working guide
+# nixxane bot: project context and working guide
 
 This is a handoff for DeepSeek or another coding assistant. Read this first, then inspect the current repository. This document is a snapshot, not a substitute for checking Git and the code.
 
@@ -8,12 +8,12 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.39**.
+- Latest userscript release at this snapshot: **1.2.40**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 - Latest validation: **200 integration tests**, JavaScript syntax check and headless browser checks pass.
-- Latest work: manual bug-report preview and optional screenshot upload through the deployed Cloudflare receiver; live game-to-Discord screenshot reporting is confirmed; pill purchases and alchemy ground-click recovery remain unconfirmed.
+- Latest work: renamed visible branding to nixxane bot in the userscript, panel, exports, diagnostics, receiver and GitHub Pages site. Live reporting was confirmed before this branding release; pill purchases and alchemy ground-click recovery remain unconfirmed.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
 
@@ -411,3 +411,12 @@ Six new integration tests cover frozen/redacted previews, exact multipart payloa
 User's Edge screenshot reports reached the Worker but failed before any Discord HTTP response. The initially missing API User-Agent was corrected but did not resolve this stall. Reproduced the confirmed cause in Cloudflare workerd/Miniflare with zero outbound requests: redirect:'error' throws TypeError, "Invalid redirect value, must be one of follow or manual". Node fetch mocks accepted this option and missed the incompatibility. The receiver now uses redirect:'manual' and explicitly rejects 3xx; uploads are never followed to another destination. ReceiverVersion4 is deployed, ready:true, with existing spam bindings and secret preserved. Bot 1.2.39 needs no update/reload for this server-side fix. User confirmed the report sent successfully after this fix. Live report delivery with the screenshot is now confirmed.
 
 Receiver tests now include worker.runtime.test.mjs, running the entire receiver in workerd with every outbound request intercepted, fake webhook values and synthetic reports/images. Confirms diagnostics-only and JPEG multipart delivery and refusal of redirects. Node tests also verify the Discord User-Agent, safe fixed failure categories/HTTP status, timeouts, and response cleanup not masking confirmation. No real Discord test messages were sent by tools. The temporary wrangler tail was stopped after live confirmation. Failure traces report only fixed failure categories, not raw errors, webhook URLs, IPs, report text or screenshots. Worker observability remains disabled. Separate backend source/config/package lock stay in C:\sroserver\opensro-bot-reports-worker; no game/server/original-bot edits or bot version bump.
+
+
+## nixxane bot branding: 1.2.40
+
+Renamed the visible userscript name, panel heading, ready/console messages, README, export labels/filenames and diagnostic report app to nixxane bot. Repository/folder/generated script paths, namespace, update/download URLs, existing localStorage profile keys, export-format identity, DOM host and SROLean debugging API remain stable. Saved per-character profiles are preserved. The original vendor/game/server are untouched. Use Tampermonkey's update check on the existing script and reload to pick up the branding release.
+
+Deployed receiverVersion5 before publishing the bot: accepts both new nixxane bot and legacy OpenSRO Bot Lean reports, rejects unrelated app names, and uses nixxane bot in health/Discord labels. Existing production secret and rate limits are preserved. Node and full workerd tests cover both names with diagnostics-only and synthetic screenshot uploads; every outbound call is mocked. Prior live screenshot delivery confirmation still stands for the receiver fix, but no real branded report was sent by tools.
+
+The separate opensro-bot-lean-site repo uses nixxane bot in the title, heading, description, README and an n favicon. Added 1.2.40 patch notes and retained the KISS layout, saved dark mode and stable install/repo links. All 200 bot integration tests, syntax and isolated browser checks pass; site theme/responsive checks pass. Publish both repositories, mirror changed Lean files and back up/update Downloads userscripts through the usual release workflow.

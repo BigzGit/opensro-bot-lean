@@ -87,9 +87,9 @@ skin_keys = ['f_lu','f_mu','f_ru','f_ls','f_rs','f_ld','f_md','f_rd',
 skin = 'const LEAN_SKIN = ' + __import__('json').dumps({k: skin[k] for k in skin_keys}, separators=(',', ':')) + ';'
 skin += '\nconst LEAN_CSS = ' + __import__('json').dumps((base / 'lean-skin.css').read_text(encoding='utf-8')) + ';'
 header = '''// ==UserScript==
-// @name         OpenSRO Bot Lean
+// @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.39
+// @version      1.2.40
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -106,10 +106,10 @@ header = '''// ==UserScript==
 'use strict';
 const W = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
-  console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
+  console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.39';
+const VERSION = '1.2.40';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -134,7 +134,7 @@ parts = [header, utils, (base / 'lean-settings.js').read_text(encoding='utf-8'),
          (base / 'lean-reports.js').read_text(encoding='utf-8'),
          (base / 'lean-ui.js').read_text(encoding='utf-8'),
          (base / 'lean-boot.js').read_text(encoding='utf-8'), '})();\n']
-output = '\n\n'.join(parts)
+output = '\n\n'.join(parts).replace('[SRO Asistan]', '[nixxane bot]')
 (base / 'bot.lean.user.js').write_text(output, encoding='utf-8', newline='\n')
 (base / 'bot.lean.meta.js').write_text(header[:header.index('// ==/UserScript==') + len('// ==/UserScript==')] + '\n', encoding='utf-8', newline='\n')
 print(f'Built bot.lean.user.js: {len(output.encode("utf-8")):,} bytes, {len(output.splitlines()):,} lines')

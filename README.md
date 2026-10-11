@@ -1,6 +1,6 @@
-# OpenSRO Bot Lean
+# nixxane bot
 
-A compact bot for hunting, potions, pet loot and automatic town trips.
+A compact OpenSRO bot for hunting, potions, pet loot and automatic town trips.
 
 [Install / update the bot](https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js)
 

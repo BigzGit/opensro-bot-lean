@@ -75,7 +75,7 @@ const server = http.createServer((req, res) => {
     page.on('request', request => { if (request.url().includes('/assets/')) assets.push(request.url()); });
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.addScriptTag({ content: script });
-    await page.getByText(/^OpenSRO Bot Lean 1\./).waitFor();
+    await page.getByText(/^nixxane bot 1\./).waitFor();
     const updateButton = page.getByRole('button', { name: 'Update 9.0.0', exact: true });
     await updateButton.waitFor();
     await page.evaluate(() => { window.open = (...args) => { window.updateOpened = args; }; });
@@ -86,12 +86,12 @@ const server = http.createServer((req, res) => {
     });
     await page.getByRole('button', { name: 'Copy diagnostics', exact: true }).click();
     const reportCopy = JSON.parse(await page.evaluate(() => window.copiedDiagnostics));
-    assert.equal(reportCopy.app, 'OpenSRO Bot Lean');
+    assert.equal(reportCopy.app, 'nixxane bot');
     await page.evaluate(() => { navigator.clipboard.writeText = async () => { throw Error('blocked'); }; });
     await page.getByRole('button', { name: 'Copy diagnostics', exact: true }).click();
     const reportField = page.getByRole('textbox', { name: 'Bug report diagnostics', exact: true });
     await reportField.waitFor();
-    assert.equal(JSON.parse(await reportField.inputValue()).app, 'OpenSRO Bot Lean');
+    assert.equal(JSON.parse(await reportField.inputValue()).app, 'nixxane bot');
     assert.equal(await reportField.evaluate(node => node.readOnly && node.selectionEnd === node.value.length), true);
     await page.getByRole('button', { name: 'Close report', exact: true }).click();
     await page.evaluate(() => {
@@ -149,7 +149,7 @@ const server = http.createServer((req, res) => {
     const reportDownload = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Save return diagnostics', exact: true }).click();
     const downloaded = await reportDownload;
-    assert.equal(downloaded.suggestedFilename(), 'sro-bot-return-diagnostics.json');
+    assert.equal(downloaded.suggestedFilename(), 'nixxane-bot-return-diagnostics.json');
     const report = JSON.parse(fs.readFileSync(await downloaded.path(), 'utf8'));
     assert.equal(report.version, await page.evaluate(() => SROLean.version));
     assert.ok(report.history.some(row => row.event === 'export'));
@@ -443,7 +443,7 @@ const server = http.createServer((req, res) => {
     await page.getByRole('button',{name:'Send bug report',exact:true}).click();
     const preview = page.getByRole('textbox',{name:'Report preview',exact:true});
     await preview.waitFor(); assert.equal(reportRequests.length,0);
-    assert.equal(JSON.parse(await preview.inputValue()).app,'OpenSRO Bot Lean');
+    assert.equal(JSON.parse(await preview.inputValue()).app,'nixxane bot');
     await page.getByRole('textbox',{name:'What happened? (optional)',exact:true}).fill('Movement stopped after alchemy.');
     assert.equal(JSON.parse(await preview.inputValue()).description,'Movement stopped after alchemy.');
     await page.evaluate(() => {
