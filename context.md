@@ -4,15 +4,15 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 
 ## Current baseline
 
-- Snapshot date: 2026-10-10.
+- Snapshot date: 2026-10-11.
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.29**.
+- Latest userscript release at this snapshot: **1.2.30**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **144 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest validation: **147 integration tests**, JavaScript syntax check and headless browser checks pass.
 - Latest work: opt-in Hotan recall/storage/refill/repair/reverse cycle. Live-account testing is still outstanding.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
@@ -301,3 +301,10 @@ Browser validation initially failed at download.path with the reused test profil
 ## Reverse arrival tolerance: 1.2.29
 
 User requested 30 m arrival tolerance. Changed reverse-wait radius from 120 to 300 game units (12 to 30 m), applying to normal and death town trips. Death-trip hunting-area acceptance and all travel/settlement checks remain. Town recall tolerance remains independently configurable (50 m default). Existing 144 integration tests and JavaScript syntax check pass.
+
+
+## Beginner speed scroll during combat: 1.2.30
+
+User reports the beginner scroll is still unused and confirms Grass Walk is not active; the exact live Supplies status is unknown. Reproduced a controller failure with a native-shaped unresolved combat cast: even after inventory settlement, SpeedScroll.tick refused every attempt while World.isCasting() remained true. Read-only native verification shows gameplay.ts sends item-use directly to inventory.use; skillitemuse.go installs the beginner scroll timed effect without initiating or waiting for a combat cast. Removed only the ordinary combat-cast gate. Resurrection holds, pending inventory, emergency potion priority, sitting/mounting, manual pauses, shops/storage, existing speed buffs and bounded confirmation retries remain. An active return-scroll cast explicitly blocks speed-item dispatch.
+
+Supplies now reports inventory, item-use, manual, resurrection, sitting/mounting and service waits instead of retaining an unrelated old message. README keeps a single optional setup instruction. Three new regressions cover activation/confirmation during combat after inventory settlement, emergency potion priority during a cast, and visible wait reasons followed by automatic recovery. Updated exclusion coverage includes return-scroll travel. 147 integration tests, syntax and isolated browser checks pass. This fixes a reproduced code defect; the user's exact live failure and successful scroll activation remain unverified. Publish and mirror using the normal release workflow; reload the game after installing.

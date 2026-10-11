@@ -10,7 +10,7 @@ A compact bot for hunting, potions, pet loot and automatic town trips.
 2. Reload the game after installing or updating.
 3. In **Combat**, save your hunting spot and choose your attack skills, buffs and imbue.
 4. In **Loot**, choose what to collect. For pet collection, summon your pickup pet and select it as the collector.
-5. In **Supplies**, set your HP/MP potion thresholds.
+5. In **Supplies**, set your HP/MP potion thresholds. Enable **Use beginner +100% speed scroll automatically** if wanted.
 6. Press **F8** to start hunting.
 
 Settings are saved separately for each character.

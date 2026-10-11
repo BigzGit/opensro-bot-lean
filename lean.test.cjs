@@ -592,12 +592,48 @@ test('speed scroll does not overwrite an existing speed buff or consume paid ite
   f.World.gp.inventory[0].refObjId = 24198; f.World.rebuildCatalog([{id:123,group:123,speedBuff:{active:true}}]);
   f.World.gp.attachedEffects = [{gid:1,skill:123}]; f.Controller.tick(); assert.equal(f.commands.some(c => c.kind === 'item-use'), false);
 });
-test('speed scroll respects idle, manual, busy inventory, existing cast and shop gates', () => {
+test('speed scroll activates during continuous combat casts after inventory settles', () => {
+  const f = fixture(); beginnerScroll(f);
+  f.World.gp.casts = [{ caster: 1, receivedAtMs: 100000, results: [] }];
+  f.World.gp.inventoryPending = true;
+  f.Controller.tick(); assert.equal(f.commands.some(c => c.kind === 'item-use'), false);
+  f.World.gp.inventoryPending = false;
+  f.advance(100); f.Controller.tick();
+  assert.equal(f.World.isCasting(), true);
+  assert.equal(f.commands.filter(c => c.kind === 'item-use' && c.slot === 15).length, 1);
+  assert.equal(f.Controller.mode, 'speed scroll');
+  f.advance(500); f.Controller.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'item-use').length, 1);
+  f.World.gp.buffSlots = [{ state: 'active', effect: { gid: 1, skill: 31107, remainingMs: 3600000, receivedAtMs: 100600 } }];
+  f.Controller.tick(); assert.equal(f.SpeedScroll.pending, null); assert.equal(f.SpeedScroll.attempts, 0);
+});
+test('emergency potions precede speed scroll without waiting for combat to end', () => {
+  const f = fixture(); beginnerScroll(f);
+  f.World.gp.casts = [{ caster: 1, receivedAtMs: 100000, results: [] }];
+  f.World.gp.inventory.push({ slot: 16, refObjId: 8, typeFlags: 2284, quantity: 50 });
+  f.World.gp.vitals = [{ gid: 1, hp: 20, mp: 100, maxHp: 100, maxMp: 100 }];
+  f.Controller.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'item-use').length, 1);
+  assert.equal(f.commands.find(c => c.kind === 'item-use').slot, 16);
+  f.advance(300); f.Controller.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'item-use' && c.slot === 15).length, 1);
+  assert.equal(f.World.isCasting(), true);
+});
+test('speed scroll respects idle, manual, busy inventory, return travel and shop gates', () => {
   for (const change of [f=>f.Hunt.stop(),f=>f.Manual.lastAt=100000,f=>f.World.gp.inventoryPending=true,
-    f=>f.World.isCasting=()=>true,f=>f.Restock.activeShop=()=>({})]) {
+    f=>f.World.gp.returnScroll={},f=>f.Restock.activeShop=()=>({})]) {
     const f = fixture(); beginnerScroll(f); change(f); f.commands.length=0; f.Controller.tick();
     assert.equal(f.commands.some(c=>c.kind==='item-use'),false);
   }
+});
+test('speed scroll explains inventory and potion waits and resumes automatically', () => {
+  const f = fixture(); beginnerScroll(f); f.World.gp.inventoryPending = true;
+  f.Controller.tick(); assert.match(f.SpeedScroll.message, /inventory transaction/);
+  f.World.gp.inventoryPending = false; f.Cmd.last['item-use'] = 100000;
+  f.Controller.tick(); assert.match(f.SpeedScroll.message, /potions have priority/);
+  assert.equal(f.SpeedScroll.attempts, 0);
+  f.advance(300); f.Controller.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'item-use' && c.slot === 15).length, 1);
 });
 test('unconfirmed speed activation has bounded backoff even for unlimited starter stacks', () => {
   const f=fixture(); beginnerScroll(f); f.Controller.tick();

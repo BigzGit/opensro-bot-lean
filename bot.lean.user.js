@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.29
+// @version      1.2.30
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.29';
+const VERSION = '1.2.30';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -2395,16 +2395,25 @@ const SpeedScroll = {
     return effects.some(e => e?.gid === World.localGid() && World.skill(e.skill)?.speedBuff?.active && World.buffRemaining(e.skill) > 0);
   },
   tick() {
-    if (Town.trip) return false;
+    if (Town.trip) { this.message = 'Waiting for town services to finish.'; return false; }
     if (!Settings.profile.potion.speedScroll) { this.message = 'Speed scroll off.'; return false; }
-    if (!World.inWorld() || World.isDead()) return false;
+    if (!World.inWorld() || World.isDead()) { this.message = 'Waiting for a living character in the world.'; return false; }
     if (this.active()) {
       this.pending = null; this.attempts = 0; this.nextAt = 0;
       this.message = 'Movement-speed buff active.'; return false;
     }
     if (!(Hunt.running || WalkBack.active || Restock.trip || Resurrect.trip)) { this.message = 'Waiting for hunting or travel.'; return false; }
-    if (World.gp.inventoryPending || World.isCasting() || Resurrect.holdUntil > now() || World.isSitting() || World.local()?.mountedOn ||
-        Restock.activeShop() || World.gp.storage || Restock.recording || now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000) return false;
+    // Native inventory.use / useSkillItem installs this timed effect without
+    // a combat cast. Waiting for World.isCasting() can starve it while hunting.
+    const blocked = World.gp.inventoryPending ? 'Waiting for the inventory transaction to finish.' :
+      World.gp.returnScroll ? 'Waiting for return-scroll travel.' :
+      Resurrect.holdUntil > now() ? 'Waiting for the resurrection cast to finish.' :
+      World.isSitting() ? 'Waiting for the character to stand.' :
+      World.local()?.mountedOn ? 'Waiting for the character to dismount.' :
+      Restock.activeShop() || World.gp.storage ? 'Waiting for the shop or storage to close.' :
+      Restock.recording ? 'Waiting for route recording to finish.' :
+      now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000 ? 'Waiting for the manual-control pause.' : '';
+    if (blocked) { this.message = blocked; return false; }
     if (this.pending) {
       if (now() - this.pending.at < 8000) { this.message = 'Waiting for speed-buff confirmation.'; return false; }
       this.pending = null; this.nextAt = now() + 30000 * this.attempts;
@@ -2415,7 +2424,7 @@ const SpeedScroll = {
     if (now() < this.nextAt) return false;
     const item = World.items().find(i => i.refObjId === 24198 && (i.quantity ?? 1) > 0);
     if (!item) { this.message = 'No beginner +100% speed scroll in your bag.'; return false; }
-    if (!Cmd.itemUse(item.slot)) return false;
+    if (!Cmd.itemUse(item.slot)) { this.message = 'Waiting for item-use availability (potions have priority).'; return false; }
     this.attempts++; this.pending = { at: now() };
     this.message = 'Beginner speed scroll requested; waiting for its buff.';
     return true;
@@ -4866,7 +4875,7 @@ const UI = {
       const pots = this.group('Automatic potion use', this.check('Use potions automatically', () => P().enabled, v => P().enabled = v));
       this.speedNote = el('p', '', 'muted');
       pots.append(this.check('Use beginner +100% speed scroll automatically', () => P().speedScroll, v => { P().speedScroll = v; SpeedScroll.reset(); }),
-        el('p', 'Uses only the beginner scroll during hunting or travel when no movement-speed buff is active. Waits for buff confirmation and stops retrying after three unconfirmed attempts.', 'muted'), this.speedNote);
+        el('p', 'Uses only the beginner scroll during hunting or travel when no movement-speed buff is active. Works during combat casts; potions have priority. Waits for buff confirmation and stops retrying after three unconfirmed attempts.', 'muted'), this.speedNote);
       for (const kind of ['hp', 'mp']) pots.append(this.check('Use ' + kind.toUpperCase(), () => P()[kind].on, v => P()[kind].on = v), this.number(kind.toUpperCase() + ' below (%)', () => P()[kind].pct, v => P()[kind].pct = v, 5, 95));
       pots.append(this.check('Use vigor potions', () => P().vigor.on, v => P().vigor.on = v), this.check('Use cure pills', () => P().cure.on, v => P().cure.on = v));
       this.pane.append(pots);
