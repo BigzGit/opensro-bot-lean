@@ -15,10 +15,9 @@ const DEFAULT_PROFILE = {
     restock: {
       enabled: false, vendor: null, route: [], offers: [],
       town: { enabled: false, revive: true, petFull: true, petFree: 1, arrivalRadius: 500, arrival: null, storage: null, vendor: null, smith: null, gate: null,
-        stacks: { hp: 2, mp: 6 },
         keep: '', store: { equipment: true, elixirs: true, powders: true, alchemy: true, others: false } },
-      hp: { on: true, refObjId: 0, low: 20, target: 200 },
-      mp: { on: true, refObjId: 0, low: 20, target: 200 },
+      hp: { on: true, refObjId: 0, low: 20, target: 100 },
+      mp: { on: true, refObjId: 0, low: 20, target: 300 },
     },
   },
   hunt: {
@@ -43,6 +42,16 @@ function botProfile(input) {
       if (field in input[key]) result[key][field] = deepMerge(DEFAULT_PROFILE[key][field], input[key][field]);
     }
   }
+  // Migrate the old separate town stack targets once. Preserve the active
+  // return mode's target; walking-only profiles retain their refill quantities.
+  const restock = input.potion?.restock;
+  if (restock?.town?.enabled && restock.town.stacks) {
+    for (const kind of ['hp', 'mp']) {
+      const stacks = restock.town.stacks[kind];
+      if (Number.isInteger(stacks) && stacks >= 1 && stacks <= 200) result.potion.restock[kind].target = stacks * 50;
+    }
+  }
+  delete result.potion.restock.town.stacks;
   // New categories inherit the old Other items switch, preserving existing selection.
   const pickup = input.hunt?.pickup;
   for (const key of ['elixirs', 'powders', 'alchemy']) {

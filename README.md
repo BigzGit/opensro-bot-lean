@@ -21,7 +21,7 @@ Set this up once in **Supplies → Hotan scroll town cycle**:
 
 1. Bind your recall to **Hotan** in the game. Use a return scroll, stop the bot, then click **Save arrival point** where you land.
 2. Stand near and select each service, then save its point: **Warehouse**, **Potion merchant**, **Repair merchant** and **World statue / teleport**. Open the potion shop before saving its merchant.
-3. Enable **Buy HP** and/or **Buy MP**, and set the low-stock thresholds. Choose your town refill amounts: defaults are **2 HP stacks** and **6 MP stacks**, using **X-Large pots, 50 per stack**. Keep low-stock thresholds below the refill totals.
+3. Enable **Buy HP** and/or **Buy MP**, and set the low-stock thresholds. Set **HP refill to** and **MP refill to** in potion counts (defaults: **100 HP / 300 MP**). These targets apply to walking restock and every town trip, including full bags and revival. Town buys X-Large potions.
 4. Enable **Use return scroll → town services → reverse return**. Enable the pickup-pet capacity option if wanted.
 5. Carry gold, spare return/reverse scrolls and at least **two free character bag slots**. Save your hunting spot and start the bot.
 

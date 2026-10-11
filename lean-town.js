@@ -65,7 +65,7 @@ const Town = {
   },
   cfg() { return Restock.cfg().town; },
   // Native X-Large HP/MP IDs 8/15, both authored with 50 potions per stack.
-  supplies() { return Restock.supplies().map(s => ({ ...s, refObjId: s.kind === 'hp' ? 8 : 15, target: this.cfg().stacks?.[s.kind] * 50 })); },
+  supplies() { return Restock.supplies().map(s => ({ ...s, refObjId: s.kind === 'hp' ? 8 : 15 })); },
   status() {
     if (this.trip || this.message.startsWith('Town cycle stopped:')) return this.message;
     if (!this.cfg().enabled) return 'Town cycle off. The pet-full chime is an alert; enable the scroll town cycle to return automatically.';
@@ -132,7 +132,6 @@ const Town = {
     const c = this.cfg(), supplies = this.supplies();
     const missing = [['arrival', 'arrival point'], ['vendor', 'potion merchant'], ['smith', 'repair merchant'], ['gate', 'world statue / teleport'], ...(c.petFull ? [['storage', 'warehouse']] : [])].filter(([key]) => !c[key]).map(([, label]) => label);
     if (missing.length) return 'Save missing town services: ' + missing.join(', ') + '.';
-    if (supplies.some(s => !Number.isInteger(c.stacks?.[s.kind]) || c.stacks[s.kind] < 1 || c.stacks[s.kind] > 200)) return 'Set town refill targets to whole stacks from 1 to 200.';
     if (!supplies.length || supplies.some(s => !s.refObjId || !Number.isInteger(s.low) || !Number.isInteger(s.target) || s.low < 0 || s.target <= s.low || s.target > 10000)) return 'Choose potions and valid low-stock/refill quantities.';
     if (!this.scroll(0x09ec) || !this.scroll(0x19ec)) return 'Carry a return scroll and a reverse return scroll before hunting.';
     if (toBigInt(World.gp.progression?.gold ?? 0) <= 0n) return 'Carry gold for potions, storage and repairs.';

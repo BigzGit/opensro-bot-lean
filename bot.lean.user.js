@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.32
+// @version      1.2.33
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.32';
+const VERSION = '1.2.33';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -198,10 +198,9 @@ const DEFAULT_PROFILE = {
     restock: {
       enabled: false, vendor: null, route: [], offers: [],
       town: { enabled: false, revive: true, petFull: true, petFree: 1, arrivalRadius: 500, arrival: null, storage: null, vendor: null, smith: null, gate: null,
-        stacks: { hp: 2, mp: 6 },
         keep: '', store: { equipment: true, elixirs: true, powders: true, alchemy: true, others: false } },
-      hp: { on: true, refObjId: 0, low: 20, target: 200 },
-      mp: { on: true, refObjId: 0, low: 20, target: 200 },
+      hp: { on: true, refObjId: 0, low: 20, target: 100 },
+      mp: { on: true, refObjId: 0, low: 20, target: 300 },
     },
   },
   hunt: {
@@ -226,6 +225,16 @@ function botProfile(input) {
       if (field in input[key]) result[key][field] = deepMerge(DEFAULT_PROFILE[key][field], input[key][field]);
     }
   }
+  // Migrate the old separate town stack targets once. Preserve the active
+  // return mode's target; walking-only profiles retain their refill quantities.
+  const restock = input.potion?.restock;
+  if (restock?.town?.enabled && restock.town.stacks) {
+    for (const kind of ['hp', 'mp']) {
+      const stacks = restock.town.stacks[kind];
+      if (Number.isInteger(stacks) && stacks >= 1 && stacks <= 200) result.potion.restock[kind].target = stacks * 50;
+    }
+  }
+  delete result.potion.restock.town.stacks;
   // New categories inherit the old Other items switch, preserving existing selection.
   const pickup = input.hunt?.pickup;
   for (const key of ['elixirs', 'powders', 'alchemy']) {
@@ -2521,7 +2530,7 @@ const Town = {
   },
   cfg() { return Restock.cfg().town; },
   // Native X-Large HP/MP IDs 8/15, both authored with 50 potions per stack.
-  supplies() { return Restock.supplies().map(s => ({ ...s, refObjId: s.kind === 'hp' ? 8 : 15, target: this.cfg().stacks?.[s.kind] * 50 })); },
+  supplies() { return Restock.supplies().map(s => ({ ...s, refObjId: s.kind === 'hp' ? 8 : 15 })); },
   status() {
     if (this.trip || this.message.startsWith('Town cycle stopped:')) return this.message;
     if (!this.cfg().enabled) return 'Town cycle off. The pet-full chime is an alert; enable the scroll town cycle to return automatically.';
@@ -2588,7 +2597,6 @@ const Town = {
     const c = this.cfg(), supplies = this.supplies();
     const missing = [['arrival', 'arrival point'], ['vendor', 'potion merchant'], ['smith', 'repair merchant'], ['gate', 'world statue / teleport'], ...(c.petFull ? [['storage', 'warehouse']] : [])].filter(([key]) => !c[key]).map(([, label]) => label);
     if (missing.length) return 'Save missing town services: ' + missing.join(', ') + '.';
-    if (supplies.some(s => !Number.isInteger(c.stacks?.[s.kind]) || c.stacks[s.kind] < 1 || c.stacks[s.kind] > 200)) return 'Set town refill targets to whole stacks from 1 to 200.';
     if (!supplies.length || supplies.some(s => !s.refObjId || !Number.isInteger(s.low) || !Number.isInteger(s.target) || s.low < 0 || s.target <= s.low || s.target > 10000)) return 'Choose potions and valid low-stock/refill quantities.';
     if (!this.scroll(0x09ec) || !this.scroll(0x19ec)) return 'Carry a return scroll and a reverse return scroll before hunting.';
     if (toBigInt(World.gp.progression?.gold ?? 0) <= 0n) return 'Carry gold for potions, storage and repairs.';
@@ -4901,12 +4909,13 @@ const UI = {
       for (const kind of ['hp', 'mp']) pots.append(this.check('Use ' + kind.toUpperCase(), () => P()[kind].on, v => P()[kind].on = v), this.number(kind.toUpperCase() + ' below (%)', () => P()[kind].pct, v => P()[kind].pct = v, 5, 95));
       pots.append(this.check('Use vigor potions', () => P().vigor.on, v => P().vigor.on = v), this.check('Use cure pills', () => P().cure.on, v => P().cure.on = v));
       this.pane.append(pots);
-      const shop = this.group('Restock and return', this.check('Auto buy while hunting', () => C().enabled, v => C().enabled = v),
+      const shop = this.group('Potion restock', this.check('Auto buy while hunting', () => C().enabled, v => C().enabled = v),
         this.row(this.button('Record from merchant', () => Restock.beginRecording()), this.button('Finish at hunt spot', () => Restock.finishRecording()), this.button('Cancel route', () => Restock.cancelRecording())),
         el('p', 'Open the potion shop, start recording, close the shop, walk to your hunting spot, then finish recording. Do not teleport while recording.', 'muted'));
       for (const kind of ['hp', 'mp']) shop.append(this.check('Buy ' + kind.toUpperCase(), () => C()[kind].on, v => C()[kind].on = v),
         this.select(kind.toUpperCase() + ' potion', () => [[0, 'Record a merchant route first'], ...C().offers.filter(o => o.kind === kind).map(o => [o.refObjId, o.name])], () => C()[kind].refObjId, v => C()[kind].refObjId = Number(v)),
-        this.number('Low stock ≤', () => C()[kind].low, v => C()[kind].low = v, 0, 9999), this.number('Refill to', () => C()[kind].target, v => C()[kind].target = v, 1, 10000));
+        this.number('Low stock ≤', () => C()[kind].low, v => C()[kind].low = v, 0, 9999), this.number(kind.toUpperCase() + ' refill to', () => C()[kind].target, v => C()[kind].target = v, 1, 10000));
+      shop.append(el('p', 'Refill targets are total potion counts, including what is already in your bag. Used for low-supply, full-bag and revival trips, and walking-route restock. Set MP refill to 1000 for 1,000 MP potions. Changes apply to the next trip.', 'muted'));
       this.pane.append(shop);
       const town = () => Town.cfg();
       const services = this.group('Hotan scroll town cycle',
@@ -4915,14 +4924,12 @@ const UI = {
         this.check('Return when pickup pet is nearly full', () => town().petFull, v => town().petFull = v),
         this.number('Pet free slots ≤', () => town().petFree, v => town().petFree = v, 0, 10),
         this.number('Town arrival tolerance (m)', () => town().arrivalRadius / 10, v => town().arrivalRadius = v * 10, 10, 150),
-        this.number('Town HP refill (stacks of 50)', () => town().stacks.hp, v => town().stacks.hp = v, 1, 200),
-        this.number('Town MP refill (stacks of 50)', () => town().stacks.mp, v => town().stacks.mp = v, 1, 200),
         el('p', 'Bind your recall to Hotan in the game. While stopped, save the arrival point where a return scroll places you. Stand near, select and save the warehouse, potion merchant, repair merchant and world statue / teleport. Open the potion shop before saving its merchant. Saves your standing position for each approach. Uses collision-aware walking between services. Overrides the recorded walking restock while enabled.', 'muted'));
       for (const [role, label] of [['arrival', 'Arrival point'], ['storage', 'Warehouse'], ['vendor', 'Potion merchant'], ['smith', 'Repair merchant'], ['gate', 'World statue / teleport']]) services.append(
         this.row(this.button('Save ' + label.toLowerCase(), () => Town.save(role)), el('span', town()[role]?.name || (town()[role] ? 'Saved' : 'Not saved'), 'muted')));
       services.append(el('p', 'Pet loot: store elixirs only. Sell other unprotected pet items at the saved weapon / repair merchant before repairing. Keep seal/rare equipment and equipment with unknown rarity in the pet. Ordinary equipment is sold regardless of + or blue options. Existing character bag items are never sold.', 'muted'));
       services.append(this.text('Keep in pet (names)', () => town().keep, v => town().keep = v),
-        el('p', 'Town tops up X-Large potions to the stack targets here (default: 2 HP / 6 MP), counting potions already in your bag. Uses the Buy HP/MP switches and low-stock thresholds above; keep each threshold below its stack target. The earlier potion selections and Refill to fields apply to walking-route restock. Returns when the character bag has at most one free slot. Free at least two slots before hunting again; existing character items stay protected. Revival uses the saved town services and a reverse scroll, without using a return scroll in town. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. F8 cancels.', 'muted'));
+        el('p', 'Town buys X-Large potions using the Buy HP/MP switches, low-stock thresholds and refill counts above. Keep each low-stock threshold below its refill target. Potion selections apply to walking-route restock. Returns when the character bag has at most one free slot. Free at least two slots before hunting again; existing character items stay protected. Revival uses the saved town services and a reverse scroll, without using a return scroll in town. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. F8 cancels.', 'muted'));
       this.townNote = el('p', Town.status(), 'muted'); services.append(this.townNote, this.button('Save return diagnostics', () => this.exportDiagnostics())); this.pane.append(services);
     } else if (this.current === 'Wardrobe') {
       LeanWardrobe.draw(this.pane);

@@ -8,11 +8,11 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.32**.
+- Latest userscript release at this snapshot: **1.2.33**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **160 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest validation: **162 integration tests**, JavaScript syntax check and headless browser checks pass.
 - Latest work: opt-in Hotan recall/storage/refill/repair/reverse cycle. Live-account testing is still outstanding.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
@@ -333,3 +333,10 @@ Four new regressions cover fresh rejection recovery at the 30-second boundary, p
 User reports matching acceptance stopped after four people were in the party and confirms Share EXP was enabled. Could not reproduce on 1.2.32 in isolated simulation. Added three regression tests: successive correlated applications from one through eight members for all shared-EXP option combinations (1, 3, 5, 7), using either Auto-recruit alone or the separate acceptance switch; a full eight-member party losing a member and accepting a replacement; and native party options overriding contrary saved recruitment settings. Successive requests also cover no observed intervening request:null snapshot and repeated ticks without duplicate acceptance. All 160 integration tests pass. Read-only native party-matching.ts confirms capacity is eight with options bit 1 set and four otherwise; social.ts member snapshots include the entire roster.
 
 No runtime change or userscript version bump: these tests pass against the existing published 1.2.32. This does not reproduce or resolve the reported live failure. Further diagnosis needs live party/matching state during the stall (owned listing, native sharing options, leader identity, incoming correlated request and its deadline); a Share EXP checkbox alone does not identify which gate blocked acceptance. No live-account interaction was performed.
+
+
+## Shared potion refill counts: 1.2.33
+
+Replaced separate town stack targets with the common potion.restock.hp/mp.target counts. Supplies now labels these HP refill to / MP refill to; entering 1000 means a total of 1000 MP potions after refill. Walking restock, low-supply town trips, full-bag trips and revival use these same counts, with existing buy switches and low-stock thresholds. Town still buys X-Large potions, counts existing stock, respects gold/space and confirms each purchase. Trips retain their starting supply snapshot; target edits apply to the next trip.
+
+Defaults remain town-equivalent 100 HP / 300 MP. Profile migration preserves enabled legacy town mode's stack amounts by converting to counts; otherwise walking-only saved counts are preserved. Legacy stacks are then removed so later reloads cannot overwrite edited shared targets. Two additional integration tests cover 1000 MP on all town triggers, buying only a missing 25, and one-time migration. Browser checks edit the shared MP field to 1000. README stays short. Live town purchases remain unverified.

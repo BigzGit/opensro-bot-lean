@@ -944,7 +944,6 @@ test('pet waits for inventory and potion priority without holding up combat', ()
 });
 function townFixture() {
   const f = fixture(), c = f.Town.cfg(), r = f.Restock.cfg(), gp = f.World.gp;
-  c.stacks.mp = 1;
   c.enabled = true; c.arrival = { regionId: 1, x: 100, y: 0, z: 100 }; c.keep = 'favorite';
   for (const [index, role] of ['storage', 'vendor', 'smith', 'gate'].entries()) {
     const npc = { gid: 60 + index, refObjId: 600 + index, kind: role === 'gate' ? 'teleport' : 'npc', name: role, regionId: 1, x: 130 + index * 40, y: 0, z: 100 };
@@ -1182,7 +1181,7 @@ test('town refuses selling at the wrong merchant or after the pet is replaced', 
 test('town buys X-Large HP and MP even when the saved potion selections are small', () => {
   const f = townFixture(), r = f.Restock.cfg(), gp = f.World.gp;
   r.hp.on = true; r.hp.refObjId = 101; r.hp.low = 5; r.hp.target = 30; r.mp.refObjId = 102;
-  f.Town.cfg().stacks.hp = 1;
+  f.Restock.cfg().hp.target = 50;
   f.Town.begin(); f.Town.enter('buy'); gp.target = 61;
   gp.shop = { npc: 61, offers: [101,8,102,15].map((refObjId, slot) => ({ refObjId, slot, tab: 0, maxStack: 100, price: '10', previews: [{ refObjId, typeFlags: slot < 2 ? 2284 : 4332 }] })) };
   f.Town.buy(); assert.equal(f.commands.at(-1).slot, 1); assert.equal(f.commands.at(-1).quantity, 50);
@@ -1194,11 +1193,11 @@ test('town buys X-Large HP and MP even when the saved potion selections are smal
   assert.equal(f.commands.some(c => c.kind === 'shop-buy' && [0,2].includes(c.slot)), false);
 });
 
-test('town stack defaults are two HP and six MP and purchases only the missing potions', () => {
+test('shared refill defaults are 100 HP and 300 MP and purchases only the missing potions', () => {
   const defaults = fixture().Town.supplies();
   assert.deepEqual(Array.from(defaults, s => s.target), [100, 300]);
   const f = townFixture(), gp = f.World.gp;
-  f.Restock.cfg().hp.on = true; f.Town.cfg().stacks = { hp: 2, mp: 6 };
+  f.Restock.cfg().hp.on = true; Object.assign(f.Restock.cfg().hp, { target: 100 }); f.Restock.cfg().mp.target = 300;
   gp.inventory.push({ slot: 16, refObjId: 8, typeFlags: 2284, quantity: 72 });
   gp.inventory.find(i => i.refObjId === 15).quantity = 275;
   f.Town.begin(); f.Town.enter('buy'); gp.target = 61;
@@ -1210,10 +1209,47 @@ test('town stack defaults are two HP and six MP and purchases only the missing p
   f.advance(1000); f.Town.buy(); assert.equal(f.Town.trip.phase, 'close-vendor');
 });
 
-test('town rejects invalid stack targets and low-stock thresholds at the refill target', () => {
-  for (const value of [0, 1.5, 201, NaN]) {
-    const f = townFixture(); f.Town.cfg().stacks.mp = value;
-    f.Town.begin(); assert.equal(f.Town.trip, null); assert.match(f.Town.message, /whole stacks/);
+test('shared 1000 MP target applies to low supplies, full bags and revival trips', () => {
+  for (const reason of ['low', 'full', 'pet', 'revival']) {
+    const f = townFixture(), r = f.Restock.cfg(); r.mp.target = 1000; f.Town.cfg().petFull = reason === 'pet';
+    if (reason === 'full') {
+      f.World.gp.inventory.find(i => i.refObjId === 15).quantity = 250;
+      f.World.freeBagSlots = () => 1;
+      assert.equal(f.Town.reason(), 'character bag nearly full');
+    } else if (reason === 'low') assert.equal(f.Town.reason(), 'potions running low');
+    else if (reason === 'pet') assert.equal(f.Town.reason(), 'pickup pet nearly full');
+    f.Town.begin(reason === 'revival');
+    assert.equal(f.Town.trip.supplies[0].target, 1000);
+    assert.equal(f.Restock.supplies()[0].target, 1000);
+    // A target is a total: top up 975 to 1000, rather than buy 1000 more.
+    f.World.freeBagSlots = () => 25;
+    f.World.gp.inventory.find(i => i.refObjId === 15).quantity = 975;
+    f.Town.enter('buy'); f.World.gp.target = 61;
+    f.World.gp.shop = { npc: 61, offers: [{ refObjId: 15, slot: 0, tab: 0, maxStack: 50, price: '10', previews: [{ refObjId: 15, typeFlags: 4332 }] }] };
+    f.Town.buy(); assert.equal(f.commands.at(-1).kind, 'shop-buy'); assert.equal(f.commands.at(-1).quantity, 25);
+  }
+});
+
+test('legacy town profiles migrate active refill targets once and preserve walking-only targets', () => {
+  for (const enabled of [false, true]) {
+    const f = fixture();
+    f.storage.set('sroAsistan:v7:profile:default', JSON.stringify({ potion: { restock: {
+      hp: { target: 400 }, mp: { target: 1000 }, town: { enabled, stacks: { hp: 2, mp: 6 } }
+    } } }));
+    f.Settings.importOriginal();
+    assert.equal(f.Restock.cfg().mp.target, enabled ? 300 : 1000);
+    assert.equal(f.Restock.cfg().hp.target, enabled ? 100 : 400);
+    assert.equal('stacks' in f.Town.cfg(), false);
+    f.Restock.cfg().mp.target = 1000;
+    f.storage.set('sroAsistan:v7:profile:default', JSON.stringify(f.Settings.profile));
+    f.Settings.importOriginal(); assert.equal(f.Restock.cfg().mp.target, 1000);
+  }
+});
+
+test('town rejects invalid potion counts and low-stock thresholds at the refill target', () => {
+  for (const value of [0, 1.5, 10001, NaN]) {
+    const f = townFixture(); f.Restock.cfg().mp.target = value;
+    f.Town.begin(); assert.equal(f.Town.trip, null); assert.match(f.Town.message, /low-stock/);
   }
   const f = townFixture(); f.Restock.cfg().mp.low = 50;
   f.Town.begin(); assert.equal(f.Town.trip, null); assert.match(f.Town.message, /low-stock/);
