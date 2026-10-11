@@ -8,11 +8,11 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.27**.
+- Latest userscript release at this snapshot: **1.2.28**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **139 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest validation: **144 integration tests**, JavaScript syntax check and headless browser checks pass.
 - Latest work: opt-in Hotan recall/storage/refill/repair/reverse cycle. Live-account testing is still outstanding.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
@@ -287,3 +287,12 @@ User still reports the toggle-required stall after 1.2.26 and requests thorough 
 Town.sentScroll/checkScroll now track slot/ref/count, original game snapshot, acceptance and attempt count for recall and reverse. After five seconds, retry only with a new snapshot explicitly reporting inventoryPending false, the unchanged scroll, no return cast, no world transition and no character cast. Any observed consumption, return cast or transition permanently marks that attempt accepted. Stale/missing/busy state never authorizes resending. Maximum three sends per leg; recall attempts reset after confirmed town arrival. Inventory timeout/resynchronization errors stop with reconnect guidance because native replies lack transaction IDs. Existing travel, manual stop, death and transaction safeguards remain.
 
 Town.blocked provides precise gating reasons; main status shows town messages on every tab, and the header shows the runtime version. Town.history records up to 120 changed state snapshots and records before stopAll clears anything. Supplies exports these via Save return diagnostics; history survives bot toggles within the loaded page, not reload. Snapshot fields cover controller/phase/trigger, blocked reason, inventory pending/casting/scroll acceptance, supplies/capacity and error, not full inventories. UI download and visible version are browser-tested. 139 integration tests, syntax and isolated browser checks pass. These tests include fresh native-style gameplay snapshots, accepted/spent/last-stack/transition cases, reverse refusal, stale/missing state, timeout, retry caps and F8. Live account confirmation remains required.
+
+
+## Death-return hunting handoff: 1.2.28 (2026-10-11)
+
+User confirms revival, services and reverse travel succeed but hunting does not resume. Reproduced a death trip landing 250 units from hunt center (within 400-unit hunt radius), with no remembered scroll point: reverse-wait required <=120 units from the assumed center and never released the controller. Death trips now snapshot the hunting area at begin and accept either the known scroll origin within 120 units or the saved hunt area after confirmed settled travel. Ordinary town trips retain the precise origin check. Arrival updates the remembered scroll point from actual pose.
+
+Also removed the global potion cooldown guard from command-free recall/reverse/revival arrival confirmation; fresh emergency potion use could otherwise postpone the hunting handoff indefinitely. Guards for transition, inventoryPending, active returnScroll and fresh local entity remain. Five regressions cover actual native attack dispatch after off-center arrival, potion starvation, stale remembered points, negative travel/area cases and manual stop. 144 integration tests, syntax and isolated browser checks pass. Exact live stalled status was not observed. Keep README simple; no release history there.
+
+Browser validation initially failed at download.path with the reused test profile. A fresh isolated profile passed the complete suite; the browser harness now creates a fresh run directory under ignored browser-test-profile/ and explicitly enables downloads.

@@ -35,7 +35,7 @@ If protected items fill a bag, the bot stays in town and asks you to free space.
 
 ## Returning after death
 
-Leave **Revive in town and reverse to last scroll point** enabled under the town-cycle settings. With the town cycle enabled, the bot revives, completes town services and reverses back to hunt. Carry reverse scrolls and keep your saved hunting spot near that return point.
+Leave **Revive in town and reverse to last scroll point** enabled under the town-cycle settings. With the town cycle enabled, the bot revives, completes town services and reverses back to hunt. Hunting resumes after arrival at the last scroll point or within your saved hunting area. Carry reverse scrolls.
 
 ## Controls
 

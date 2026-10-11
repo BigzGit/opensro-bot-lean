@@ -62,7 +62,9 @@ const server = http.createServer((req, res) => {
 });
 (async () => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const browser = await chromium.launchPersistentContext(__dirname + '/browser-test-profile', { executablePath: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', headless: true, viewport: { width: 1200, height: 1000 } });
+  fs.mkdirSync(__dirname + '/browser-test-profile', { recursive: true });
+  const testProfile = fs.mkdtempSync(__dirname + '/browser-test-profile/run-');
+  const browser = await chromium.launchPersistentContext(testProfile, { executablePath: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', headless: true, acceptDownloads: true, viewport: { width: 1200, height: 1000 } });
   try {
     const page = await browser.newPage();
     const errors = [], assets = [];

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.27
+// @version      1.2.28
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.27';
+const VERSION = '1.2.28';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -2589,6 +2589,7 @@ const Town = {
     Restock.trip = null;
     Resurrect.cancelTrip('', true); Resurrect.holdUntil = 0; Loot.suspend();
     this.trip = { phase: 'recall', at: now(), started: now(), origin: { ...origin }, revival,
+      huntArea: revival && Hunt.cfg().center ? { center: { ...Hunt.cfg().center }, radius: Hunt.cfg().radius } : null,
       manualAt: Manual.lastAt, character: World.charName, petRef: Loot.pet()?.rec.refObjId,
       config: JSON.stringify(this.cfg()), supplies: this.supplies() };
     Hunt.targetGid = Hunt.lootGid = 0;
@@ -2822,7 +2823,9 @@ const Town = {
       this.message = 'Town departure: stopping combat before using the return scroll.';
       return true;
     }
-    if (now() - Potion.lastUse < 350) return true;
+    // Arrival confirmation sends no command, so emergency potions cannot
+    // keep the controller trapped in travel after the character has arrived.
+    if (!['recall-wait', 'reverse-wait', 'revive-arrival'].includes(t.phase) && now() - Potion.lastUse < 350) return true;
     Hunt.state = 'restock';
     if (t.phase === 'recall') {
       if (World.isCasting() || gp.inventoryPending) {
@@ -2841,10 +2844,15 @@ const Town = {
       const dest = t.phase === 'recall-wait' ? c.arrival : t.origin;
       const radius = t.phase === 'recall-wait' ? clamp(Number(c.arrivalRadius) || 500, 100, 1500) : 120;
       const distance = dist2D(World.pose(), dest);
-      // Require a world transition; the old pose can lie next to the expected point.
-      if (t.transition && distance <= radius && !gp.inventoryPending && !gp.returnScroll) {
+      // After death the game's last scroll point need not equal the saved
+      // hunt center (or an older remembered scroll point). Accept the saved
+      // hunting area too, but only after confirmed, settled world travel.
+      const inHuntArea = t.phase === 'reverse-wait' && t.revival && t.huntArea &&
+        dist2D(World.pose(), t.huntArea.center) <= t.huntArea.radius;
+      if (t.transition && (distance <= radius || inHuntArea) && !gp.inventoryPending && !gp.returnScroll) {
         if (t.phase === 'recall-wait') { this.lastScrollPoint = { ...t.origin }; this.arrived(); }
         else {
+          this.lastScrollPoint = { ...World.pose() };
           this.trip = null; Hunt.targetGid = Hunt.lootGid = 0; Hunt.state = 'search';
           this.message = 'Town service complete; hunting resumed.'; UI.toast(this.message);
         }

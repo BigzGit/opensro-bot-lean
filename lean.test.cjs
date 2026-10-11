@@ -1426,4 +1426,57 @@ test('diagnostic sampling cannot prevent manual stop on an inconsistent snapshot
   assert.doesNotThrow(() => f.stopAll());
   assert.equal(f.Hunt.running, false); assert.equal(f.Town.trip, null);
 });
+
+
+
+test('death reverse landing within the hunt area resumes actual combat away from exact center', () => {
+  const f = townFixture(); f.Town.lastScrollPoint = null;
+  f.World.gp.pose.x = 100; f.Town.begin(true); f.Town.enter('reverse-wait');
+  f.Town.phase('entering-world'); f.World.gp.pose.x = 950;
+  f.pet.inventory = []; f.World.gp.inventory.find(i => i.refObjId === 15).quantity = 50;
+  f.World.ents.set(30, { gid: 30, kind: 'monster', name: 'Mob', regionId: 1, x: 960, z: 100, attackFlags: 16, appearanceState: [0] });
+  f.World.gp.target = 30;
+  f.Controller.tick(); assert.equal(f.Town.trip, null, f.Town.message);
+  f.advance(1000); f.Controller.tick();
+  assert.ok(f.commands.some(c => c.kind === 'attack' && c.gid === 30), 'Hunting must issue an attack after returning');
+});
+
+test('potions cannot postpone confirmed reverse arrival and hunting handoff', () => {
+  const f = townFixture(); f.Town.begin(); f.Town.enter('reverse-wait');
+  f.Town.phase('entering-world'); f.World.gp.pose.x = 700;
+  f.Potion.tick = () => { f.Potion.lastUse = 100000; };
+  f.Controller.tick(); assert.equal(f.Town.trip, null, f.Town.message);
+});
+
+
+test('death return accepts the current hunt area even with an older remembered scroll point', () => {
+  const f = townFixture(); f.Town.lastScrollPoint = { ...f.World.pose(), x: 1500 };
+  f.World.gp.pose.x = 100; f.Town.begin(true); f.Town.enter('reverse-wait');
+  f.Town.phase('entering-world'); f.World.gp.pose.x = 950;
+  f.Town.tick(); assert.equal(f.Town.trip, null);
+  assert.equal(f.Town.lastScrollPoint.x, 950);
+});
+
+test('death arrival still requires settled travel inside the expected destination area', () => {
+  for (const blocked of ['no-transition', 'pending', 'scroll', 'no-player', 'outside', 'other-world', 'ordinary-trip']) {
+    const f = townFixture(); f.World.gp.pose.x = 100;
+    f.Town.begin(blocked !== 'ordinary-trip'); f.Town.enter('reverse-wait');
+    if (blocked !== 'no-transition') f.Town.phase('entering-world');
+    f.World.gp.pose.x = blocked === 'outside' ? 1500 : 950;
+    if (blocked === 'pending') f.World.gp.inventoryPending = true;
+    if (blocked === 'scroll') f.World.gp.returnScroll = { durationMs: 30000 };
+    if (blocked === 'no-player') f.World.ents.delete(1);
+    if (blocked === 'other-world') f.World.gp.pose.regionId = 0x8001;
+    f.Town.tick(); assert.ok(f.Town.trip, blocked);
+    assert.equal(f.Town.trip.phase, 'reverse-wait', blocked);
+  }
+});
+
+test('stopping death return before arrival never resumes hunting', () => {
+  const f = townFixture(); f.World.gp.pose.x = 100;
+  f.Town.begin(true); f.Town.enter('reverse-wait'); f.Town.phase('entering-world');
+  f.stopAll(); f.World.gp.pose.x = 950; f.advance(1000); f.Controller.tick();
+  assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, false);
+  assert.equal(f.commands.some(c => c.kind === 'attack'), false);
+});
 console.log('Total integration tests: ' + passed);
