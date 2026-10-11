@@ -13,7 +13,7 @@ A compact bot for hunting, potions, pet loot and automatic town trips.
 5. In **Supplies**, set your HP/MP potion thresholds. Enable **Use beginner +100% speed scroll automatically** if wanted.
 6. Press **F8** to start hunting.
 
-Settings are saved separately for each character.
+Settings are saved separately for each character. The bot checks for updates on load and every 15 minutes; click **Update** beside the version when it appears, install, then reload when ready.
 
 ## Automatic town trips
 

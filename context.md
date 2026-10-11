@@ -8,11 +8,11 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.33**.
+- Latest userscript release at this snapshot: **1.2.34**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **162 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest validation: **166 integration tests**, JavaScript syntax check and headless browser checks pass.
 - Latest work: opt-in Hotan recall/storage/refill/repair/reverse cycle. Live-account testing is still outstanding.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
@@ -340,3 +340,12 @@ No runtime change or userscript version bump: these tests pass against the exist
 Replaced separate town stack targets with the common potion.restock.hp/mp.target counts. Supplies now labels these HP refill to / MP refill to; entering 1000 means a total of 1000 MP potions after refill. Walking restock, low-supply town trips, full-bag trips and revival use these same counts, with existing buy switches and low-stock thresholds. Town still buys X-Large potions, counts existing stock, respects gold/space and confirms each purchase. Trips retain their starting supply snapshot; target edits apply to the next trip.
 
 Defaults remain town-equivalent 100 HP / 300 MP. Profile migration preserves enabled legacy town mode's stack amounts by converting to counts; otherwise walking-only saved counts are preserved. Legacy stacks are then removed so later reloads cannot overwrite edited shared targets. Two additional integration tests cover 1000 MP on all town triggers, buying only a missing 25, and one-time migration. Browser checks edit the shared MP field to 1000. README stays short. Live town purchases remain unverified.
+
+
+## In-panel update notice: 1.2.34
+
+Added lean-update.js. Updates.start runs at boot once, checks immediately and every 15 minutes independently of bot/character state. Fetches the public GitHub commits/main SHA, validates a full lowercase 40-character hash, then reads bot.lean.meta.js at that immutable commit. Numeric three-component version comparison handles patch 100 versus 34. A newer release shows an Update <version> button beside the installed version; clicking opens bot.lean.user.js at the same SHA in a new tab with noopener/noreferrer. No fetched code is executed, no automatic install/reload occurs, and no hunting commands are issued. Tampermonkey's existing update/download URLs remain on main.
+
+Requests omit credentials/referrer and use no-store; a 15-second AbortController bounds the two-request check, with no overlapping checks. Offline failures, HTTP errors, rate limits and malformed replies stay silent and leave any previously valid notice intact. Checks need page fetch access to api.github.com and raw.githubusercontent.com; verified API HTTP 200 with CORS * from this environment, but the live game's policy/network and Tampermonkey installation prompt remain unverified. Tests mock network responses rather than use the user's account.
+
+Four new integration checks cover numeric comparisons, pinned metadata/installer URL and manual opening, malformed/offline recovery and retained notice, overlap prevention and exactly one 15-minute schedule. Browser checks mock a newer release and click the real header button, verifying the exact install URL; desktop/mobile screenshots inspected. All 166 integration tests, syntax, browser and whitespace checks pass. Update module is included by build-lean.py and exposed as SROLean.updates for diagnostics. README adds one sentence about updates.

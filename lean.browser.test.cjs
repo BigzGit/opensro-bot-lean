@@ -67,12 +67,20 @@ const server = http.createServer((req, res) => {
   const browser = await chromium.launchPersistentContext(testProfile, { executablePath: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', headless: true, acceptDownloads: true, viewport: { width: 1200, height: 1000 } });
   try {
     const page = await browser.newPage();
+    const updateSha = 'b'.repeat(40);
+    await page.route('https://api.github.com/repos/nixxane/opensro-bot-lean/commits/main', route => route.fulfill({ json: { sha: updateSha } }));
+    await page.route('https://raw.githubusercontent.com/nixxane/opensro-bot-lean/' + updateSha + '/bot.lean.meta.js', route => route.fulfill({ body: '// @version      9.0.0\n' }));
     const errors = [], assets = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('request', request => { if (request.url().includes('/assets/')) assets.push(request.url()); });
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.addScriptTag({ content: script });
     await page.getByText(/^OpenSRO Bot Lean 1\./).waitFor();
+    const updateButton = page.getByRole('button', { name: 'Update 9.0.0', exact: true });
+    await updateButton.waitFor();
+    await page.evaluate(() => { window.open = (...args) => { window.updateOpened = args; }; });
+    await updateButton.click();
+    assert.deepEqual(await page.evaluate(() => window.updateOpened), ['https://raw.githubusercontent.com/nixxane/opensro-bot-lean/' + updateSha + '/bot.lean.user.js', '_blank', 'noopener,noreferrer']);
     await page.evaluate(() => {
       const code = `onmessage = e => { if(e.data.kind === 'fixture') postMessage(e.data.message); else if(e.data.kind === 'session') postMessage({ kind: 'observed-command', command: e.data.command.command }); };`;
       window.testCommands = [];

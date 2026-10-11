@@ -81,7 +81,10 @@ const UI = {
     const fold = this.button('−', () => { this.body.hidden = !this.body.hidden; fold.textContent = this.body.hidden ? '+' : '−'; });
     fold.className = 'fold'; fold.setAttribute('aria-label', 'Fold or unfold bot window');
     header.title = 'Shift+F7 hides or shows the whole window; F7 folds it.';
-    header.append(el('strong', 'OpenSRO Bot Lean ' + VERSION), fold);
+    this.updateButton = this.button('Update', () => Updates.open());
+    this.updateButton.className = 'update'; this.updateButton.hidden = true;
+    header.append(el('strong', 'OpenSRO Bot Lean ' + VERSION), this.updateButton, fold);
+    Updates.render();
     this.body = el('div', null, 'body'); this.status = el('div', 'Waiting for game…', 'status'); this.status.setAttribute('role', 'status');
     const controls = this.row(this.button('Start / stop · F8', () => toggleBot()), this.button('Walk back', () => WalkBack.start()), this.button('Return & hunt', () => WalkBack.start(true)), this.button('Stop all', () => stopAll()));
     controls.classList.add('controls');

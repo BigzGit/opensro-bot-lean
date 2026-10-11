@@ -3,13 +3,13 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
-  const storage = new Map(), commands = [], notices = [];
+  const storage = new Map(), commands = [], notices = [], intervals = [];
   const win = { addEventListener() {}, localStorage: { getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v) } };
   const context = { window: win, performance: { now: () => time }, console,
-    setTimeout: () => 1, clearTimeout() {}, setInterval() {}, Map, Set, Date, ArrayBuffer, DataView, atob };
+    setTimeout: () => 1, clearTimeout() {}, setInterval(fn, ms) { intervals.push({ fn, ms }); }, AbortController, Map, Set, Date, ArrayBuffer, DataView, atob };
   vm.createContext(context); vm.runInContext(isolated, context);
   const b = context.bot;
   b.UI.toast = message => notices.push(message);
@@ -28,7 +28,7 @@ function fixture() {
     const e = { gid, kind: 'ground-item', refObjId: 101, name: 'HP potion', regionId: 1, x: 200, y: 0, z: 100, groundItem: { typeFlags: tf, goldAmount: 0 } };
     b.World.ents.set(gid, e); return e;
   }
-  return { ...b, commands, notices, storage, drop, advance: ms => { time += ms; } };
+  return { ...b, commands, notices, storage, drop, win, intervals, advance: ms => { time += ms; } };
 }
 let passed = 0;
 function pickupPet(f, commandMode = 7) {
@@ -1709,4 +1709,53 @@ test('stopping death return before arrival never resumes hunting', () => {
   assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, false);
   assert.equal(f.commands.some(c => c.kind === 'attack'), false);
 });
-console.log('Total integration tests: ' + passed);
+async function updateTests() {
+  async function check(name, fn) { await fn(); passed++; console.log('PASS ' + name); }
+  const sha = 'a'.repeat(40), base = 'https://raw.githubusercontent.com/nixxane/opensro-bot-lean/' + sha + '/bot.lean.';
+  function updater(f, version = '1.2.100') {
+    const calls = [];
+    f.win.fetch = async (url, options) => {
+      calls.push({ url, options });
+      return url.includes('api.github.com') ? { ok: true, json: async () => ({ sha }) } :
+        { ok: true, text: async () => '// @version      ' + version + '\n' };
+    };
+    return calls;
+  }
+  await check('updates compare numeric version components and ignore malformed versions', async () => {
+    const f = fixture();
+    for (const v of ['1.2.100', '1.3.0', '2.0.0']) assert.equal(f.Updates.newer(v), true);
+    for (const v of ['1.2.9', '1.2.34', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
+  });
+  await check('updates pin metadata and user-initiated installer to the same trusted commit', async () => {
+    const f = fixture(), calls = updater(f); f.UI.updateButton = {};
+    await f.Updates.check();
+    assert.equal(calls.length, 2); assert.equal(calls[1].url, base + 'meta.js');
+    assert.equal(calls[0].options.credentials, 'omit'); assert.equal(calls[0].options.cache, 'no-store');
+    assert.equal(f.UI.updateButton.hidden, false); assert.equal(f.UI.updateButton.textContent, 'Update 1.2.100');
+    let opened; f.win.open = (...args) => { opened = args; };
+    assert.equal(opened, undefined); f.Updates.open();
+    assert.deepEqual(opened, [base + 'user.js', '_blank', 'noopener,noreferrer']);
+    assert.equal(f.commands.length, 0); assert.equal(f.Hunt.running, false);
+    updater(f, '1.2.34'); await f.Updates.check(); assert.equal(f.Updates.latest, null); assert.equal(f.UI.updateButton.hidden, true);
+  });
+  await check('offline and invalid update responses never create an install link and release the check lock', async () => {
+    for (const response of [null, { ok: false }, { ok: true, json: async () => ({ sha: '../evil' }) }]) {
+      const f = fixture(); f.win.fetch = async () => { if (!response) throw Error('offline'); return response; };
+      await f.Updates.check(); assert.equal(f.Updates.latest, null); assert.equal(f.Updates.busy, false);
+      updater(f); await f.Updates.check(); assert.ok(f.Updates.latest);
+      f.win.fetch = async () => { throw Error('offline'); }; await f.Updates.check(); assert.ok(f.Updates.latest);
+    }
+    const f = fixture(); updater(f, 'javascript:alert(1)'); await f.Updates.check(); assert.equal(f.Updates.latest, null);
+  });
+  await check('update checks do not overlap and startup schedules one fifteen-minute interval', async () => {
+    const f = fixture(); let resolve, calls = 0;
+    f.win.fetch = () => { calls++; return new Promise(r => { resolve = r; }); };
+    const pending = f.Updates.check(); await f.Updates.check(); assert.equal(calls, 1);
+    resolve({ ok: false }); await pending; assert.equal(f.Updates.busy, false);
+    let checks = 0; f.Updates.check = async () => { checks++; };
+    f.Updates.start(); f.Updates.start(); assert.equal(checks, 1); assert.equal(f.intervals.length, 1);
+    assert.equal(f.intervals[0].ms, 900000); f.intervals[0].fn(); assert.equal(checks, 2);
+  });
+  console.log('Total integration tests: ' + passed);
+}
+updateTests().catch(error => { console.error(error); process.exitCode = 1; });
