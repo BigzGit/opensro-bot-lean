@@ -33,6 +33,12 @@ When supplies run low or a bag reaches its capacity trigger, the bot recalls to 
 
 If protected items fill a bag, the bot stays in town and asks you to free space.
 
+## Weapon alchemy
+
+Stop hunting/travel and put the weapon in your bag. In **Alchemy**, select it, set **Target +** and **Maximum attempts**, choose a weapon elixir and optionally enable matching-degree lucky powder, then click **Start alchemy**.
+
+Stops at the target, attempt limit or missing materials. Failures can reduce +, damage or destroy the weapon. **Stop alchemy**, **Stop all** or **F8** prevents further attempts; a sent attempt can still finish. Unconfirmed results pause without retrying.
+
 ## Returning after death
 
 Leave **Revive in town and reverse to last scroll point** enabled under the town-cycle settings. With the town cycle enabled, the bot revives, completes town services and reverses back to hunt. Hunting resumes within 30 metres of the last scroll point, or within your saved hunting area after death. Carry reverse scrolls.

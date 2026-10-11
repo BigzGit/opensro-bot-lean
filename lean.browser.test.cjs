@@ -384,6 +384,40 @@ const server = http.createServer((req, res) => {
     await page.getByRole('button',{name:'Walk back',exact:true}).click();
     await page.waitForFunction(() => testCommands.some(c => c.kind==='move' && c.destination.z>100));
     await page.getByRole('button',{name:'Stop all',exact:true}).click();
+    await page.evaluate(() => {
+      const w = SROLean.world;
+      w.applyGameplay({ ...w.gp, pendingMoves: 0, returnScroll: null, storage: null, shop: null,
+        alchemy: { visible: true, pending: false, mode: 'reinforce', flags: 0, error: null, slot: null },
+        inventory: [
+          { slot: 13, refObjId: 10, typeFlags: 44 | (6 << 7), plus: 0, durability: 100, variance: '123', magic: [], quantity: 1, name: 'Test Sword', icon: 'skill/test/skill0.ddj', tooltip: { fields: { itemClass: 25 } } },
+          { slot: 14, refObjId: 3679, typeFlags: 0x0d6c, quantity: 3, name: 'Weapon elixir' },
+          { slot: 15, refObjId: 3691, typeFlags: 0x156c, quantity: 3, name: 'Lucky powder degree 9' }
+        ] });
+      testCommands.length = 0;
+    });
+    await page.getByRole('button', { name: 'Alchemy', exact: true }).click();
+    await page.getByLabel('Weapon', { exact: true }).selectOption('13');
+    await page.getByLabel('Target +', { exact: true }).fill('1');
+    await page.getByLabel('Target +', { exact: true }).dispatchEvent('change');
+    await page.getByLabel('Maximum attempts', { exact: true }).fill('2');
+    await page.getByLabel('Maximum attempts', { exact: true }).dispatchEvent('change');
+    await page.getByLabel('Use lucky powder of matching degree', { exact: true }).check();
+    await page.getByRole('button', { name: 'Start alchemy', exact: true }).click();
+    await page.waitForFunction(() => testCommands.some(c => c.kind === 'alchemy-start'));
+    assert.deepEqual(await page.evaluate(() => testCommands.find(c => c.kind === 'alchemy-start')), { kind: 'alchemy-start', mode: 'reinforce', slots: [13, 14, 15] });
+    await page.evaluate(() => {
+      const w = SROLean.world, gp = w.gp;
+      w.applyGameplay({ ...gp, inventory: gp.inventory.map(i => i.slot === 13 ? { ...i, plus: 1 } : { ...i, quantity: 2 }),
+        alchemy: { visible: true, pending: false, mode: 'reinforce', flags: 0x10, error: null, slot: 13 } });
+    });
+    await page.getByText(/Target reached: \+1\./).waitFor();
+    assert.equal(await page.evaluate(() => SROLean.alchemy.result.elixirs), 1);
+    assert.equal(await page.evaluate(() => SROLean.alchemy.result.powders), 1);
+    assert.equal(await page.evaluate(() => testCommands.filter(c => c.kind === 'alchemy-start').length), 1);
+    await page.screenshot({ path: __dirname + '/lean-alchemy-desktop.png', fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.evaluate(() => { const r = document.querySelector('#sro-bot-lean').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; }), true);
+    await page.screenshot({ path: __dirname + '/lean-alchemy-mobile.png', fullPage: true });
     assert.deepEqual(errors,[]);
     console.log('PASS browser boot, collision routing, skills and missing Thunderdragon metadata; wardrobe honor and paid avatar skins, all-slot browsing, pagination, slot mapping, search, glow, presets and real-inventory isolation; controls and desktop/mobile bounds; zero page errors.');
   } finally { await browser.close(); }

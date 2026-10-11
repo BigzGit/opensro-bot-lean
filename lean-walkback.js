@@ -2,6 +2,7 @@
 const WalkBack = {
   active: null,
   start(resume = false) {
+    if (Alchemy.run || Alchemy.pending) return UI.toast('Stop alchemy and wait for its result before travelling.', 'warn');
     if (Town.trip) return UI.toast('Stop the town cycle before starting walk-back.', 'warn');
     if (!World.inWorld() || World.isDead()) return UI.toast(T('Önce canlı olarak oyuna girin.', 'Enter the world with a living character first.'), 'warn');
     const dest = Settings.profile.hunt.center, pose = World.pose();

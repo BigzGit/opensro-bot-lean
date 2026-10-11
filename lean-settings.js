@@ -1,5 +1,6 @@
 const CLASS_KEYS = ['normal', 'champion', 'giant', 'party', 'elite', 'unique'];
 const DEFAULT_PROFILE = {
+  alchemy: { target: 3, limit: 20, elixir: 0, powder: false },
   party: { autoAcceptMatching: false, autoRecruit: false, autoRes: false, resRadius: 300, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true },
   wardrobe: { on: true, phantom: true, realAnim: true, hideAvatars: false,
     eq: {}, av: {}, pet: { atk: 0, pick: 0, mount: 0 }, presets: {}, undo: null },
@@ -36,7 +37,7 @@ const DEFAULT_PROFILE = {
 function botProfile(input) {
   const result = deepMerge(DEFAULT_PROFILE, {});
   if (!input || typeof input !== 'object') return result;
-  for (const key of ['macro', 'potion', 'hunt', 'wardrobe', 'party']) {
+  for (const key of ['macro', 'potion', 'hunt', 'wardrobe', 'party', 'alchemy']) {
     if (!input[key] || typeof input[key] !== 'object') continue;
     for (const field of Object.keys(DEFAULT_PROFILE[key])) {
       if (field in input[key]) result[key][field] = deepMerge(DEFAULT_PROFILE[key][field], input[key][field]);

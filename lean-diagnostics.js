@@ -72,6 +72,8 @@ const Diagnostics = {
     return Town.reason() ? 'Town return: preparing departure.' : '';
   },
   main() {
+    if (Alchemy.pending) return Alchemy.run ? 'Alchemy: waiting for the server result.' : 'Alchemy stopped; outstanding result unconfirmed.';
+    if (Alchemy.run) return 'Alchemy: preparing the next attempt.';
     if (!World.inWorld()) return 'Waiting for game world.';
     if (World.isDead()) return 'Character dead; waiting for recovery.';
     if (Town.trip) {
@@ -95,6 +97,11 @@ const Diagnostics = {
     const gp = World.gp, c = Settings.profile, pet = Loot.pet(), social = gp?.social, matching = gp?.partyMatching;
     return {
       action: this.main(), partyStatus: this.party(), petStatus: this.pet(), townStatus: this.town(),
+      alchemyActive: !!Alchemy.run, alchemyPending: !!Alchemy.pending, alchemyAttempts: this.number(Alchemy.result?.attempts),
+      alchemyTarget: this.number(Alchemy.run?.cfg.target), alchemySuccesses: this.number(Alchemy.result?.successes),
+      alchemyFailures: this.number(Alchemy.result?.failures), alchemyElixirsUsed: this.number(Alchemy.result?.elixirs),
+      alchemyPowdersUsed: this.number(Alchemy.result?.powders), alchemyResultFlags: this.number(gp?.alchemy?.flags),
+      alchemyError: this.number(gp?.alchemy?.error),
       running: !!Hunt.running, inWorld: World.inWorld(), dead: World.isDead(),
       inventoryPending: !!gp?.inventoryPending, casting: World.isCasting(),
       freeBagSlots: this.number(World.freeBagSlots()), hpPotions: Potion.count('hp'), mpPotions: Potion.count('mp'),

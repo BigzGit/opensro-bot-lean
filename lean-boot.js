@@ -1,5 +1,5 @@
 function toggleBot() {
-  if (Hunt.running || Town.trip || WalkBack.active || Restock.trip || Resurrect.trip || Controller.resumeAfterRevive) stopAll();
+  if (Alchemy.run || Alchemy.pending || Hunt.running || Town.trip || WalkBack.active || Restock.trip || Resurrect.trip || Controller.resumeAfterRevive) stopAll();
   else if (Restock.recording) UI.toast('Finish or cancel route recording before starting the bot.', 'warn');
   else Hunt.start();
 }
@@ -20,7 +20,7 @@ function boot() {
     }
   };
   for (const type of ['keydown', 'keypress', 'keyup']) W.addEventListener(type, protectEditing, true);
-  Combat.init(); Loot.init();
+  Combat.init(); Loot.init(); Alchemy.init();
   bus.on('character', name => {
     const key = name ? 'profile:' + name : 'profile:default';
     if (key !== Settings.profileKey) { Town.lastScrollPoint = null; stopAll(); Settings.useCharacter(name); }
@@ -60,7 +60,7 @@ function boot() {
   }, true);
   Ticker.start(() => Controller.tick(), 100);
   setInterval(() => { Wardrobe.tick(); UI.update(); }, 500);
-  W.SROLean = { version: VERSION, updates: Updates, diagnostics: Diagnostics, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, resurrect: Resurrect,
+  W.SROLean = { version: VERSION, updates: Updates, diagnostics: Diagnostics, alchemy: Alchemy, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, resurrect: Resurrect,
     restock: Restock, town: Town, walkBack: WalkBack, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, stop: stopAll, log: Log };
   Log.info('OpenSRO Bot Lean ready. F8 starts/stops; F7 folds; Shift+F7 hides/shows the window.');
 }

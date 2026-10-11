@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Diagnostics, Alchemy, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [];
@@ -1709,6 +1709,171 @@ test('stopping death return before arrival never resumes hunting', () => {
   assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, false);
   assert.equal(f.commands.some(c => c.kind === 'attack'), false);
 });
+function alchemyFixture(powder = false) {
+  const f = fixture();
+  f.World.gp.alchemy = { visible: true, pending: false, mode: 'reinforce', flags: 0, error: null, slot: null };
+  f.World.gp.inventory = [
+    { slot: 13, refObjId: 100, typeFlags: 44 | (6 << 7), plus: 0, durability: 100, variance: '123', magic: [], quantity: 1, name: 'Test weapon', tooltip: { fields: { itemClass: 25 } } },
+    { slot: 14, refObjId: 3679, typeFlags: 0x0d6c, quantity: 10 },
+    { slot: 15, refObjId: 3691, typeFlags: 0x156c, quantity: 10 },
+  ];
+  Object.assign(f.Settings.profile.alchemy, { target: 3, limit: 20, powder });
+  f.Alchemy.select(13);
+  f.Alchemy.init();
+  function result(flags, plus = 1, extra = {}) {
+    const gp = f.World.gp, pending = f.Alchemy.pending;
+    const inventory = gp.inventory.map(i => i.slot === 13 ? { ...i, plus } :
+      i.slot === 14 || powder && i.slot === 15 ? { ...i, quantity: i.quantity - 1 } : i).filter(i => flags === 0x40 ? i.slot !== 13 : true);
+    f.World.applyGameplay({ ...gp, inventory, inventoryPending: false,
+      alchemy: { ...gp.alchemy, pending: false, flags, slot: 13, error: null, ...extra } });
+    assert.ok(pending);
+    f.Controller.tick();
+  }
+  return { ...f, result };
+}
+
+test('alchemy sends native reinforcement slots and confirms success and failure before continuing', () => {
+  const f = alchemyFixture(true); f.Alchemy.start(); f.Controller.tick();
+  assert.deepEqual(JSON.parse(JSON.stringify(f.commands[0])), { kind: 'alchemy-start', mode: 'reinforce', slots: [13, 14, 15] });
+  for (let n = 0; n < 10; n++) { f.advance(100); f.Controller.tick(); }
+  assert.equal(f.commands.length, 1); assert.equal(f.Alchemy.result.elixirs, 0);
+  f.result(0x10, 1); assert.equal(f.Alchemy.result.successes, 1); assert.equal(f.Alchemy.result.powders, 1);
+  f.Controller.tick(); assert.equal(f.commands.length, 1);
+  f.advance(1000); f.Controller.tick(); assert.equal(f.commands.length, 2);
+  f.result(0x21, 0); assert.equal(f.Alchemy.result.failures, 1); assert.equal(f.Alchemy.item().plus, 0);
+  assert.equal(f.Alchemy.result.elixirs, 2); assert.equal(f.Alchemy.result.powders, 2);
+});
+
+test('alchemy stops at target or attempt limit instead of spending further materials', () => {
+  for (const target of [true, false]) {
+    const f = alchemyFixture(); Object.assign(f.Settings.profile.alchemy, target ? { target: 1 } : { target: 5, limit: 1 });
+    f.Alchemy.start(); f.Controller.tick(); f.result(target ? 0x10 : 0x20, target ? 1 : 0);
+    assert.equal(f.Alchemy.run, null); assert.match(f.Alchemy.message, target ? /Target reached/ : /Attempt limit/);
+    f.advance(30000); f.Controller.tick(); assert.equal(f.commands.filter(c => c.kind === 'alchemy-start').length, 1);
+  }
+});
+
+test('alchemy requires bag weapons, valid limits, settled state and compatible materials', () => {
+  for (const change of [f => { f.World.gp.inventory[0].typeFlags = 44 | (4 << 7); },
+    f => { f.World.gp.inventory[0].slot = 6; }, f => { f.World.gp.inventoryPending = true; },
+    f => { f.World.gp.alchemy.pending = true; }, f => { f.World.gp.alchemy = undefined; },
+    f => { f.World.gp.inventory[1].refObjId = 3678; }, f => { f.Settings.profile.alchemy.target = 0; },
+    f => { f.Settings.profile.alchemy.limit = 1.5; }, f => { f.Settings.profile.alchemy.elixir = 3675; },
+    f => { f.Settings.profile.alchemy.powder = true; f.World.gp.inventory[2].refObjId = 3683; },
+    f => { f.Settings.profile.alchemy.powder = true; delete f.World.gp.inventory[0].tooltip; },
+    f => { f.World.gp.stall = { phase: 'owner', mode: 0 }; }, f => { f.Hunt.running = true; }]) {
+    const f = alchemyFixture(); change(f); f.Alchemy.start();
+    assert.equal(f.Alchemy.run, null); assert.equal(f.commands.length, 0);
+  }
+});
+
+test('alchemy does not accept stale flags or material consumption alone as a result', () => {
+  const f = alchemyFixture(); f.World.gp.alchemy.flags = 0x10; f.World.gp.alchemy.slot = 13;
+  f.Alchemy.start(); f.Controller.tick();
+  f.World.applyGameplay({ ...f.World.gp, alchemy: { ...f.World.gp.alchemy } });
+  f.advance(1000); f.Controller.tick(); assert.ok(f.Alchemy.pending); assert.equal(f.commands.length, 1);
+  const items = f.World.gp.inventory.map(i => i.slot === 14 ? { ...i, quantity: 9 } : i);
+  f.World.applyGameplay({ ...f.World.gp, inventory: items, alchemy: { ...f.World.gp.alchemy, flags: 0 } });
+  f.Controller.tick(); assert.ok(f.Alchemy.pending); assert.equal(f.Alchemy.result.elixirs, 0);
+  f.advance(16000); f.Controller.tick(); assert.equal(f.Alchemy.run, null); assert.ok(f.Alchemy.pending);
+  assert.match(f.Alchemy.message, /unconfirmed/); f.Alchemy.start(); assert.equal(f.Alchemy.run, null);
+  f.Controller.tick(); assert.equal(f.commands.length, 1);
+});
+
+test('alchemy waits for pending inventory to settle even after a matching result', () => {
+  const f = alchemyFixture(); f.Alchemy.start(); f.Controller.tick();
+  const gp = f.World.gp;
+  f.World.applyGameplay({ ...gp, inventoryPending: true,
+    inventory: gp.inventory.map(i => i.slot === 13 ? { ...i, plus: 1 } : i.slot === 14 ? { ...i, quantity: 9 } : i),
+    alchemy: { ...gp.alchemy, pending: false, flags: 0x10, slot: 13 } });
+  f.Controller.tick(); assert.ok(f.Alchemy.pending);
+  f.World.applyGameplay({ ...f.World.gp, inventoryPending: false }); f.Controller.tick();
+  assert.equal(f.Alchemy.pending, null); assert.equal(f.Alchemy.result.successes, 1);
+});
+
+test('alchemy observes native rejection and confirmed destruction without retrying', () => {
+  const f = alchemyFixture(); f.Alchemy.start(); f.Controller.tick();
+  f.World.applyGameplay({ ...f.World.gp, alchemy: { ...f.World.gp.alchemy, pending: false, error: 9, flags: 0, slot: 0 } });
+  f.Controller.tick(); assert.equal(f.Alchemy.run, null); assert.equal(f.Alchemy.pending, null); assert.match(f.Alchemy.message, /refused/);
+  const d = alchemyFixture(); d.Alchemy.start(); d.Controller.tick(); d.result(0x40);
+  assert.equal(d.Alchemy.run, null); assert.equal(d.Alchemy.selected, null); assert.equal(d.Alchemy.pending, null);
+  assert.match(d.Alchemy.message, /destroyed/); assert.equal(d.Alchemy.result.elixirs, 1);
+});
+
+test('alchemy freezes the selected item and stops on movement, replacement or edits', () => {
+  for (const change of [f => { f.World.gp.inventory[0].slot = 16; },
+    f => { f.World.gp.inventory[0].variance = '456'; }, f => { f.World.gp.inventory[0].refObjId = 200; },
+    f => { f.World.gp.inventory[0].magic = ['1']; }, f => { f.Settings.profile.alchemy.limit++; },
+    f => { f.Manual.lastAt = 100001; }, f => { f.World.charName = 'changed'; }]) {
+    const f = alchemyFixture(); f.Alchemy.start(); change(f); f.Controller.tick();
+    assert.equal(f.Alchemy.run, null); assert.equal(f.commands.length, 0);
+  }
+});
+
+test('alchemy stop and F8 never repeat a sent attempt, including a late result', () => {
+  const f = alchemyFixture(); f.Alchemy.start(); f.Controller.tick(); f.toggleBot();
+  assert.equal(f.Hunt.running, false); assert.equal(f.Alchemy.run, null); assert.ok(f.Alchemy.pending);
+  f.toggleBot(); assert.equal(f.Hunt.running, false);
+  f.result(0x10, 1); assert.equal(f.Alchemy.pending, null); assert.equal(f.Alchemy.run, null);
+  f.advance(2000); f.Controller.tick(); assert.equal(f.commands.filter(c => c.kind === 'alchemy-start').length, 1);
+});
+
+test('alchemy stops on native manual commands, death and world reset', () => {
+  const f = alchemyFixture(); f.Alchemy.start();
+  for (const observer of f.Hook.observers) observer({ kind: 'gameplay', command: { kind: 'inventory-move' } });
+  assert.equal(f.Alchemy.run, null); assert.match(f.Alchemy.message, /manual/);
+  const d = alchemyFixture(); d.Alchemy.start(); d.World.isDead = () => true; d.Controller.tick(); assert.equal(d.Alchemy.run, null);
+  const r = alchemyFixture(); r.Alchemy.start(); r.Controller.tick(); r.bus.emit('reset');
+  assert.equal(r.Alchemy.run, null); assert.equal(r.Alchemy.pending, null); assert.equal(r.Alchemy.selected, null);
+});
+
+test('alchemy waits for a visible window once and times out without spending', () => {
+  const f = alchemyFixture(); f.World.gp.alchemy.visible = false; f.Alchemy.start(); f.Controller.tick();
+  assert.equal(f.commands[0].kind, 'alchemy-open');
+  f.advance(1000); f.Controller.tick(); assert.equal(f.commands.length, 1);
+  f.World.applyGameplay({ ...f.World.gp, alchemy: { ...f.World.gp.alchemy, visible: true } }); f.Controller.tick();
+  assert.equal(f.commands.at(-1).kind, 'alchemy-start');
+  const t = alchemyFixture(); t.World.gp.alchemy.visible = false; t.Alchemy.start(); t.Controller.tick();
+  t.advance(6000); t.Controller.tick(); assert.equal(t.Alchemy.run, null); assert.equal(t.commands.length, 1);
+});
+
+test('alchemy blocks hunting and travel and stops when supplies run out', () => {
+  const f = alchemyFixture(); f.Alchemy.start(); f.Hunt.start(); f.WalkBack.start();
+  assert.equal(f.Hunt.running, false); assert.equal(f.WalkBack.active, null);
+  f.World.gp.inventory[1].quantity = 0; f.Controller.tick(); assert.equal(f.Alchemy.run, null); assert.equal(f.commands.length, 0);
+  const t = alchemyFixture(); t.Alchemy.start(); t.Controller.tick();
+  assert.equal(t.Controller.mode, 'alchemy'); assert.equal(t.commands.some(c => c.kind === 'item-use'), false);
+});
+
+test('alchemy uses no powder when disabled and rolls over exhausted elixir stacks', () => {
+  const f = alchemyFixture(); f.World.gp.inventory[1].quantity = 1;
+  f.World.gp.inventory.push({ slot: 16, refObjId: 3679, typeFlags: 0x0d6c, quantity: 5 });
+  f.Alchemy.start(); f.Controller.tick();
+  assert.deepEqual(Array.from(f.commands[0].slots), [13, 14]);
+  f.result(0x10, 1); assert.equal(f.Alchemy.result.powders, 0);
+  f.advance(1000); f.Controller.tick(); assert.deepEqual(Array.from(f.commands.at(-1).slots), [13, 16]);
+});
+
+test('alchemy rejects mismatched results and unexpected plus changes without another attempt', () => {
+  for (const change of [a => { a.slot = 14; }, a => { a.mode = 'magic'; }, a => { a.flags = 0x70; }]) {
+    const f = alchemyFixture(); f.Alchemy.start(); f.Controller.tick();
+    const gp = f.World.gp, a = { ...gp.alchemy, slot: 13, flags: 0x10 }; change(a);
+    f.World.applyGameplay({ ...gp, alchemy: a,
+      inventory: gp.inventory.map(i => i.slot === 13 ? { ...i, plus: 1 } : i.slot === 14 ? { ...i, quantity: 9 } : i) });
+    f.advance(16000); f.Controller.tick(); assert.equal(f.Alchemy.run, null); assert.ok(f.Alchemy.pending); assert.equal(f.commands.length, 1);
+  }
+  const f = alchemyFixture(); f.Alchemy.start(); f.Controller.tick(); f.result(0x10, 5);
+  assert.equal(f.Alchemy.run, null); assert.ok(f.Alchemy.pending); assert.match(f.Alchemy.message, /Unexpected enhancement/);
+});
+
+test('alchemy dispatch failure spends no attempt and manual refusal stops a pending run', () => {
+  const f = alchemyFixture(), raw = f.Cmd.raw;
+  f.Cmd.raw = () => false; f.Alchemy.start(); f.Controller.tick(); assert.equal(f.Alchemy.result.attempts, 0); assert.equal(f.Alchemy.pending, null);
+  f.Cmd.raw = raw; f.Controller.tick(); assert.equal(f.Alchemy.result.attempts, 1);
+  f.bus.emit('game-error', 'Alchemy operation unavailable'); assert.equal(f.Alchemy.run, null); assert.ok(f.Alchemy.pending);
+  f.result(0x10, 1); assert.equal(f.Alchemy.pending, null); f.advance(1000); f.Controller.tick(); assert.equal(f.commands.filter(c => c.kind === 'alchemy-start').length, 1);
+});
+
 test('diagnostics identify party acceptance gates without changing party commands', () => {
   const f = fixture(), m = partyApplication(f);
   f.World.gp.social.members = Array.from({ length: 5 }, (_, n) => ({ id: 10 + n }));
@@ -1775,7 +1940,7 @@ async function updateTests() {
   await check('updates compare numeric version components and ignore malformed versions', async () => {
     const f = fixture();
     for (const v of ['1.2.100', '1.3.0', '2.0.0']) assert.equal(f.Updates.newer(v), true);
-    for (const v of ['1.2.9', '1.2.35', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
+    for (const v of ['1.2.9', '1.2.36', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
   });
   await check('updates pin metadata and user-initiated installer to the same trusted commit', async () => {
     const f = fixture(), calls = updater(f); f.UI.updateButton = {};

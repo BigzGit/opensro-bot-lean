@@ -101,7 +101,7 @@ const UI = {
     const controls = this.row(this.button('Start / stop · F8', () => toggleBot()), this.button('Walk back', () => WalkBack.start()), this.button('Return & hunt', () => WalkBack.start(true)), this.button('Stop all', () => stopAll()));
     controls.classList.add('controls');
     this.nav = el('nav'); this.nav.setAttribute('aria-label', 'Bot settings');
-    for (const name of ['Combat', 'Loot', 'Supplies', 'Wardrobe', 'Settings']) this.nav.append(this.button(name, () => { this.current = name; this.draw(); }));
+    for (const name of ['Combat', 'Loot', 'Supplies', 'Alchemy', 'Wardrobe', 'Settings']) this.nav.append(this.button(name, () => { this.current = name; this.draw(); }));
     this.pane = el('div', null, 'pane'); this.feedback = el('div', null, 'feedback'); this.feedback.setAttribute('role', 'status');
     this.waitNote = el('div', '', 'waiting'); this.waitNote.setAttribute('role', 'status');
     this.body.append(this.status, this.waitNote, this.row(this.button('Copy diagnostics', () => { void Diagnostics.copy(); })), controls, this.nav, this.pane, this.feedback);
@@ -309,6 +309,8 @@ const UI = {
       services.append(this.text('Keep in pet (names)', () => town().keep, v => town().keep = v),
         el('p', 'Town buys X-Large potions using the Buy HP/MP switches, low-stock thresholds and refill counts above. Keep each low-stock threshold below its refill target. Potion selections apply to walking-route restock. Returns when the character bag has at most one free slot. Free at least two slots before hunting again; existing character items stay protected. Revival uses the saved town services and a reverse scroll, without using a return scroll in town. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. F8 cancels.', 'muted'));
       this.townNote = el('p', Town.status(), 'muted'); services.append(this.townNote, this.button('Save return diagnostics', () => this.exportDiagnostics())); this.pane.append(services);
+    } else if (this.current === 'Alchemy') {
+      Alchemy.draw();
     } else if (this.current === 'Wardrobe') {
       LeanWardrobe.draw(this.pane);
     } else {
@@ -352,6 +354,7 @@ const UI = {
     return (World.gp?.skills || []).map(id => { const s = World.skill(id); return `${id}:${s?.name}:${s?.icon}:${s?.level}`; }).join('|');
   },
   update() {
+    Alchemy.refresh();
     const diagnosticState = Diagnostics.sample();
     if (this.waitNote) this.waitNote.textContent = Diagnostics.lines(diagnosticState);
     if (this.townNote) this.townNote.textContent = Town.status();

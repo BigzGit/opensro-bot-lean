@@ -1,4 +1,9 @@
 // Single owner for movement/combat/pickup. Potion use remains a separate emergency lane.
+const startHunting = Hunt.start;
+Hunt.start = function (...args) {
+  if (Alchemy.run || Alchemy.pending) return UI.toast('Stop alchemy and wait for its result before hunting.', 'warn');
+  return startHunting.apply(this, args);
+};
 Hunt.lootAllowed = e => Loot.allowed(e);
 Hunt.chooseLoot = () => Loot.choose();
 Hunt.tick = function () {
@@ -67,6 +72,7 @@ Hunt.tick = function () {
 
 function stopAll() {
   Town.record('stop');
+  Alchemy.stop();
   const townActive = !!Town.trip;
   Town.cancel();
   Resurrect.cancelTrip('', true);
@@ -92,6 +98,8 @@ const Controller = {
   tick() {
     try {
       Restock.sample();
+      Alchemy.tick();
+      if (Alchemy.run || Alchemy.pending) { if (World.inWorld()) Party.tick(); this.mode = 'alchemy'; return; }
       if (World.inWorld() && World.isDead() && Hunt.running) {
         Town.cancel(); Resurrect.cancelTrip(); Resurrect.holdUntil = 0;
         Hunt.tick(); this.mode = Hunt.state; return;
