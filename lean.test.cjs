@@ -549,6 +549,54 @@ test('auto-recruit waits for confirmation without duplicate or blind repeat regi
   f.advance(60000); m.pending = null; m.result = 9; f.Controller.tick();
   assert.equal(f.commands.length, 1);
 });
+test('auto-recruit recovers a refused registration from fresh idle state without toggling', () => {
+  const f = fixture(); recruiting(f); f.Controller.tick();
+  f.World.applyGameplay({ ...f.World.gp, partyMatching: { ...f.World.gp.partyMatching, pending: 'register' } });
+  f.advance(1000); f.Controller.tick(); assert.equal(f.commands.length, 1);
+  f.World.applyGameplay({ ...f.World.gp, partyMatching: { ...f.World.gp.partyMatching, pending: null, result: 9 } });
+  f.advance(28900); f.Controller.tick(); assert.equal(f.commands.length, 1);
+  f.advance(100); f.Controller.tick(); assert.equal(f.commands.length, 2);
+  assert.equal(f.Settings.profile.party.autoRecruit, true); assert.equal(f.Hunt.running, false);
+  f.Controller.tick(); assert.equal(f.commands.length, 2);
+  f.World.applyGameplay({ ...f.World.gp, partyMatching: { ...f.World.gp.partyMatching, own: { id: 5, type: 1 }, pending: null } });
+  f.advance(60000); f.Controller.tick(); assert.equal(f.commands.length, 2);
+  assert.equal(f.Party.registration, null);
+});
+test('auto-recruit retry waits for fresh explicitly idle matching state and preserves pending requests', () => {
+  const f = fixture(); recruiting(f); f.Controller.tick(); f.advance(60000);
+  f.Controller.tick(); assert.equal(f.commands.length, 1);
+  for (const change of [{ pending: 'register' }, { pending: 'page' }, { pending: undefined }, { own: undefined, pending: null },
+      { pending: null, request: { a: 1, b: 2 } }, { pending: null, joining: { name: 'Other' } }]) {
+    f.World.applyGameplay({ ...f.World.gp, partyMatching: { own: null, pending: null, request: null, ...change } });
+    f.Controller.tick(); assert.equal(f.commands.length, 1);
+  }
+  f.World.applyGameplay({ ...f.World.gp, partyMatching: { own: null, pending: null, request: null } });
+  f.Controller.tick(); assert.equal(f.commands.length, 2);
+});
+test('auto-recruit keeps retrying at thirty-second intervals while enabled and stops when disabled', () => {
+  const f = fixture(); recruiting(f); f.Controller.tick();
+  for (let attempt = 2; attempt <= 4; attempt++) {
+    f.World.applyGameplay({ ...f.World.gp, partyMatching: { own: null, pending: null, request: null, result: 9 } });
+    f.advance(30000); f.Controller.tick(); assert.equal(f.commands.length, attempt);
+    for (let tick = 0; tick < 10; tick++) f.Controller.tick();
+    assert.equal(f.commands.length, attempt);
+  }
+  f.Settings.profile.party.autoRecruit = false;
+  f.World.applyGameplay({ ...f.World.gp, partyMatching: { own: null, pending: null, request: null } });
+  f.advance(60000); f.Controller.tick(); assert.equal(f.commands.length, 4);
+});
+test('auto-recruit revalidates leadership, capacity and settings before retrying registration', () => {
+  const f = fixture(); recruiting(f); f.Controller.tick(); f.advance(30000);
+  f.World.applyGameplay({ ...f.World.gp, partyMatching: { own: null, pending: null, request: null } });
+  f.World.gp.social = { self: 10, leader: 20, options: 1, members: [{ id: 10 }] };
+  f.Controller.tick(); assert.equal(f.commands.length, 1);
+  f.World.gp.social.leader = 10; f.World.gp.social.members = Array(8).fill({ id: 10 });
+  f.Controller.tick(); assert.equal(f.commands.length, 1);
+  f.World.gp.social.members.pop(); f.Settings.profile.party.title = '';
+  f.Controller.tick(); assert.equal(f.commands.length, 1);
+  f.Settings.profile.party.title = 'Recovered party'; f.Controller.tick();
+  assert.equal(f.commands.length, 2); assert.equal(f.commands[1].registration.title, 'Recovered party');
+});
 test('auto-recruit restores a confirmed listing after it disappears and space opens', () => {
   const f = fixture(), m = recruiting(f); f.Controller.tick();
   m.own = { id: 5, type: 1 }; f.Controller.tick();

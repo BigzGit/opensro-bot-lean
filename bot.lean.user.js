@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.31
+// @version      1.2.32
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.31';
+const VERSION = '1.2.32';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -2200,10 +2200,16 @@ const Party = {
       return;
     }
     if (this.registration) {
-      this.message = now() - this.registration.at < 15000 ? 'Waiting for registration confirmation.' : 'Registration not confirmed. Check the game, then toggle Auto-recruit to retry.';
-      return;
+      if (now() - this.registration.at < 15000) { this.message = 'Waiting for registration confirmation.'; return; }
+      // A local send can be refused before registration starts. Retry only
+      // after a newer native snapshot explicitly confirms no listing or request.
+      if (World.gp === this.registration.state) { this.message = 'Registration unconfirmed; waiting for fresh party state before retrying.'; return; }
+      if (matching.own !== null || matching.pending !== null || matching.request || matching.joining) {
+        this.message = 'Waiting for party matching before retrying registration.'; return;
+      }
+      this.registration = null;
     }
-    if (matching.own !== null || matching.pending || matching.request || matching.joining) { this.message = 'Waiting for party matching.'; return; }
+    if (matching.own !== null || matching.pending !== null || matching.request || matching.joining) { this.message = 'Waiting for party matching.'; return; }
     if (social.leader && (!social.self || social.self !== social.leader) || !social.leader && social.members.length) {
       this.message = 'Waiting until you are solo or party leader.'; return;
     }
@@ -2223,7 +2229,7 @@ const Party = {
     if (now() - this.lastRegisterAt < 30000 || !Cmd.spaced('party-match-register')) { this.message = 'Waiting before restoring the listing.'; return; }
     const registration = { party: 0, type, purpose: c.purpose, min: c.min, max: c.max, title };
     if (Cmd.raw({ kind: 'party-match-register', registration }, 'Auto-recruit: register party listing')) {
-      this.registration = { at: now() }; this.lastRegisterAt = now();
+      this.registration = { at: now(), state: World.gp }; this.lastRegisterAt = now();
       this.message = 'Waiting for registration confirmation.';
     }
   },
@@ -4941,7 +4947,7 @@ const UI = {
         this.check('Share EXP in new parties', () => party().expShare, v => party().expShare = v),
         this.check('Share items in new parties', () => party().itemShare, v => party().itemShare = v),
         this.partyNote,
-        el('p', 'Auto-recruit registers your saved listing and accepts applicants whenever enabled, even with hunting stopped. Restores missing listings when space opens. Existing listings and party sharing settings are preserved; edits apply to the next new listing. Turning this off leaves the current listing in place.', 'muted'),
+        el('p', 'Auto-recruit registers your saved listing and accepts applicants whenever enabled, even with hunting stopped. Restores missing listings when space opens and retries unconfirmed registrations after fresh idle state, at most once every 30 seconds. Existing listings and party sharing settings are preserved; edits apply to the next new listing. Turning this off leaves the current listing in place.', 'muted'),
         this.check('Auto-accept party-matching joins', () => Settings.profile.party.autoAcceptMatching, v => Settings.profile.party.autoAcceptMatching = v),
         el('p', 'Accepts applications to your own listing while you are the leader or forming a new party. Works while hunting is stopped; turn this switch off to stop accepting. Ordinary invitations are left to you.', 'muted'),
         this.check('Auto-resurrect party members', () => party().autoRes, v => { party().autoRes = v; Resurrect.reset(); }),

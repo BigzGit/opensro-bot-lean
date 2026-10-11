@@ -8,11 +8,11 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.31**.
+- Latest userscript release at this snapshot: **1.2.32**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **153 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest validation: **157 integration tests**, JavaScript syntax check and headless browser checks pass.
 - Latest work: opt-in Hotan recall/storage/refill/repair/reverse cycle. Live-account testing is still outstanding.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
@@ -79,7 +79,7 @@ The party switches default off and are saved per character. They operate wheneve
 - Existing listings are preserved. Existing party sharing options override saved new-party options.
 - Registration requires solo level 5+ or leadership with room. Capacity is 4 without shared EXP or 8 with it. Current client listing range is 1-90; title length is 1-50 characters. Job-suit restrictions determine allowed purposes.
 - Missing listings can be restored when space opens, with at least 30 seconds between registrations.
-- Unconfirmed registration does not blindly repeat. A status message asks the user to check the game and toggle Auto-recruit to retry.
+- Unconfirmed registration retries automatically at most once every 30 seconds, only after a fresh snapshot explicitly reports no listing and no pending matching request. Stale or incomplete state never authorizes a retry.
 - **Auto-resurrect** casts a learned corpse-targeted row (DeadBody target bit 128 of the client catalogue, the Rebirth family) on a fallen party member whose corpse entity is in view, preferring the highest mastery requirement. The sim worker replaces a press gid with the newest selection intent (`core.ts`), so the corpse is selected immediately before the press; the server walks the caster into reach and proposes the revival. The dead member still has to accept; refusals and timeouts are invisible to the caster.
 - Offers repeat per member only after the server's 30 second answer window (31 s here) and clear when the member revives or leaves the party. A fresh manual-control command pauses offers for `manualPauseS`. Dead targets stay refused for every other targeted skill.
 - Turning off Auto-recruit leaves an existing listing in place. The separate auto-accept switch may still be on; disable both to stop all party automation.
@@ -317,3 +317,12 @@ User reports late/missed pet pickup with Finish current fight disabled. Screensh
 Loot.init previously assigned every shared game-error to the pending pickup. The capacity regex classified any mention of inventory as full, so Inventory command unavailable / Inventory rejected could suppress a drop until the unchanged pet bag changed. Pet failures now accept only the native COS-ground/transaction refusal strings verified in read-only gameplay.ts and inventory/inventory.ts; unrelated combat/item-use errors are ignored. Generic inventory refusals use bounded retry/backoff instead of capacity suppression. Capacity recognition requires explicit full/space/capacity wording; character full-bag coverage remains. Native manual cos-pickup owns the shared inventory lane and can approach before granting, so pending transactions and confirmation checks remain necessary. No game/server or original-bot changes.
 
 Drop selection now ranks by pet distance while retaining the configured player/hunting range, pet 50 m reach, ownership, category, exclusions and capacity checks. Pet status reports collecting, retry pending, actual potion wait or inventory wait. Six new regressions cover the HP/MP margin, retry recovery, unrelated errors, temporary native inventory failures, nearest-pet selection and actual potion/pending priority with ongoing combat. All 153 integration tests, syntax and isolated browser checks pass. These reproduce code defects matching the symptoms; live account pickup timing and successful collection remain unverified. Publish, mirror and back up install copies using the normal release workflow.
+
+
+## Auto-recruit registration recovery: 1.2.32
+
+User reports Auto-recruit needs toggling off/on to form a party. Reproduced the registration latch: after a local Cmd.raw send, Party.registration remained set indefinitely, including after a fresh native-style rejection with own:null and pending:null. Toggle cleared this latch. Party now retains the send snapshot, waits 15 seconds for confirmation, and releases the latch only after a newer gameplay snapshot explicitly reports own:null and pending:null with no application or join in progress. Existing 30-second lastRegisterAt throttle bounds automatic retries while enabled; each attempt revalidates leadership, capacity, level, saved title/range, job purpose and party sharing. A confirmed listing clears the latch and is preserved. Unknown/stale state or an outstanding native matching request never authorizes resending.
+
+Read-only party-matching.ts verification confirms register sets pending:'register'; a rejection clears matching pending and returns result, while success publishes own immediately. Native request admission rejects both an outstanding request and an existing owned listing. Auto-recruit still runs with hunting stopped and accepts applicants through the existing correlated matching path; it does not invite arbitrary players or fabricate party members. UI describes automatic recovery rather than requiring a toggle.
+
+Four new regressions cover fresh rejection recovery at the 30-second boundary, pending/stale/incomplete state and applications/joins, repeated bounded retries plus disabling, and leadership/capacity/settings revalidation. The first regression failed before the fix (one registration instead of two). All 157 integration tests, syntax and isolated browser checks pass. Live account registration and party formation remain unverified. Publish and mirror through the usual workflow; README remains simple and unchanged.

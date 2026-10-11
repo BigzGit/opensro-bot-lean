@@ -14,10 +14,16 @@ const Party = {
       return;
     }
     if (this.registration) {
-      this.message = now() - this.registration.at < 15000 ? 'Waiting for registration confirmation.' : 'Registration not confirmed. Check the game, then toggle Auto-recruit to retry.';
-      return;
+      if (now() - this.registration.at < 15000) { this.message = 'Waiting for registration confirmation.'; return; }
+      // A local send can be refused before registration starts. Retry only
+      // after a newer native snapshot explicitly confirms no listing or request.
+      if (World.gp === this.registration.state) { this.message = 'Registration unconfirmed; waiting for fresh party state before retrying.'; return; }
+      if (matching.own !== null || matching.pending !== null || matching.request || matching.joining) {
+        this.message = 'Waiting for party matching before retrying registration.'; return;
+      }
+      this.registration = null;
     }
-    if (matching.own !== null || matching.pending || matching.request || matching.joining) { this.message = 'Waiting for party matching.'; return; }
+    if (matching.own !== null || matching.pending !== null || matching.request || matching.joining) { this.message = 'Waiting for party matching.'; return; }
     if (social.leader && (!social.self || social.self !== social.leader) || !social.leader && social.members.length) {
       this.message = 'Waiting until you are solo or party leader.'; return;
     }
@@ -37,7 +43,7 @@ const Party = {
     if (now() - this.lastRegisterAt < 30000 || !Cmd.spaced('party-match-register')) { this.message = 'Waiting before restoring the listing.'; return; }
     const registration = { party: 0, type, purpose: c.purpose, min: c.min, max: c.max, title };
     if (Cmd.raw({ kind: 'party-match-register', registration }, 'Auto-recruit: register party listing')) {
-      this.registration = { at: now() }; this.lastRegisterAt = now();
+      this.registration = { at: now(), state: World.gp }; this.lastRegisterAt = now();
       this.message = 'Waiting for registration confirmation.';
     }
   },
