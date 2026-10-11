@@ -2,6 +2,7 @@
 const WalkBack = {
   active: null,
   start(resume = false) {
+    if (BuffGear.run || BuffGear.recovery) return UI.toast('Restore or review combat gear before travelling.', 'warn');
     if (Alchemy.run || Alchemy.pending) return UI.toast('Stop alchemy and wait for its result before travelling.', 'warn');
     if (Town.trip) return UI.toast('Stop the town cycle before starting walk-back.', 'warn');
     if (!World.inWorld() || World.isDead()) return UI.toast(T('Önce canlı olarak oyuna girin.', 'Enter the world with a living character first.'), 'warn');

@@ -6,7 +6,7 @@ const DEFAULT_PROFILE = {
     eq: {}, av: {}, pet: { atk: 0, pick: 0, mount: 0 }, presets: {}, undo: null },
   macro: {
     rotations: { normal: [], champion: [], giant: [], party: [], elite: [], unique: [] },
-    fallbackToNormal: true, normalAttack: true, buffs: [], imbue: null,
+    fallbackToNormal: true, normalAttack: true, buffs: [], imbue: null, buffSwap: false, buffSets: [],
     imbueBeforeAttack: true, berserk: 'strong', minMpPct: 0, castGapMs: 350,
   },
   potion: {

@@ -8,12 +8,12 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.40**.
+- Latest userscript release at this snapshot: **1.2.41**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **200 integration tests**, JavaScript syntax check and headless browser checks pass.
-- Latest work: renamed visible branding to nixxane bot in the userscript, panel, exports, diagnostics, receiver and GitHub Pages site. Live reporting was confirmed before this branding release; pill purchases and alchemy ground-click recovery remain unconfirmed.
+- Latest validation: **219 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest work: multiple opt-in buff weapon sets, per-buff assignment, confirmed inventory swaps and combat-gear restoration. Isolated validation passes; live-server swapping remains unconfirmed.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
 
@@ -426,3 +426,15 @@ The separate opensro-bot-lean-site repo uses nixxane bot in the title, heading, 
 The receiver now includes the user explanation directly below the version heading in the Discord message. Diagnostics JSON and optional screenshot remain attachments. Explanations are trimmed and capped at 1000 characters in message content; missing, blank or non-string explanations receive a readable fallback. Allowed mentions remain disabled, including @everyone/user/role mentions. Original report contents remain in the attachment. Older bot reports are supported; no bot update or reload is required.
 
 Syntax, Node receiver tests and full workerd tests pass, including multiline descriptions, content bounds, attachment preservation, legacy fallback and disabled mentions. All outbound test requests are intercepted; no real Discord messages sent by tools. Deployed Worker version f5766264-ba8b-43c6-9e37-e15005f637db; live health confirms receiverVersion6 and ready:true.
+
+## Multiple buff weapon sets: 1.2.41
+
+lean-buff-gear.js owns BuffGear, with macro.buffSwap off by default and macro.buffSets saved per character. Save up to eight sets from currently equipped slot6 weapon and optional slot7 shield in Combat → Buffs & imbue; return to combat gear before hunting. Each selected buff gets a gearSet ID (0 = ordinary current-gear buff). Assigned buffs are excluded from the original Combat.buffs loop even while swapping is off. Existing profiles keep ordinary buff behavior.
+
+A hunting-only cycle snapshots the actual combat weapon/off-hand, groups due self-buffs by assigned set, stops combat movement, explicitly removes incompatible off-hand equipment to one free bag slot, swaps the weapon, equips the selected shield, then casts. Uses verified native inventory-move {source,destination,quantity:0} into sockets6/7. Each move must show the exact source/destination exchange in settled inventory before advancing; no repeat of unconfirmed moves (15s timeout). Item identities include reference/type/plus/variance/magic and ignore durability, slot and stack quantity. Duplicate identities are refused. Original combat gear can be any weapon, with shield, ammunition or empty off-hand; no hardcoded staff/cleric/bard types. Saved buff sets require a weapon plus optional actual shield.
+
+Buff casts wait for an observed cast event or active buff, plus authored actionMs+500ms (6s fallback) and observed casting settlement before the next swap. Unconfirmed casts restore gear and suppress that buff until configuration changes. After home gear is restored, a 1s hold checks previously observed buffs for disappearance; weapon-bound buffs are suppressed until buff settings change to prevent swap loops. Native server itemmove_door_test.go proves reqi-bound buffs can end on equipment removal; no claim that every cleric/bard buff survives. Full cycle is bounded to120s.
+
+Party and emergency potions continue during swaps. Combat, town, walk-back, resurrection, collection and alchemy yield; new travel/hunting/alchemy starts are refused while gear restoration/review is outstanding. Stop/F8/feature-disable finishes pending moves/casts then restores without further buffs. Manual control/equipment commands, death, disconnect and world reset stop hunting and preserve a manual recovery snapshot in this page; Restore combat gear retries only when explicitly clicked with settled state, Use current gear clears recovery after inspection. Character/profile change or reload discards recovery without touching new gear. Missing gear, ambiguous copies, capacity failures or unconfirmed restoration never resume hunting automatically.
+
+219 integration tests, syntax and isolated Edge browser checks pass. New tests cover two alternate sets, arbitrary combat gear/ammunition, exact confirmation, stale/busy inventory, action holds, disabled paths, missing/full/duplicate gear, interrupted/rejected restoration, death/manual/profile isolation, independent services, cast timeout and lost-buff suppression. Browser tests save two sets and assign/remove them through actual controls. No live game/account equipment was changed; native swapping and buff survival need user confirmation. Publish and mirror through the standing workflow.

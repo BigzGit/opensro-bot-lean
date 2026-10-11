@@ -206,6 +206,9 @@ const UI = {
       up.className = down.className = remove.className = 'mini';
       up.setAttribute('aria-label', 'Move up ' + World.skillName(id)); down.setAttribute('aria-label', 'Move down ' + World.skillName(id)); remove.setAttribute('aria-label', 'Delete ' + World.skillName(id));
       row.append(this.skillSlot(id, () => {}, World.skillName(id)), info, up, down, remove); parent.append(row);
+      if (buff) parent.append(this.select('Gear for ' + World.skillName(id),
+        () => [[0, 'Current combat gear'], ...Settings.profile.macro.buffSets.map(s => [s.id, s.name])],
+        () => entry.gearSet || 0, value => entry.gearSet = Number(value)));
     });
     const search = el('input'); search.type = 'search'; search.placeholder = 'Find a skill…'; search.setAttribute('aria-label', buff ? 'Search buff skills' : 'Search attack skills');
     const title = el('div', null, 'picker-title'); title.append(el('span', buff ? 'Learned self buffs' : 'Learned attack skills'), search);
@@ -285,6 +288,7 @@ const UI = {
         this.number('Skill gap (ms)', () => M().castGapMs, v => M().castGapMs = v, 150, 2000, 50)));
       }
       if (this.combatTab === 'Buffs & imbue') {
+      BuffGear.draw(this.pane);
       const buffs = this.group('Buffs'); this.skillList(buffs, M().buffs, true);
       this.pane.append(buffs);
       const imbue = this.group('Weapon imbue'); this.imbuePicker(imbue); this.pane.append(imbue);
@@ -385,6 +389,7 @@ const UI = {
   },
   update() {
     Alchemy.refresh();
+    if (this.current === 'Combat' && this.combatTab === 'Buffs & imbue' && BuffGear.note) BuffGear.note.textContent = BuffGear.status();
     Reports.render();
     const diagnosticState = Diagnostics.sample();
     if (this.waitNote) this.waitNote.textContent = Diagnostics.lines(diagnosticState);

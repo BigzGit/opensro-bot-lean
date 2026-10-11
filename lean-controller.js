@@ -1,6 +1,7 @@
 // Single owner for movement/combat/pickup. Potion use remains a separate emergency lane.
 const startHunting = Hunt.start;
 Hunt.start = function (...args) {
+  if (BuffGear.run || BuffGear.recovery) return UI.toast('Restore or review combat gear before hunting.', 'warn');
   if (Alchemy.run || Alchemy.pending) return UI.toast('Stop alchemy and wait for its result before hunting.', 'warn');
   return startHunting.apply(this, args);
 };
@@ -73,6 +74,7 @@ Hunt.tick = function () {
 function stopAll() {
   Town.record('stop');
   Alchemy.stop();
+  BuffGear.cancel();
   const townActive = !!Town.trip;
   Town.cancel();
   Resurrect.cancelTrip('', true);
@@ -99,6 +101,10 @@ const Controller = {
     try {
       Restock.sample();
       Alchemy.tick();
+      if (BuffGear.run) {
+        if (World.inWorld()) { Party.tick(); Potion.tick(); }
+        if (BuffGear.tick()) { this.mode = 'buff gear'; return; }
+      }
       if (Alchemy.run || Alchemy.pending) { if (World.inWorld()) Party.tick(); this.mode = 'alchemy'; return; }
       if (World.inWorld() && World.isDead() && Hunt.running) {
         Town.cancel(); Resurrect.cancelTrip(); Resurrect.holdUntil = 0;
@@ -123,6 +129,7 @@ const Controller = {
       Potion.tick();
       Loot.checkPetFull();
       if (Town.tick()) { this.mode = 'town service'; return; }
+      if (BuffGear.tick()) { this.mode = 'buff gear'; return; }
       if (SpeedScroll.tick()) { this.mode = 'speed scroll'; return; }
       if (!WalkBack.active && !Restock.trip && !Restock.recording && !Controller.resumeAfterRevive &&
           !Restock.activeShop() && !World.gp.storage && Resurrect.tick()) {

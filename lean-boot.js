@@ -20,14 +20,15 @@ function boot() {
     }
   };
   for (const type of ['keydown', 'keypress', 'keyup']) W.addEventListener(type, protectEditing, true);
-  Combat.init(); Loot.init(); Alchemy.init();
+  Combat.init(); Loot.init(); Alchemy.init(); BuffGear.init();
   bus.on('character', name => {
     const key = name ? 'profile:' + name : 'profile:default';
     if (key !== Settings.profileKey) { Town.lastScrollPoint = null; stopAll(); Settings.useCharacter(name); }
   });
-  bus.on('profile', () => { Town.lastScrollPoint = null; SpeedScroll.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
+  bus.on('profile', () => { BuffGear.reset(); Town.lastScrollPoint = null; SpeedScroll.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
   bus.on('phase', phase => {
     if (phase !== 'world') {
+      BuffGear.interrupt('World transition interrupted buff swaps.');
       Party.reset();
       SpeedScroll.reset();
       Resurrect.reset();
@@ -37,8 +38,9 @@ function boot() {
       Controller.resumeAfterRevive = revival;
     }
   });
-  bus.on('failure', () => { stopAll(); Restock.cancelRecording(); UI.toast('Game connection failed; bot stopped.', 'warn'); });
+  bus.on('failure', () => { BuffGear.interrupt('Connection failed during buff swaps.'); stopAll(); Restock.cancelRecording(); UI.toast('Game connection failed; bot stopped.', 'warn'); });
   bus.on('reset', () => {
+    BuffGear.interrupt('World reset interrupted buff swaps.');
     if (Town.trip) {
       if (['recall-wait', 'reverse-wait'].includes(Town.trip.phase)) Town.trip.transition = true;
       else Town.fail('Unexpected world reset during town service.');
@@ -60,7 +62,7 @@ function boot() {
   }, true);
   Ticker.start(() => Controller.tick(), 100);
   setInterval(() => { Wardrobe.tick(); UI.update(); }, 500);
-  W.SROLean = { version: VERSION, updates: Updates, diagnostics: Diagnostics, reports: Reports, alchemy: Alchemy, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, resurrect: Resurrect,
+  W.SROLean = { version: VERSION, updates: Updates, diagnostics: Diagnostics, reports: Reports, alchemy: Alchemy, buffGear: BuffGear, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, resurrect: Resurrect,
     restock: Restock, town: Town, walkBack: WalkBack, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, stop: stopAll, log: Log };
   Log.info('nixxane bot ready. F8 starts/stops; F7 folds; Shift+F7 hides/shows the window.');
 }

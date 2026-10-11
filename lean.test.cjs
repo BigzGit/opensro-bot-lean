@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -2046,6 +2046,201 @@ test('diagnostic history is bounded, retained across stops and tolerates incompl
   f.stopAll(); assert.equal(f.Diagnostics.history.length, 30);
   f.World.gp = null; assert.doesNotThrow(() => JSON.parse(f.Diagnostics.report()));
   f.World.simOffset = null; assert.doesNotThrow(() => f.Diagnostics.sample());
+});
+
+
+function buffGearFixture() {
+  const f = fixture(), gp = f.World.gp;
+  const weapon = (slot, ref, sub = 1) => ({slot, refObjId:ref, typeFlags:(sub<<11)|(6<<7)|44, plus:0, variance:'1', durability:100});
+  const shield = (slot, ref) => ({slot,refObjId:ref,typeFlags:(1<<11)|(4<<7)|44,plus:0});
+  gp.inventory = [weapon(6,100,8),shield(7,101),weapon(13,200,15),shield(14,201),weapon(15,300,14)];
+  gp.skills=[20,30];
+  f.World.catalog.set(20,{id:20,group:20,name:'Cleric buff',targetRequired:false,actionMs:1000,durationMs:60000});
+  f.World.catalog.set(30,{id:30,group:30,name:'Bard buff',targetRequired:false,actionMs:1000,durationMs:60000});
+  const key = slot => f.BuffGear.key(gp.inventory.find(i=>i.slot===slot));
+  f.Settings.profile.macro.buffSets=[{id:1,name:'Cleric',weapon:key(13),shield:key(14)},{id:2,name:'Bard',weapon:key(15),shield:null}];
+  f.Settings.profile.macro.buffSwap=true;
+  f.Settings.profile.macro.buffs=[{id:20,group:20,gearSet:1,enabled:true,mode:'hunt'},{id:30,group:30,gearSet:2,enabled:true,mode:'hunt'}];
+  f.Hunt.running=true; f.Settings.profile.hunt.pickup.enabled=false;
+  f.BuffGear.init();
+  f.confirmMove=()=>{
+    const p=f.BuffGear.run.pending, from=gp.inventory.find(i=>i.slot===p.source), to=gp.inventory.find(i=>i.slot===p.destination);
+    from.slot=p.destination; if(to)to.slot=p.source;
+    gp.inventoryPending=false; f.advance(300);
+  };
+  f.confirmBuff=id=>{
+    gp.buffSlots ||= []; gp.buffSlots.push({state:'active',effect:{gid:1,skill:id,remainingMs:60000,receivedAtMs:f.World.simNow()}});
+  };
+  f.drive=(max=100)=>{
+    for(let n=0;n<max;n++){
+      f.BuffGear.tick();
+      if(f.BuffGear.run?.pending)f.confirmMove();
+      if(f.BuffGear.run?.cast){ f.confirmBuff(f.BuffGear.run.cast.id); f.advance(2000); }
+      f.advance(300);
+      if(!f.BuffGear.run)return;
+    }
+    throw Error('Buff gear did not finish');
+  };
+  return f;
+}
+
+test('buff gear runs cleric and bard sets and restores arbitrary combat weapon and shield',()=>{
+  const f=buffGearFixture(), home=JSON.stringify(f.BuffGear.setup());
+  assert.equal(f.BuffGear.tick(),true); f.drive();
+  assert.equal(JSON.stringify(f.BuffGear.setup()),home);
+  assert.deepEqual(f.commands.filter(c=>c.kind==='skill').map(c=>c.skillId),[20,30]);
+  assert.ok(f.commands.some(c=>c.kind==='inventory-move'&&c.source===7));
+  assert.equal(f.BuffGear.recovery,null); assert.equal(f.Hunt.running,true);
+  const count=f.commands.length; f.BuffGear.tick(); assert.equal(f.commands.length,count);
+});
+
+test('buff gear waits for actual inventory confirmation and never casts with stale equipment',()=>{
+  const f=buffGearFixture(); f.BuffGear.tick(); f.BuffGear.tick();
+  const count=f.commands.length; assert.ok(f.BuffGear.run.pending);
+  for(let n=0;n<20;n++){f.advance(300);f.BuffGear.tick();}
+  assert.equal(f.commands.length,count); assert.equal(f.commands.some(c=>c.kind==='skill'),false);
+  f.confirmMove(); f.World.gp.inventoryPending=true;
+  f.BuffGear.tick();assert.equal(f.commands.length,count);
+  f.World.gp.inventoryPending=false;f.drive();assert.equal(f.BuffGear.run,null);
+});
+
+test('buff gear unconfirmed move stops hunting and blocks restart without repeating it',()=>{
+  const f=buffGearFixture();f.BuffGear.tick();f.BuffGear.tick();const count=f.commands.filter(c=>c.kind!=='move').length;
+  f.advance(15001);f.BuffGear.tick();
+  assert.equal(f.Hunt.running,false);assert.ok(f.BuffGear.recovery);assert.equal(f.BuffGear.run,null);
+  f.BuffGear.tick();f.Hunt.start();assert.equal(f.Hunt.running,false);assert.equal(f.commands.filter(c=>c.kind!=='move').length,count);
+  assert.match(f.BuffGear.message,/unconfirmed/);
+});
+
+test('buff gear Stop all settles an in-flight swap and restores without casting',()=>{
+  const f=buffGearFixture(), home=JSON.stringify(f.BuffGear.setup());
+  f.BuffGear.tick();f.BuffGear.tick();f.stopAll();
+  assert.ok(f.BuffGear.run.pending);f.confirmMove();f.drive();
+  assert.equal(JSON.stringify(f.BuffGear.setup()),home);assert.equal(f.commands.some(c=>c.kind==='skill'),false);
+  assert.equal(f.Hunt.running,false);
+});
+
+test('buff gear waits through buff action hold even before casting state arrives',()=>{
+  const f=buffGearFixture();f.BuffGear.tick();
+  for(let n=0;n<20&&!f.BuffGear.run.cast;n++) {f.BuffGear.tick();if(f.BuffGear.run.pending)f.confirmMove();f.advance(250);}
+  assert.ok(f.BuffGear.run.cast);const count=f.commands.length;
+  f.confirmBuff(20);f.advance(500);f.BuffGear.tick();assert.equal(f.commands.length,count);
+  f.World.isCasting=()=>true;f.advance(2000);f.BuffGear.tick();assert.equal(f.commands.length,count);
+  f.World.isCasting=()=>false;f.drive();assert.equal(f.BuffGear.run,null);
+});
+
+test('buff gear missing or ambiguous sets and full bags never move equipment',()=>{
+  for(const mode of ['missing','ambiguous','full']){
+    const f=buffGearFixture();
+    if(mode==='missing')f.World.gp.inventory=f.World.gp.inventory.filter(i=>i.refObjId!==200);
+    if(mode==='ambiguous')f.World.gp.inventory.push({...f.World.gp.inventory[2],slot:16});
+    if(mode==='full')f.World.freeBagSlots=()=>0;
+    assert.equal(f.BuffGear.tick(),false);assert.equal(f.commands.length,0);
+  }
+});
+
+test('buff gear manual movement stops swaps and requires explicit equipment review',()=>{
+  const f=buffGearFixture();f.BuffGear.tick();f.BuffGear.tick();const count=f.commands.filter(c=>c.kind!=='move').length;
+  f.Manual.lastAt=100001;f.BuffGear.tick();assert.ok(f.BuffGear.recovery);assert.equal(f.Hunt.running,false);
+  assert.equal(f.commands.filter(c=>c.kind!=='move').length,count);
+});
+
+test('buff gear manual inventory command is not overwritten by automatic restoration',()=>{
+  const f=buffGearFixture();f.BuffGear.tick();
+  for(const observer of f.Hook.observers)observer({kind:'gameplay',command:{kind:'inventory-move',source:13,destination:6}});
+  assert.equal(f.BuffGear.run,null);assert.ok(f.BuffGear.recovery);assert.equal(f.Hunt.running,false);
+});
+
+test('buff gear death and disconnect reset never dispatch gear commands',()=>{
+  for(const mode of ['dead','offline']){
+    const f=buffGearFixture();f.BuffGear.tick();f.BuffGear.tick();const count=f.commands.length;
+    if(mode==='dead')f.World.isDead=()=>true;else f.World.phase='login';
+    f.BuffGear.tick();assert.equal(f.BuffGear.run,null);assert.equal(f.commands.length,count);assert.ok(f.BuffGear.recovery);assert.equal(f.Hunt.running,false);
+  }
+});
+
+test('buff gear disabled mid-cycle restores original equipment before resuming',()=>{
+  const f=buffGearFixture(), home=JSON.stringify(f.BuffGear.setup());
+  f.BuffGear.tick();f.BuffGear.tick();f.confirmMove();f.Settings.profile.macro.buffSwap=false;
+  f.drive();assert.equal(JSON.stringify(f.BuffGear.setup()),home);assert.equal(f.commands.some(c=>c.kind==='skill'),false);
+});
+
+test('buff gear controller retains party and potion services but excludes combat travel and alchemy',()=>{
+  const f=buffGearFixture();let parties=0,potions=0,fights=0,towns=0;
+  f.Party.tick=()=>parties++;f.Potion.tick=()=>potions++;f.Hunt.tick=()=>fights++;f.Town.tick=()=>{towns++;return false;};
+  f.Controller.tick();assert.ok(f.BuffGear.run);const townCount=towns;
+  f.Controller.tick();assert.equal(fights,0);assert.equal(parties,2);assert.equal(potions,2);assert.equal(towns,townCount);
+  f.WalkBack.start();assert.equal(f.WalkBack.active,null);assert.match(f.Alchemy.blocked(),/combat gear/);
+});
+
+test('buff gear start gates respect other services, casting, inventory, manual pause and mount',()=>{
+  for(const mode of ['town','walk','res','shop','casting','inventory','manual','mount','off']){
+    const f=buffGearFixture();
+    if(mode==='town')f.Town.trip={};if(mode==='walk')f.WalkBack.active={};if(mode==='res')f.Resurrect.trip={};
+    if(mode==='shop')f.Restock.activeShop=()=>true;if(mode==='casting')f.World.isCasting=()=>true;
+    if(mode==='inventory')f.World.gp.inventoryPending=true;if(mode==='manual')f.Manual.lastAt=100000;
+    if(mode==='mount')f.World.local=()=>({mountedOn:5});if(mode==='off')f.Settings.profile.macro.buffSwap=false;
+    assert.equal(f.BuffGear.tick(),false,mode);assert.equal(f.commands.length,0,mode);
+  }
+});
+
+test('assigned buffs never cast on combat gear when swapping is off; ordinary buffs still work',()=>{
+  const f=buffGearFixture();f.Settings.profile.macro.buffSwap=false;
+  assert.equal(f.Combat.buffs(true),false);assert.equal(f.commands.length,0);
+  f.Settings.profile.macro.buffs[0].gearSet=0;
+  assert.equal(f.Combat.buffs(true),true);assert.equal(f.commands.at(-1).skillId,20);
+});
+
+test('buff gear unconfirmed cast returns home and suppresses repeated failed swaps',()=>{
+  const f=buffGearFixture(),home=JSON.stringify(f.BuffGear.setup());f.BuffGear.tick();
+  for(let n=0;n<20&&!f.BuffGear.run.cast;n++){f.BuffGear.tick();if(f.BuffGear.run.pending)f.confirmMove();f.advance(300);}
+  assert.ok(f.BuffGear.run.cast);f.advance(11000);f.BuffGear.tick();f.drive();
+  assert.equal(JSON.stringify(f.BuffGear.setup()),home);assert.equal(f.BuffGear.skipped.has(20),true);
+  assert.equal(f.commands.filter(c=>c.kind==='skill'&&c.skillId===20).length,1);
+});
+
+test('buff gear notices effects lost on weapon removal and prevents recast loops',()=>{
+  const f=buffGearFixture();f.BuffGear.tick();
+  for(let n=0;n<100&&f.BuffGear.run;n++){
+    f.BuffGear.tick();
+    if(f.BuffGear.run?.pending){f.confirmMove();f.World.gp.buffSlots=[];}
+    if(f.BuffGear.run?.cast){f.confirmBuff(f.BuffGear.run.cast.id);f.advance(2000);}
+    f.advance(300);
+  }
+  assert.equal(f.BuffGear.run,null);assert.equal(f.BuffGear.skipped.has(20),true);assert.equal(f.BuffGear.skipped.has(30),true);
+  f.advance(100000);const count=f.commands.length;assert.equal(f.BuffGear.tick(),false);assert.equal(f.commands.length,count);
+});
+
+test('buff gear restores original bow ammunition as well as shield and empty off-hand setups',()=>{
+  for(const mode of ['ammo','empty']){
+    const f=buffGearFixture();
+    if(mode==='ammo')f.World.gp.inventory.find(i=>i.slot===7).typeFlags=0x66c;
+    else f.World.gp.inventory=f.World.gp.inventory.filter(i=>i.slot!==7);
+    const home=JSON.stringify(f.BuffGear.setup());f.BuffGear.tick();f.drive();
+    assert.equal(JSON.stringify(f.BuffGear.setup()),home);
+  }
+});
+
+
+test('buff gear explicit recovery restores home after a settled failed cycle',()=>{
+  const f=buffGearFixture(),home=JSON.stringify(f.BuffGear.setup());
+  f.BuffGear.tick();f.BuffGear.tick();f.confirmMove();f.BuffGear.fail('Interrupted');
+  assert.ok(f.BuffGear.recovery);f.BuffGear.restore();assert.ok(f.BuffGear.run);f.drive();
+  assert.equal(JSON.stringify(f.BuffGear.setup()),home);assert.equal(f.BuffGear.recovery,null);assert.equal(f.Hunt.running,false);
+});
+
+test('buff gear reports restoration failure and does not resume combat',()=>{
+  const f=buffGearFixture();f.BuffGear.tick();f.BuffGear.tick();f.confirmMove();
+  f.Settings.profile.macro.buffSwap=false;f.BuffGear.tick();f.World.gp.inventory=f.World.gp.inventory.filter(i=>i.refObjId!==101);
+  f.advance(15001);f.BuffGear.tick();assert.equal(f.Hunt.running,false);assert.ok(f.BuffGear.recovery);assert.match(f.BuffGear.message,/unconfirmed/);
+});
+
+test('buff gear resets recovery on character or profile change without touching new gear',()=>{
+  for(const mode of ['character','profile']){
+    const f=buffGearFixture();f.BuffGear.tick();const count=f.commands.length;
+    if(mode==='character')f.World.charName='Other';else f.Settings.profile={...f.Settings.profile};
+    f.BuffGear.tick();assert.equal(f.BuffGear.run,null);assert.equal(f.BuffGear.recovery,null);assert.equal(f.commands.length,count);
+  }
 });
 
 async function updateTests() {

@@ -136,6 +136,24 @@ const server = http.createServer((req, res) => {
     await page.getByRole('button', { name: 'Use imbue Weapon imbue', exact: true }).click();
     assert.equal(await page.evaluate(() => SROLean.settings.profile.macro.imbue.id), 8);
     await page.waitForFunction(() => [...document.getElementById('sro-bot-lean').shadowRoot.querySelectorAll('.slot')].every(s => s.dataset.iconLoaded === 'true'));
+
+    // Save two actual equipped setups and assign buffs through the rendered UI.
+    await page.getByLabel('New buff set name',{exact:true}).fill('Cleric');
+    await page.getByRole('button',{name:'Save equipped buff set',exact:true}).click();
+    await page.evaluate(()=>{const item=SROLean.world.gp.inventory.find(i=>i.slot===6);item.slot=13;SROLean.world.gp.inventory.push({...item,slot:6,refObjId:11});});
+    await page.getByLabel('New buff set name',{exact:true}).fill('Bard');
+    await page.getByRole('button',{name:'Save equipped buff set',exact:true}).click();
+    assert.equal(await page.evaluate(()=>SROLean.settings.profile.macro.buffSets.length),2);
+    await page.getByLabel('Swap weapons for assigned buffs',{exact:true}).check();
+    await page.getByLabel('Gear for Test buff',{exact:true}).selectOption('2');
+    assert.equal(await page.evaluate(()=>SROLean.settings.profile.macro.buffs[0].gearSet),2);
+    assert.equal(await page.evaluate(()=>SROLean.settings.profile.macro.buffSwap),true);
+    await page.locator('.pane').screenshot({path:__dirname+'/lean-buff-gear-preview.png'});
+    await page.getByRole('button',{name:'Remove Bard',exact:true}).click();
+    assert.equal(await page.evaluate(()=>SROLean.settings.profile.macro.buffs[0].gearSet),0);
+    await page.getByRole('button',{name:'Remove Cleric',exact:true}).click();
+    await page.getByLabel('Swap weapons for assigned buffs',{exact:true}).uncheck();
+    await page.evaluate(()=>{SROLean.world.gp.inventory=SROLean.world.gp.inventory.filter(i=>i.refObjId!==11);SROLean.world.gp.inventory.find(i=>i.refObjId===10).slot=6;});
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     assert.equal(await page.getByLabel('Maximum res distance from hunt spot (m)', { exact: true }).inputValue(), '30');
     await page.getByLabel('Maximum res distance from hunt spot (m)', { exact: true }).fill('40');

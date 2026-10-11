@@ -26,6 +26,7 @@ const Alchemy = {
     return { elixir, powder };
   },
   blocked() {
+    if (BuffGear.run || BuffGear.recovery) return 'Restore or review combat gear before alchemy.';
     const gp = World.gp;
     if (!World.inWorld() || !gp || !World.local()) return 'Enter the game world first.';
     if (World.isDead()) return 'Alchemy stopped: character died.';

@@ -72,6 +72,8 @@ const Diagnostics = {
     return Town.reason() ? 'Town return: preparing departure.' : '';
   },
   main() {
+    if (BuffGear.run) return BuffGear.run.restoring ? 'Buff gear: restoring combat equipment.' : 'Buff gear: swapping or casting.';
+    if (BuffGear.recovery) return 'Buff gear: manual equipment review needed.';
     if (Alchemy.pending) return Alchemy.run ? 'Alchemy: waiting for the server result.' : 'Alchemy stopped; outstanding result unconfirmed.';
     if (Alchemy.run) return 'Alchemy: preparing the next attempt.';
     if (!World.inWorld()) return 'Waiting for game world.';
@@ -97,6 +99,7 @@ const Diagnostics = {
     const gp = World.gp, c = Settings.profile, pet = Loot.pet(), social = gp?.social, matching = gp?.partyMatching;
     return {
       action: this.main(), partyStatus: this.party(), petStatus: this.pet(), townStatus: this.town(),
+      buffGearActive: !!BuffGear.run, buffGearRestoring: !!BuffGear.run?.restoring, buffGearMovePending: !!BuffGear.run?.pending, buffGearRecovery: !!BuffGear.recovery,
       alchemyActive: !!Alchemy.run, alchemyPending: !!Alchemy.pending, alchemyAttempts: this.number(Alchemy.result?.attempts),
       alchemyTarget: this.number(Alchemy.run?.cfg.target), alchemySuccesses: this.number(Alchemy.result?.successes),
       alchemyFailures: this.number(Alchemy.result?.failures), alchemyElixirsUsed: this.number(Alchemy.result?.elixirs),

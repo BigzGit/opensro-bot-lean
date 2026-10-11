@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.40
+// @version      1.2.41
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.40';
+const VERSION = '1.2.41';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -189,7 +189,7 @@ const DEFAULT_PROFILE = {
     eq: {}, av: {}, pet: { atk: 0, pick: 0, mount: 0 }, presets: {}, undo: null },
   macro: {
     rotations: { normal: [], champion: [], giant: [], party: [], elite: [], unique: [] },
-    fallbackToNormal: true, normalAttack: true, buffs: [], imbue: null,
+    fallbackToNormal: true, normalAttack: true, buffs: [], imbue: null, buffSwap: false, buffSets: [],
     imbueBeforeAttack: true, berserk: 'strong', minMpPct: 0, castGapMs: 350,
   },
   potion: {
@@ -1918,6 +1918,7 @@ Hook.observers.push(command => Navigation.capture(command));
 const WalkBack = {
   active: null,
   start(resume = false) {
+    if (BuffGear.run || BuffGear.recovery) return UI.toast('Restore or review combat gear before travelling.', 'warn');
     if (Alchemy.run || Alchemy.pending) return UI.toast('Stop alchemy and wait for its result before travelling.', 'warn');
     if (Town.trip) return UI.toast('Stop the town cycle before starting walk-back.', 'warn');
     if (!World.inWorld() || World.isDead()) return UI.toast(T('Önce canlı olarak oyuna girin.', 'Enter the world with a living character first.'), 'warn');
@@ -2932,9 +2933,220 @@ const Town = {
 };
 
 
+// Confirm every native inventory move before casting or restoring combat gear.
+const BuffGear = {
+  run: null, recovery: null, message: 'Buff weapon swapping off.', skipped: new Map(), started: false,
+  cfg() { return Settings.profile.macro; },
+  items() { return World.gp?.inventory || []; },
+  at(slot) { return this.items().find(i => i.slot === slot) || null; },
+  key(i) { return i ? JSON.stringify([i.refObjId, i.typeFlags, i.plus ?? 0, i.variance ?? null, i.magic ?? null]) : null; },
+  weapon(i) { return i && (i.typeFlags & 0x7e) === 0x2c && (i.typeFlags >>> 7 & 15) === 6; },
+  shield(i) { return i && (i.typeFlags & 0x1e) === 0x0c && (i.typeFlags >>> 7 & 15) === 4; },
+  find(key) {
+    if (!key) return null;
+    const matches = this.items().filter(i => this.key(i) === key);
+    return matches.length === 1 ? matches[0] : null;
+  },
+  setup() { return { weapon: this.key(this.at(6)), shield: this.key(this.at(7)) }; },
+  matches(set) { return set.weapon === this.key(this.at(6)) && set.shield === this.key(this.at(7)); },
+  signature() { return JSON.stringify([this.cfg().buffSwap, this.cfg().buffSets, this.cfg().buffs]); },
+  init() {
+    if (this.started) return;
+    this.started = true;
+    Hook.observers.push(command => {
+      if (command.kind === 'gameplay' && command.command?.kind === 'inventory-move' && this.run) this.fail('Manual equipment move interrupted buff swaps.');
+    });
+    bus.on('cast', c => {
+      const p = this.run?.cast;
+      if (p && c.caster === World.localGid() && c.skill === p.id && !c.resultOnly && c.cancelledAtMs === undefined) p.accepted = true;
+    });
+  },
+  save(name) {
+    if (this.run || this.recovery || Hunt.running || World.gp?.inventoryPending || !World.inWorld()) return UI.toast('Stop hunting and settle gear restoration first.', 'warn');
+    const set = this.setup();
+    if (!this.weapon(this.at(6)) || this.at(7) && !this.shield(this.at(7))) return UI.toast('Equip a buff weapon and an optional shield first. Remove arrows or bolts from the off-hand slot.', 'warn');
+    if (!this.find(set.weapon) || set.shield && !this.find(set.shield)) return UI.toast('Identical gear cannot be distinguished. Keep only one matching copy.', 'warn');
+    const sets = this.cfg().buffSets;
+    if (sets.length >= 8) return UI.toast('Up to eight buff sets can be saved.', 'warn');
+    sets.push({ ...set, id: Math.max(0, ...sets.map(s => Number(s.id) || 0)) + 1, name: String(name || 'Buff set').trim().slice(0, 40) || 'Buff set' });
+    Settings.saveProfile(); UI.draw();
+  },
+  reset() {
+    this.run = this.recovery = null; this.skipped.clear();
+    this.message = 'Buff gear reset. Check equipped weapons after reconnecting.';
+  },
+  interrupt(text) {
+    if (this.run) this.fail(text);
+  },
+  fail(text) {
+    if (this.run) this.recovery = this.run.home;
+    this.run = null;
+    if (Hunt.running && World.inWorld() && !World.isDead()) Hunt.stop(text);
+    else Hunt.running = false;
+    this.message = text + ' Check gear or use Restore combat gear.';
+    UI.toast(this.message, 'warn');
+  },
+  cancel() {
+    if (!this.run) return;
+    this.run.restoring = true; this.run.queue = []; this.run.cancelled = true;
+    this.message = 'Stopping buffs; restoring combat gear.';
+  },
+  restore() {
+    if (this.run || !this.recovery || !World.inWorld() || World.isDead() || World.gp?.inventoryPending || World.isCasting()) return;
+    if (Hunt.running || Town.trip || WalkBack.active || Restock.trip || Alchemy.run || Alchemy.pending) return UI.toast('Stop hunting and travel before restoring gear.', 'warn');
+    this.run = this.create(this.recovery, []); this.run.restoring = true; this.recovery = null;
+  },
+  create(home, queue) {
+    return { home, queue, restoring: false, pending: null, cast: null, effects: [],
+      at: now(), manualAt: Manual.lastAt, character: World.charName, profile: Settings.profile, signature: this.signature() };
+  },
+  due(b) {
+    if (!b.enabled || !b.gearSet) return 0;
+    const id = Combat.resolve(b), info = World.skill(id);
+    if (!id || !info || info.targetRequired || Combat.blocked(id) || !Cmd.canCast(id) || !Combat.mpOk(id, World.me())) return 0;
+    if (this.skipped.get(b.group) === this.signature()) return 0;
+    const remaining = World.buffRemaining(id);
+    if (remaining > (b.refreshS ?? 3) * 1000) return 0;
+    const gap = Math.max(4000, Math.min((info?.durationMs || 20000) * .85, 600000));
+    return now() - (Combat.buffCastAt.get(b.group) ?? -Infinity) >= gap ? id : 0;
+  },
+  begin() {
+    if (!this.cfg().buffSwap || this.recovery || !Hunt.running || !World.inWorld() || World.isDead() ||
+        Combat.busy() || World.isSitting() || World.local()?.mountedOn || World.gp?.inventoryPending ||
+        World.gp?.pendingMoves || World.gp?.returnScroll || now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000 ||
+        Town.trip || WalkBack.active || Restock.trip || Restock.recording || Resurrect.trip || now() < Resurrect.holdUntil ||
+        Restock.activeShop() || World.gp?.storage || World.gp?.exchange?.open || World.gp?.exchange?.requesting || World.gp?.stall?.phase && World.gp.stall.phase !== 'none' ||
+        Alchemy.run || Alchemy.pending || Loot.active && !Loot.active.petGid || Loot.pressed()) return false;
+    const queue = [];
+    for (const set of this.cfg().buffSets) {
+      const buffs = this.cfg().buffs.filter(b => Number(b.gearSet) === set.id).map(b => ({ b, id: this.due(b) })).filter(b => b.id);
+      if (buffs.length) queue.push({ set, buffs });
+    }
+    if (!queue.length) return false;
+    const home = this.setup();
+    if (!this.weapon(this.at(6))) { this.message = 'Equip your combat weapon before hunting.'; return false; }
+    for (const set of [home, ...queue.map(q => q.set)]) {
+      if (!this.find(set.weapon) || !this.weapon(this.find(set.weapon)) || set.shield && (!this.find(set.shield) || set !== home && !this.shield(this.find(set.shield)))) {
+        this.message = 'Buff gear missing or ambiguous. Save the sets again.'; return false;
+      }
+    }
+    // One free bag slot permits explicit shield removal before two-handed swaps.
+    if (World.freeBagSlots() < 1) { this.message = 'Buff swaps need one free bag slot.'; return false; }
+    if (!Cmd.move(World.pose())) return false;
+    Loot.suspend(); Hunt.state = 'buff'; this.run = this.create(home, queue);
+    this.message = 'Pausing combat for buff gear.';
+    return true;
+  },
+  move(source, destination) {
+    const r = this.run, from = this.key(this.at(source)), to = this.key(this.at(destination));
+    if (!from || !Cmd.spaced('inventory-move')) return;
+    if (Cmd.raw({ kind: 'inventory-move', source, destination, quantity: 0 }, 'Buff gear: move equipment')) {
+      r.pending = { source, destination, from, to, at: now() };
+    }
+  },
+  equip(set) {
+    if (this.matches(set)) return true;
+    const weapon = this.find(set.weapon), shield = this.find(set.shield);
+    if (!weapon || !this.weapon(weapon) || set.shield && (!shield || set !== this.run.home && !this.shield(shield))) { this.fail('Required equipment missing or ambiguous.'); return false; }
+    if (this.at(7) && this.key(this.at(7)) !== set.shield) {
+      const gp = World.gp;
+      let empty = -1;
+      for (let slot = gp.equipmentSlotCount || 13; slot < gp.inventorySlotCount; slot++) if (!this.at(slot)) { empty = slot; break; }
+      if (empty < 0) { this.fail('No bag space to remove the off-hand item.'); return false; }
+      this.move(7, empty); return false;
+    }
+    if (weapon.slot !== 6) { this.move(weapon.slot, 6); return false; }
+    if (shield && shield.slot !== 7) { this.move(shield.slot, 7); return false; }
+    return false;
+  },
+  tick() {
+    if (!this.run) return this.begin();
+    const r = this.run, gp = World.gp;
+    if (r.character !== World.charName || r.profile !== Settings.profile) { this.reset(); return false; }
+    if (!World.inWorld() || World.isDead()) { this.interrupt('World change or death interrupted buff swaps.'); return false; }
+    if (Manual.lastAt !== r.manualAt) { this.fail('Manual control interrupted buff swaps.'); return true; }
+    if (now() - r.at > 120000) { this.fail('Buff gear cycle timed out.'); return true; }
+    if (!Hunt.running || r.signature !== this.signature()) this.cancel();
+    if (r.pending) {
+      const p = r.pending;
+      if (!gp.inventoryPending && this.key(this.at(p.destination)) === p.from && this.key(this.at(p.source)) === p.to) r.pending = null;
+      else { if (now() - p.at > 15000) this.fail('Equipment move unconfirmed; no retry sent.'); return true; }
+    }
+    if (r.cast) {
+      const p = r.cast, remaining = World.buffRemaining(p.id);
+      if (remaining > 0) { p.accepted = true; p.visible = true; }
+      if (now() < p.until || World.isCasting()) return true;
+      if (!p.accepted) { if (now() - p.at > 10000) { this.skipped.set(p.group, r.signature); this.cancel(); this.message = 'Buff cast unconfirmed; restoring combat gear.'; r.cast = null; } return true; }
+      r.effects.push(p); r.cast = null;
+    }
+    if (Combat.busy() || gp.inventoryPending || World.isSitting() || World.local()?.mountedOn || Loot.pressed()) return true;
+    if (Restock.activeShop() || gp.storage || gp.exchange?.open || gp.exchange?.requesting || gp.stall?.phase && gp.stall.phase !== 'none' || gp.returnScroll) { this.fail('Buff swaps interrupted by another game action.'); return true; }
+    if (r.restoring || !r.queue.length) {
+      this.message = 'Restoring combat gear.';
+      if (!this.equip(r.home)) return true;
+      if (!r.restoredAt) { r.restoredAt = now(); return true; }
+      if (now() - r.restoredAt < 1000) return true;
+      for (const p of r.effects) if (p.visible && World.buffRemaining(p.id) <= 0) {
+        this.skipped.set(p.group, r.signature);
+        this.message = 'A buff ended after changing weapons; skipped until buff settings change.';
+      }
+      if (this.message === 'Restoring combat gear.') this.message = 'Combat gear restored.';
+      this.run = null; this.recovery = null; return true;
+    }
+    const q = r.queue[0];
+    this.message = 'Equipping ' + q.set.name + ' for buffs.';
+    if (!this.equip(q.set)) return true;
+    const entry = q.buffs[0];
+    if (!entry) { r.queue.shift(); return true; }
+    if (!this.due(entry.b)) { q.buffs.shift(); return true; }
+    if (Combat.cast(entry.id, 0)) {
+      Combat.buffCastAt.set(entry.b.group, now()); q.buffs.shift();
+      r.cast = { id: entry.id, group: entry.b.group, at: now(), until: now() + Math.max(1000, World.skill(entry.id)?.actionMs || 6000) + 500, accepted: false, visible: false };
+      this.message = 'Casting buff; waiting before changing weapons.';
+    }
+    return true;
+  },
+  status() {
+    if (this.run || this.recovery || this.skipped.size) return this.message;
+    return this.cfg().buffSwap ? 'Buff weapon sets ready; used while hunting.' : 'Buff weapon swapping off.';
+  },
+  draw(parent) {
+    const box = UI.group('Buff weapon sets');
+    box.append(UI.check('Swap weapons for assigned buffs', () => this.cfg().buffSwap, v => this.cfg().buffSwap = v),
+      el('p', 'Equip a buff weapon and optional shield, save the set, then put your combat gear back on. Assign each buff below to its set. Multiple sets run in turn while hunting; original combat gear is restored afterward. Keep one bag slot free. Buffs tied to the removed weapon may end.', 'muted'));
+    const name = el('input'); name.type = 'text'; name.maxLength = 40; name.value = 'Buff set ' + (this.cfg().buffSets.length + 1);
+    box.append(UI.field('New buff set name', name), UI.button('Save equipped buff set', () => this.save(name.value)));
+    for (const set of this.cfg().buffSets) {
+      const weapon = this.find(set.weapon), shield = this.find(set.shield);
+      box.append(UI.row(el('span', set.name + ': ' + (weapon?.name || (weapon ? 'Weapon +' + (weapon.plus || 0) : 'weapon missing / ambiguous')) + (set.shield ? shield ? ' + shield' : ' + shield missing / ambiguous' : '')),
+        UI.button('Remove ' + set.name, () => {
+          if (this.run || this.recovery) return UI.toast('Restore combat gear before editing sets.', 'warn');
+          this.cfg().buffSets = this.cfg().buffSets.filter(s => s.id !== set.id);
+          for (const b of this.cfg().buffs) if (Number(b.gearSet) === set.id) b.gearSet = 0;
+          Settings.saveProfile(); UI.draw();
+        })));
+    }
+    box.append(UI.button('Restore combat gear', () => this.restore()), UI.button('Use current gear', () => {
+      if (this.run || World.gp?.inventoryPending) return UI.toast('Wait for the current equipment move to settle.', 'warn');
+      this.recovery = null; this.message = 'Current gear accepted. Review it before hunting.';
+    }));
+    this.note = el('p', this.status(), 'muted'); box.append(this.note); parent.append(box);
+  },
+};
+const normalBuffs = Combat.buffs;
+Combat.buffs = function (hunting) {
+  // Assigned buffs are owned exclusively by the gear cycle, including when off.
+  const original = Settings.profile.macro.buffs;
+  Settings.profile.macro.buffs = original.filter(b => !b.gearSet);
+  try { return normalBuffs.call(this, hunting); }
+  finally { Settings.profile.macro.buffs = original; }
+};
+
+
 // Single owner for movement/combat/pickup. Potion use remains a separate emergency lane.
 const startHunting = Hunt.start;
 Hunt.start = function (...args) {
+  if (BuffGear.run || BuffGear.recovery) return UI.toast('Restore or review combat gear before hunting.', 'warn');
   if (Alchemy.run || Alchemy.pending) return UI.toast('Stop alchemy and wait for its result before hunting.', 'warn');
   return startHunting.apply(this, args);
 };
@@ -3007,6 +3219,7 @@ Hunt.tick = function () {
 function stopAll() {
   Town.record('stop');
   Alchemy.stop();
+  BuffGear.cancel();
   const townActive = !!Town.trip;
   Town.cancel();
   Resurrect.cancelTrip('', true);
@@ -3033,6 +3246,10 @@ const Controller = {
     try {
       Restock.sample();
       Alchemy.tick();
+      if (BuffGear.run) {
+        if (World.inWorld()) { Party.tick(); Potion.tick(); }
+        if (BuffGear.tick()) { this.mode = 'buff gear'; return; }
+      }
       if (Alchemy.run || Alchemy.pending) { if (World.inWorld()) Party.tick(); this.mode = 'alchemy'; return; }
       if (World.inWorld() && World.isDead() && Hunt.running) {
         Town.cancel(); Resurrect.cancelTrip(); Resurrect.holdUntil = 0;
@@ -3057,6 +3274,7 @@ const Controller = {
       Potion.tick();
       Loot.checkPetFull();
       if (Town.tick()) { this.mode = 'town service'; return; }
+      if (BuffGear.tick()) { this.mode = 'buff gear'; return; }
       if (SpeedScroll.tick()) { this.mode = 'speed scroll'; return; }
       if (!WalkBack.active && !Restock.trip && !Restock.recording && !Controller.resumeAfterRevive &&
           !Restock.activeShop() && !World.gp.storage && Resurrect.tick()) {
@@ -4677,6 +4895,7 @@ const Alchemy = {
     return { elixir, powder };
   },
   blocked() {
+    if (BuffGear.run || BuffGear.recovery) return 'Restore or review combat gear before alchemy.';
     const gp = World.gp;
     if (!World.inWorld() || !gp || !World.local()) return 'Enter the game world first.';
     if (World.isDead()) return 'Alchemy stopped: character died.';
@@ -4947,6 +5166,8 @@ const Diagnostics = {
     return Town.reason() ? 'Town return: preparing departure.' : '';
   },
   main() {
+    if (BuffGear.run) return BuffGear.run.restoring ? 'Buff gear: restoring combat equipment.' : 'Buff gear: swapping or casting.';
+    if (BuffGear.recovery) return 'Buff gear: manual equipment review needed.';
     if (Alchemy.pending) return Alchemy.run ? 'Alchemy: waiting for the server result.' : 'Alchemy stopped; outstanding result unconfirmed.';
     if (Alchemy.run) return 'Alchemy: preparing the next attempt.';
     if (!World.inWorld()) return 'Waiting for game world.';
@@ -4972,6 +5193,7 @@ const Diagnostics = {
     const gp = World.gp, c = Settings.profile, pet = Loot.pet(), social = gp?.social, matching = gp?.partyMatching;
     return {
       action: this.main(), partyStatus: this.party(), petStatus: this.pet(), townStatus: this.town(),
+      buffGearActive: !!BuffGear.run, buffGearRestoring: !!BuffGear.run?.restoring, buffGearMovePending: !!BuffGear.run?.pending, buffGearRecovery: !!BuffGear.recovery,
       alchemyActive: !!Alchemy.run, alchemyPending: !!Alchemy.pending, alchemyAttempts: this.number(Alchemy.result?.attempts),
       alchemyTarget: this.number(Alchemy.run?.cfg.target), alchemySuccesses: this.number(Alchemy.result?.successes),
       alchemyFailures: this.number(Alchemy.result?.failures), alchemyElixirsUsed: this.number(Alchemy.result?.elixirs),
@@ -5382,6 +5604,9 @@ const UI = {
       up.className = down.className = remove.className = 'mini';
       up.setAttribute('aria-label', 'Move up ' + World.skillName(id)); down.setAttribute('aria-label', 'Move down ' + World.skillName(id)); remove.setAttribute('aria-label', 'Delete ' + World.skillName(id));
       row.append(this.skillSlot(id, () => {}, World.skillName(id)), info, up, down, remove); parent.append(row);
+      if (buff) parent.append(this.select('Gear for ' + World.skillName(id),
+        () => [[0, 'Current combat gear'], ...Settings.profile.macro.buffSets.map(s => [s.id, s.name])],
+        () => entry.gearSet || 0, value => entry.gearSet = Number(value)));
     });
     const search = el('input'); search.type = 'search'; search.placeholder = 'Find a skill…'; search.setAttribute('aria-label', buff ? 'Search buff skills' : 'Search attack skills');
     const title = el('div', null, 'picker-title'); title.append(el('span', buff ? 'Learned self buffs' : 'Learned attack skills'), search);
@@ -5461,6 +5686,7 @@ const UI = {
         this.number('Skill gap (ms)', () => M().castGapMs, v => M().castGapMs = v, 150, 2000, 50)));
       }
       if (this.combatTab === 'Buffs & imbue') {
+      BuffGear.draw(this.pane);
       const buffs = this.group('Buffs'); this.skillList(buffs, M().buffs, true);
       this.pane.append(buffs);
       const imbue = this.group('Weapon imbue'); this.imbuePicker(imbue); this.pane.append(imbue);
@@ -5561,6 +5787,7 @@ const UI = {
   },
   update() {
     Alchemy.refresh();
+    if (this.current === 'Combat' && this.combatTab === 'Buffs & imbue' && BuffGear.note) BuffGear.note.textContent = BuffGear.status();
     Reports.render();
     const diagnosticState = Diagnostics.sample();
     if (this.waitNote) this.waitNote.textContent = Diagnostics.lines(diagnosticState);
@@ -5612,14 +5839,15 @@ function boot() {
     }
   };
   for (const type of ['keydown', 'keypress', 'keyup']) W.addEventListener(type, protectEditing, true);
-  Combat.init(); Loot.init(); Alchemy.init();
+  Combat.init(); Loot.init(); Alchemy.init(); BuffGear.init();
   bus.on('character', name => {
     const key = name ? 'profile:' + name : 'profile:default';
     if (key !== Settings.profileKey) { Town.lastScrollPoint = null; stopAll(); Settings.useCharacter(name); }
   });
-  bus.on('profile', () => { Town.lastScrollPoint = null; SpeedScroll.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
+  bus.on('profile', () => { BuffGear.reset(); Town.lastScrollPoint = null; SpeedScroll.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
   bus.on('phase', phase => {
     if (phase !== 'world') {
+      BuffGear.interrupt('World transition interrupted buff swaps.');
       Party.reset();
       SpeedScroll.reset();
       Resurrect.reset();
@@ -5629,8 +5857,9 @@ function boot() {
       Controller.resumeAfterRevive = revival;
     }
   });
-  bus.on('failure', () => { stopAll(); Restock.cancelRecording(); UI.toast('Game connection failed; bot stopped.', 'warn'); });
+  bus.on('failure', () => { BuffGear.interrupt('Connection failed during buff swaps.'); stopAll(); Restock.cancelRecording(); UI.toast('Game connection failed; bot stopped.', 'warn'); });
   bus.on('reset', () => {
+    BuffGear.interrupt('World reset interrupted buff swaps.');
     if (Town.trip) {
       if (['recall-wait', 'reverse-wait'].includes(Town.trip.phase)) Town.trip.transition = true;
       else Town.fail('Unexpected world reset during town service.');
@@ -5652,7 +5881,7 @@ function boot() {
   }, true);
   Ticker.start(() => Controller.tick(), 100);
   setInterval(() => { Wardrobe.tick(); UI.update(); }, 500);
-  W.SROLean = { version: VERSION, updates: Updates, diagnostics: Diagnostics, reports: Reports, alchemy: Alchemy, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, resurrect: Resurrect,
+  W.SROLean = { version: VERSION, updates: Updates, diagnostics: Diagnostics, reports: Reports, alchemy: Alchemy, buffGear: BuffGear, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, resurrect: Resurrect,
     restock: Restock, town: Town, walkBack: WalkBack, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, stop: stopAll, log: Log };
   Log.info('nixxane bot ready. F8 starts/stops; F7 folds; Shift+F7 hides/shows the window.');
 }

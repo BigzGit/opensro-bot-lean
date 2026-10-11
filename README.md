@@ -33,6 +33,14 @@ When supplies run low or a bag reaches its capacity trigger, the bot recalls to 
 
 If protected items fill a bag, the bot stays in town and asks you to free space.
 
+## Buff weapon swapping
+
+In **Combat → Buffs & imbue**, equip your buff weapon and optional shield, name the set and click **Save equipped buff set**. Repeat for other sets (such as cleric and bard), then put your combat gear back on.
+
+Assign each selected buff to its set and enable **Swap weapons for assigned buffs**. While hunting, the bot equips each needed set, casts its buffs and restores your original combat weapon and off-hand. Keep one bag slot free. Assigned buffs are skipped while swapping is off.
+
+Some buffs end when their weapon is removed. If observed, the bot skips that buff until its buff settings change. Interrupted or unconfirmed swaps stop hunting; use **Restore combat gear**, or inspect your equipment and choose **Use current gear**. Reloads discard unfinished recovery. Live-server swapping still needs confirmation.
+
 ## Weapon alchemy
 
 Stop hunting/travel and put the weapon in your bag. In **Alchemy**, select it, set **Target +** and **Maximum attempts**, choose a weapon elixir and optionally enable matching-degree lucky powder, then click **Start alchemy**.
