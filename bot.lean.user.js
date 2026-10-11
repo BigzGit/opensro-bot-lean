@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OpenSRO Bot Lean
 // @namespace    https://opensro.online/
-// @version      1.2.30
+// @version      1.2.31
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[SRO Lean] Another SRO assistant is active. Disable it and reload to use Lean.');
   return;
 }
-const VERSION = '1.2.30';
+const VERSION = '1.2.31';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -2017,6 +2017,9 @@ const Loot = {
     if (!Number.isInteger(pet.rec.commandMode)) return 'Waiting for pet settings.';
     if (pet.rec.commandMode & 128) return this.petSetup?.attempts >= 3 && now() - this.petSetup.at >= 5000
       ? 'Auto-grab was not disabled. Turn it off in the game pet settings, then retry.' : 'Waiting for broad auto-grab to turn off.';
+    if (Hunt.running && World.gp.inventoryPending) return 'Pet waiting for pickup / inventory transaction to finish.';
+    if (Hunt.running && this.pressed()) return 'Pet waiting briefly for potion use.';
+    if (this.active?.petGid === pet.rec.gid) return 'Pet collecting: ' + (this.active.name || this.active.gid) + (this.active.retryAt ? ' (retry pending).' : '.');
     return `Pet ready: ${Math.max(0, pet.rec.status - pet.rec.inventory.length)} empty slots. Collects while hunting; auto-grab stays off when stopped.`;
   },
   items(petGid = 0) { return petGid ? World.gp?.cosRecords?.find(r => r.gid === petGid)?.inventory || [] : World.items(); },
@@ -2024,8 +2027,10 @@ const Loot = {
     return petGid ? Cmd.spaced('cos-pickup') && Cmd.raw({ kind: 'cos-pickup', gid: petGid, target: gid }, 'Pet pickup') : Cmd.pickup(gid);
   },
   pressed() {
-    const me = World.me(), p = Settings.profile.potion;
-    return p.enabled && ((p.hp.on && me.hpPct <= p.hp.pct + 10) || (p.mp.on && me.mpPct <= p.mp.pct + 10));
+    // Controller runs potions first. Reserve only a short window after an
+    // actual send, including the gap before inventoryPending reaches our mirror.
+    // A threshold margin can otherwise block the pet indefinitely.
+    return Potion.lastUse > 0 && now() - Potion.lastUse < 350;
   },
   categories: ['gold', 'potions', 'equipment', 'elixirs', 'powders', 'alchemy', 'others'],
   category(tf) {
@@ -2083,6 +2088,8 @@ const Loot = {
   choose() {
     const H = Hunt.cfg(), P = H.pickup, pose = World.pose();
     if (!P.enabled || !pose) return null;
+    const origin = this.petMode() ? this.pet()?.ent : pose;
+    if (!origin) return null;
     let chosen = null, best = Infinity;
     for (const e of World.ents.values()) {
       if (e.kind !== 'ground-item') continue;
@@ -2093,7 +2100,8 @@ const Loot = {
       }
       const d = dist2D(pose, e);
       if (!Number.isFinite(d) || d > P.radius || H.center && dist2D(H.center, e) > H.radius + P.radius || !this.allowed(e)) continue;
-      if (d < best) { chosen = e; best = d; }
+      const travel = dist2D(origin, e);
+      if (travel < best) { chosen = e; best = travel; }
     }
     return chosen;
   },
@@ -2151,7 +2159,7 @@ const Loot = {
     // Keep the approach alive while moving; don't expire it after a fixed 4.5 seconds.
     if (!a.failure && now() - a.progressAt < 8000 && now() - a.at < 45000) return true;
     const reason = a.failure || 'no approach/pickup progress';
-    const capacity = /inventory|space|full|capacity|envanter/i.test(reason);
+    const capacity = /full|capacity|(?:not enough|no|out of) (?:free |inventory |bag )?space|envanter.*dolu/i.test(reason);
     if (capacity || a.attempts > Hunt.cfg().pickup.retries) { this.skip(e, reason, capacity); return false; }
     // Movement cancels the outstanding worker pickup intent. Resubmit on a later tick.
     if (a.petGid || Cmd.move(World.pose())) { a.retryAt = now() + 700; a.failure = ''; }
@@ -2160,7 +2168,15 @@ const Loot = {
   suspend() { this.active = null; Hunt.lootGid = 0; },
   reset() { this.suspend(); this.skips.clear(); this.failureCounts.clear(); this.petSetup = null; this.fullAlert = null; },
   init() {
-    bus.on('game-error', message => { if (this.active) this.active.failure = String(message); });
+    bus.on('game-error', message => {
+      if (!this.active) return;
+      const reason = String(message);
+      // The shared error field also contains combat and item-use failures.
+      // Only native COS-ground/transaction refusals can fail a pet request;
+      // generic inventory refusals are transient, never proof its bag is full.
+      if (this.active.petGid && !/^(?:Inventory (?:command unavailable|rejected: \d+)|No owned COS ground authority|Invalid COS ground request|Unmatched COS ground result)$/.test(reason)) return;
+      this.active.failure = reason;
+    });
     bus.on('despawn', e => {
       this.skips.delete(e.gid); this.failureCounts.delete(e.gid);
     });

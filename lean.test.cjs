@@ -74,11 +74,71 @@ test('missing, foreign, dead or distant pet never falls back to character collec
   ent.x = 100; f.World.gp.cosRecords = []; assert.equal(f.Loot.begin(d), false);
   assert.equal(f.commands.length, 0);
 });
-test('pet pickup yields to busy inventory and low potion thresholds', () => {
+test('pet pickup yields to busy inventory and a freshly sent potion', () => {
   const f = fixture(); pickupPet(f); const d = f.drop(20, 3436);
   f.World.gp.inventoryPending = true; assert.equal(f.Loot.begin(d), false);
-  f.World.gp.inventoryPending = false; f.World.gp.vitals = [{ gid: 1, hp: 65, mp: 100, maxHp: 100, maxMp: 100 }];
+  f.World.gp.inventoryPending = false; f.Potion.lastUse = 100000;
   assert.equal(f.Loot.begin(d), false); assert.equal(f.commands.length, 0);
+});
+test('pet collects promptly above potion thresholds instead of waiting in the ten-percent margin', () => {
+  for (const [hp, mp] of [[65, 100], [100, 45]]) {
+    const f = fixture(); petFight(f); f.drop(20, 3436);
+    f.Settings.profile.hunt.pickup.afterKillOnly = false;
+    f.World.gp.vitals = [{ gid: 1, hp, mp, maxHp: 100, maxMp: 100 }];
+    let fights = 0; f.Combat.fight = () => { fights++; };
+    f.Controller.tick();
+    assert.equal(f.commands.filter(c => c.kind === 'cos-pickup').length, 1);
+    assert.equal(f.commands.some(c => c.kind === 'item-use'), false);
+    assert.equal(fights, 1);
+  }
+});
+test('pet retries are not starved by HP just above the potion threshold', () => {
+  const f = fixture(); pickupPet(f); const d = f.drop(20, 3436); f.Hunt.start(); f.Loot.begin(d);
+  f.advance(9000); f.Loot.tick();
+  f.World.gp.vitals = [{ gid: 1, hp: 65, mp: 100, maxHp: 100, maxMp: 100 }];
+  f.advance(800); f.Controller.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'cos-pickup').length, 2);
+});
+test('combat errors do not interrupt or suppress a pending pet pickup', () => {
+  for (const error of ['Target is out of range', 'Insufficient MP', 'Not enough inventory space for item use']) {
+    const f = fixture(); pickupPet(f); const d = f.drop(20, 3436); f.Hunt.start(); f.Loot.begin(d);
+    f.bus.emit('game-error', error); f.Loot.tick();
+    assert.ok(f.Loot.active); assert.equal(f.Loot.active.retryAt, 0);
+    assert.equal(f.Loot.skips.has(d.gid), false);
+  }
+});
+test('native busy and rejected pickup errors never permanently exclude an unchanged pet bag', () => {
+  for (const error of ['Inventory command unavailable', 'Inventory rejected: 3']) {
+    const f = fixture(); pickupPet(f); const d = f.drop(20, 3436); f.Hunt.start(); f.Loot.begin(d);
+    f.Settings.profile.hunt.pickup.retries = 0;
+    f.bus.emit('game-error', error); f.Loot.tick();
+    assert.equal(f.Loot.active, null); assert.equal(f.Loot.choose(), null);
+    f.advance(6000); assert.equal(f.Loot.choose()?.gid, d.gid);
+  }
+});
+test('pet chooses the nearest eligible drop to itself inside the configured hunting range', () => {
+  const f = fixture(); pickupPet(f); f.World.ents.get(50).x = 350;
+  const nearPlayer = f.drop(20, 3436); nearPlayer.x = 110;
+  const nearPet = f.drop(21, 3436); nearPet.x = 340;
+  const outside = f.drop(22, 3436); outside.x = 410;
+  assert.equal(f.Loot.choose()?.gid, nearPet.gid);
+  nearPet.groundItem.ownerJid = 999; assert.equal(f.Loot.choose()?.gid, nearPlayer.gid);
+});
+test('pet yields to actual potion dispatch and pending inventory then collects without interrupting combat', () => {
+  const f = fixture(); petFight(f); f.drop(20, 3436);
+  f.World.gp.inventory.push({ slot: 16, refObjId: 8, typeFlags: 2284, quantity: 50 });
+  f.World.gp.vitals = [{ gid: 1, hp: 55, mp: 100, maxHp: 100, maxMp: 100 }];
+  let fights = 0; f.Combat.fight = () => { fights++; };
+  f.Controller.tick(); assert.equal(f.commands.some(c => c.kind === 'item-use'), true);
+  assert.equal(f.commands.some(c => c.kind === 'cos-pickup'), false);
+  assert.match(f.Loot.petStatus(), /potion/);
+  f.World.gp.inventoryPending = true; f.advance(400); f.Controller.tick();
+  assert.equal(f.commands.some(c => c.kind === 'cos-pickup'), false);
+  assert.match(f.Loot.petStatus(), /transaction/);
+  f.World.gp.inventoryPending = false; f.Controller.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'cos-pickup').length, 1);
+  assert.match(f.Loot.petStatus(), /collecting/);
+  assert.equal(fights, 3);
 });
 test('pet configuration retries are bounded and resummoning resets setup', () => {
   const f = fixture(), pet = pickupPet(f, 135);
@@ -781,7 +841,7 @@ test('pet waits for inventory and potion priority without holding up combat', ()
   const f = fixture(); petFight(f); f.drop(20, 3436); let fights = 0;
   f.Combat.fight = () => { fights++; }; f.World.gp.inventoryPending = true;
   f.Hunt.tick(); assert.equal(fights, 1); assert.equal(f.Loot.active, null);
-  f.World.gp.inventoryPending = false; f.World.gp.vitals = [{ gid: 1, hp: 65, mp: 100, maxHp: 100, maxMp: 100 }];
+  f.World.gp.inventoryPending = false; f.Potion.lastUse = 100000;
   f.Hunt.tick(); assert.equal(fights, 2); assert.equal(f.Loot.active, null);
 });
 function townFixture() {

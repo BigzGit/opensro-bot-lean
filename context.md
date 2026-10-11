@@ -8,11 +8,11 @@ This is a handoff for DeepSeek or another coding assistant. Read this first, the
 - Authoritative repository: `C:\sroserver\opensro-bot-lean`.
 - GitHub: https://github.com/nixxane/opensro-bot-lean
 - Branch: `main`.
-- Latest userscript release at this snapshot: **1.2.30**.
+- Latest userscript release at this snapshot: **1.2.31**.
 - Release commit: use `git log -1 -- bot.lean.user.js` for the latest release.
 - Install/download: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 - Update metadata: https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-- Latest validation: **147 integration tests**, JavaScript syntax check and headless browser checks pass.
+- Latest validation: **153 integration tests**, JavaScript syntax check and headless browser checks pass.
 - Latest work: opt-in Hotan recall/storage/refill/repair/reverse cycle. Live-account testing is still outstanding.
 
 Check `git status --short`, `git log -5 --oneline` and the generated metadata before assuming these facts are still current. A documentation-only commit may follow the release commit without changing the userscript version.
@@ -308,3 +308,12 @@ User requested 30 m arrival tolerance. Changed reverse-wait radius from 120 to 3
 User reports the beginner scroll is still unused and confirms Grass Walk is not active; the exact live Supplies status is unknown. Reproduced a controller failure with a native-shaped unresolved combat cast: even after inventory settlement, SpeedScroll.tick refused every attempt while World.isCasting() remained true. Read-only native verification shows gameplay.ts sends item-use directly to inventory.use; skillitemuse.go installs the beginner scroll timed effect without initiating or waiting for a combat cast. Removed only the ordinary combat-cast gate. Resurrection holds, pending inventory, emergency potion priority, sitting/mounting, manual pauses, shops/storage, existing speed buffs and bounded confirmation retries remain. An active return-scroll cast explicitly blocks speed-item dispatch.
 
 Supplies now reports inventory, item-use, manual, resurrection, sitting/mounting and service waits instead of retaining an unrelated old message. README keeps a single optional setup instruction. Three new regressions cover activation/confirmation during combat after inventory settlement, emergency potion priority during a cast, and visible wait reasons followed by automatic recovery. Updated exclusion coverage includes return-scroll travel. 147 integration tests, syntax and isolated browser checks pass. This fixes a reproduced code defect; the user's exact live failure and successful scroll activation remain unverified. Publish and mirror using the normal release workflow; reload the game after installing.
+
+
+## Pet pickup delays and skipped drops: 1.2.31
+
+User reports late/missed pet pickup with Finish current fight disabled. Screenshot confirms pickup-pet mode, collection enabled, 30 m pickup radius, two retries and ten free pet slots. The finish-fight switch was already character-only. Reproduced pet dispatch and retry starvation at HP 65% with a 60% potion threshold, and MP 45% with a 40% threshold: Loot.pressed used a ten-percentage-point margin, so it blocked pickup when no potion was due. It now reserves only 350 ms after an actual Potion.lastUse send, with native inventoryPending still blocking transactions. Controller continues to run potions first and combat alongside pet actions.
+
+Loot.init previously assigned every shared game-error to the pending pickup. The capacity regex classified any mention of inventory as full, so Inventory command unavailable / Inventory rejected could suppress a drop until the unchanged pet bag changed. Pet failures now accept only the native COS-ground/transaction refusal strings verified in read-only gameplay.ts and inventory/inventory.ts; unrelated combat/item-use errors are ignored. Generic inventory refusals use bounded retry/backoff instead of capacity suppression. Capacity recognition requires explicit full/space/capacity wording; character full-bag coverage remains. Native manual cos-pickup owns the shared inventory lane and can approach before granting, so pending transactions and confirmation checks remain necessary. No game/server or original-bot changes.
+
+Drop selection now ranks by pet distance while retaining the configured player/hunting range, pet 50 m reach, ownership, category, exclusions and capacity checks. Pet status reports collecting, retry pending, actual potion wait or inventory wait. Six new regressions cover the HP/MP margin, retry recovery, unrelated errors, temporary native inventory failures, nearest-pet selection and actual potion/pending priority with ongoing combat. All 153 integration tests, syntax and isolated browser checks pass. These reproduce code defects matching the symptoms; live account pickup timing and successful collection remain unverified. Publish, mirror and back up install copies using the normal release workflow.
