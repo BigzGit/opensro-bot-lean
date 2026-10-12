@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.65
+// @version      1.2.66
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.65';
+const VERSION = '1.2.66';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -191,7 +191,8 @@ const DEFAULT_PROFILE = {
   macro: {
     rotations: { normal: [], champion: [], giant: [], party: [], elite: [], unique: [] },
     fallbackToNormal: true, normalAttack: true, buffs: [], imbue: null, buffSwap: false, buffSets: [],
-    imbueBeforeAttack: true, berserk: 'strong', minMpPct: 0, castGapMs: 350,
+    imbueBeforeAttack: true, berserkClasses: { normal: false, champion: false, giant: true, party: false, elite: false, unique: false, titan: false },
+    minMpPct: 0, castGapMs: 350,
   },
   potion: {
     enabled: true, speedScroll: false, hp: { on: true, pct: 60 }, mp: { on: true, pct: 40 },
@@ -212,7 +213,7 @@ const DEFAULT_PROFILE = {
     classes: { normal: true, champion: true, giant: true, party: false, elite: false, unique: false, titan: false },
     levelMin: 0, levelMax: 0, include: '', exclude: '', priority: 'attackers', avoidKs: true,
     targetTimeoutS: 25,
-    pickup: { enabled: true, soxOnly: false, gold: true, potions: true, equipment: true, elixirs: true, powders: true, alchemy: true, others: true,
+    pickup: { enabled: true, soxOnly: false, gold: true, potions: true, equipment: true, elixirs: true, powders: true, magicStones: true, attrStones: true, alchemy: true, others: true,
       collector: 'character', petFullSound: true, soxSound: true, include: '', exclude: '', radius: 300, afterKillOnly: true, retries: 2 },
     sit: { enabled: true, hpBelow: 35, mpBelow: 20, resumeAt: 90 },
     antiStuck: { enabled: true, minutes: 3, maxRecoveries: 3 },
@@ -244,6 +245,15 @@ function botProfile(input) {
   const pickup = input.hunt?.pickup;
   for (const key of ['elixirs', 'powders', 'alchemy']) {
     if (pickup && !(key in pickup)) result.hunt.pickup[key] = pickup.others ?? true;
+  }
+  // The old Berserk dropdown: Off and Whenever full carry over; Champion and above becomes Giants only.
+  const mode = input.macro?.berserk;
+  if (!input.macro?.berserkClasses && (mode === 'off' || mode === 'always')) {
+    for (const key of Object.keys(result.macro.berserkClasses)) result.macro.berserkClasses[key] = mode === 'always';
+  }
+  // Magic and attribute stones used to sit in the alchemy switch, so they keep its setting.
+  for (const key of ['magicStones', 'attrStones']) {
+    if (pickup && !(key in pickup)) result.hunt.pickup[key] = pickup.alchemy ?? pickup.others ?? true;
   }
   return result;
 }
@@ -2071,7 +2081,7 @@ const Loot = {
     // A threshold margin can otherwise block the pet indefinitely.
     return Potion.lastUse > 0 && now() - Potion.lastUse < 350;
   },
-  categories: ['gold', 'potions', 'equipment', 'elixirs', 'powders', 'alchemy', 'others'],
+  categories: ['gold', 'potions', 'equipment', 'elixirs', 'powders', 'magicStones', 'attrStones', 'alchemy', 'others'],
   category(tf) {
     if (ItemType.isGold(tf)) return 'gold';
     if (ItemType.isPotion(tf) || ItemType.isCure(tf)) return 'potions';
@@ -2080,6 +2090,9 @@ const Loot = {
     const consumable = (tf & 126) === 108, t3 = (tf >>> 7) & 15, t4 = (tf >>> 11) & 31;
     if (consumable && t3 === 10 && t4 === 1) return 'elixirs';
     if (consumable && t3 === 10 && t4 === 2) return 'powders';
+    // Magic stones also cover the Astral, Luck, Steady and Immortal stones; tablets stay under other alchemy items.
+    if (consumable && t3 === 11 && (t4 === 1 || t4 === 7)) return 'magicStones';
+    if (consumable && t3 === 11 && t4 === 2) return 'attrStones';
     if (consumable && (t3 === 10 || t3 === 11)) return 'alchemy';
     return 'others';
   },
@@ -2878,8 +2891,12 @@ const Town = {
     if (BuffGear.cfg().buffSets.some(s => s.weapon === key || s.shield === key)) return false;
     return !(fromBag && Alchemy.selected && Alchemy.selected.slot === item.slot);
   },
-  eligible(item) { return this.depositItem(item) || this.disposable(item) && Loot.category(item.typeFlags) === 'elixirs'; },
-  sellable(item) { return this.disposable(item) && Loot.category(item.typeFlags) !== 'elixirs'; },
+  // Loot kept in the warehouse instead of being sold. Stones are also deposited from the character bag; elixirs are
+  // not, because alchemy takes them from there.
+  kept: ['elixirs', 'magicStones', 'attrStones'],
+  stone(item) { return this.disposable(item) && ['magicStones', 'attrStones'].includes(Loot.category(item.typeFlags)); },
+  eligible(item) { return this.depositItem(item) || this.disposable(item) && this.kept.includes(Loot.category(item.typeFlags)); },
+  sellable(item) { return this.disposable(item) && !this.kept.includes(Loot.category(item.typeFlags)); },
   autoRevive() { return this.cfg().enabled && this.cfg().revive; },
   reason() {
     const c = this.cfg(), pet = Loot.pet();
@@ -3030,7 +3047,7 @@ const Town = {
     const bagItem = t.staged ? World.items().find(i => i.slot === t.staged.slot && i.refObjId === t.staged.ref) : null;
     if (t.staged && !bagItem) return this.fail('Staged pet item changed unexpectedly.');
     // Gear the character picked up is deposited straight from the bag, then pet loot is staged through it.
-    const bagSox = bagItem ? null : World.items().find(i => this.depositItem(i, true));
+    const bagSox = bagItem ? null : World.items().find(i => this.depositItem(i, true) || this.stone(i));
     const direct = bagItem || bagSox;
     const item = direct || pet?.rec.inventory.find(i => this.eligible(i));
     if (!item) {
@@ -3527,6 +3544,12 @@ function stopAll() {
   if (active && World.inWorld() && !World.isDead()) Cmd.move(World.pose());
 }
 
+// Berserk fires when the gauge is full and the target's class is ticked in Combat options.
+Combat.berserk = function (cls) {
+  if (!Settings.profile.macro.berserkClasses?.[cls] || World.berserkGauge < 5) return false;
+  if (World.local()?.appearanceState?.[2] === 1) return false;
+  return Cmd.berserk();
+};
 const Controller = {
   mode: 'idle', lastErrorAt: -Infinity, resumeAfterRevive: false, guardAt: {},
   // Optional features must never stop hunting: an error in one is logged (at most every 5 s) and skipped.
@@ -6393,8 +6416,10 @@ const UI = {
         this.check('Use normal attacks', () => M().normalAttack, v => M().normalAttack = v));
       this.skillList(rotation, M().rotations[this.rotationClass]); this.pane.append(rotation);
       this.pane.append(this.group('Combat options',
-        this.select('Berserk', [['off', 'Off'], ['strong', 'Champion and above'], ['always', 'Whenever full']], () => M().berserk, v => M().berserk = v),
         this.number('Skill gap (ms)', () => M().castGapMs, v => M().castGapMs = v, 150, 2000, 50)));
+      this.pane.append(this.group('Berserk when the gauge is full, on',
+        ...[['giant', 'Giants'], ['titan', 'Titans'], ['unique', 'Uniques'], ['elite', 'Elites'], ['party', 'Party monsters'], ['champion', 'Champions'], ['normal', 'Normal monsters']]
+          .map(([key, label]) => this.check(label, () => M().berserkClasses[key], v => M().berserkClasses[key] = v))));
       }
       if (this.combatTab === 'Buffs & imbue') {
       BuffGear.draw(this.pane);
@@ -6411,7 +6436,7 @@ const UI = {
         this.check('Chime and notice when a SoX item is picked up', () => L().soxSound, v => L().soxSound = v), this.button('Test SoX chime', () => Sound.test('sox')));
       this.petNote = el('p', '', 'muted'); options.append(this.petNote);
       options.append(this.row(...[['Elixirs only','elixirs'],['Elixirs + gold','elixirs-gold'],['All items','all']].map(([label,mode]) => this.button(label, () => { Loot.preset(mode); this.draw(); }))));
-      for (const [key, label] of [['enabled', 'Collect drops'], ['soxOnly', 'Equipment: only SoX (Star / Moon / Sun)'], ['gold', 'Gold'], ['potions', 'Potions and cure pills'], ['equipment', 'Equipment'], ['elixirs', 'Elixirs'], ['powders', 'Lucky powders'], ['alchemy', 'Other alchemy items / stones'], ['others', 'Other items'], ['afterKillOnly', 'Finish current fight before character pickup']]) options.append(this.check(label, () => L()[key], v => L()[key] = v));
+      for (const [key, label] of [['enabled', 'Collect drops'], ['soxOnly', 'Equipment: only SoX (Star / Moon / Sun)'], ['gold', 'Gold'], ['potions', 'Potions and cure pills'], ['equipment', 'Equipment'], ['elixirs', 'Elixirs'], ['powders', 'Lucky powders'], ['magicStones', 'Magic stones (stored in the warehouse)'], ['attrStones', 'Attribute stones (stored in the warehouse)'], ['alchemy', 'Other alchemy items'], ['others', 'Other items'], ['afterKillOnly', 'Finish current fight before character pickup']]) options.append(this.check(label, () => L()[key], v => L()[key] = v));
       options.append(this.number('Pickup radius (m)', () => L().radius / 10, v => L().radius = v * 10, 3, 100),
         this.number('Retries after first attempt', () => L().retries, v => L().retries = v, 0, 3),
         this.text('Always include names', () => L().include, v => L().include = v),

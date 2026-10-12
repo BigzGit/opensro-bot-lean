@@ -88,6 +88,12 @@ function stopAll() {
   if (active && World.inWorld() && !World.isDead()) Cmd.move(World.pose());
 }
 
+// Berserk fires when the gauge is full and the target's class is ticked in Combat options.
+Combat.berserk = function (cls) {
+  if (!Settings.profile.macro.berserkClasses?.[cls] || World.berserkGauge < 5) return false;
+  if (World.local()?.appearanceState?.[2] === 1) return false;
+  return Cmd.berserk();
+};
 const Controller = {
   mode: 'idle', lastErrorAt: -Infinity, resumeAfterRevive: false, guardAt: {},
   // Optional features must never stop hunting: an error in one is logged (at most every 5 s) and skipped.

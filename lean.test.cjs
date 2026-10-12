@@ -1579,6 +1579,44 @@ test('pet storage protects supplies, keep names and items with missing metadata'
   f.Town.cfg().store.elixirs = false; assert.equal(f.Town.eligible(f.pet.inventory[0]), true, 'Legacy category switches cannot store other items or sell elixirs');
   assert.equal(f.Town.eligible(f.pet.inventory[1]), false);
 });
+test('magic and attribute stones are stored in the warehouse, never sold, and have their own pickup switches', () => {
+  const f = townFixture(), magic = { slot: 5, refObjId: 1010, typeFlags: 108 | (11 << 7) | (1 << 11), quantity: 4, name: 'Magic stone' };
+  const astral = { slot: 6, refObjId: 1011, typeFlags: 108 | (11 << 7) | (7 << 11), quantity: 1, name: 'Astral stone' };
+  const attr = { slot: 7, refObjId: 1012, typeFlags: 108 | (11 << 7) | (2 << 11), quantity: 3, name: 'Attribute stone' };
+  const tablet = { slot: 8, refObjId: 1013, typeFlags: 108 | (11 << 7) | (3 << 11), quantity: 1, name: 'Attribute tablet' };
+  assert.equal(f.Loot.category(magic.typeFlags), 'magicStones'); assert.equal(f.Loot.category(astral.typeFlags), 'magicStones');
+  assert.equal(f.Loot.category(attr.typeFlags), 'attrStones'); assert.equal(f.Loot.category(tablet.typeFlags), 'alchemy');
+  for (const stone of [magic, astral, attr]) { assert.equal(f.Town.eligible(stone), true); assert.equal(f.Town.sellable(stone), false); }
+  assert.equal(f.Town.eligible(tablet), false); assert.equal(f.Town.sellable(tablet), true);
+  f.Town.cfg().keep = 'magic'; assert.equal(f.Town.eligible(magic), false, 'Keep names still protect the stone from every town step');
+  f.Town.cfg().keep = 'favorite';
+  const g = fixture(); g.Settings.profile.hunt.pickup.magicStones = false; assert.equal(g.Loot.allowed(g.drop(30, magic.typeFlags)), false);
+  g.Settings.profile.hunt.pickup.magicStones = true; assert.equal(g.Loot.allowed(g.drop(31, magic.typeFlags)), true);
+  g.Settings.profile.hunt.pickup.attrStones = false; assert.equal(g.Loot.allowed(g.drop(32, attr.typeFlags)), false);
+  f.Loot.preset('elixirs'); assert.equal(f.Settings.profile.hunt.pickup.magicStones, false); assert.equal(f.Settings.profile.hunt.pickup.attrStones, false);
+  assert.equal(f.Town.stone(magic), true); assert.equal(f.Town.stone(f.pet.inventory[0]), false, 'Elixirs stay in the character bag for alchemy');
+});
+test('stones follow the old alchemy switch and Berserk migrates to Giants only', () => {
+  let f = fixture(); f.storage.set('sroAsistan:v7:profile:default', JSON.stringify({ hunt: { pickup: { alchemy: false } }, macro: { berserk: 'strong' } }));
+  f.Settings.importOriginal();
+  assert.equal(f.Settings.profile.hunt.pickup.magicStones, false); assert.equal(f.Settings.profile.hunt.pickup.attrStones, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(f.Settings.profile.macro.berserkClasses)), { normal: false, champion: false, giant: true, party: false, elite: false, unique: false, titan: false });
+  f = fixture(); f.storage.set('sroAsistan:v7:profile:default', JSON.stringify({ macro: { berserk: 'off' } })); f.Settings.importOriginal();
+  assert.equal(Object.values(f.Settings.profile.macro.berserkClasses).some(Boolean), false);
+  f = fixture(); f.storage.set('sroAsistan:v7:profile:default', JSON.stringify({ macro: { berserk: 'always' } })); f.Settings.importOriginal();
+  assert.equal(Object.values(f.Settings.profile.macro.berserkClasses).every(Boolean), true);
+  f = fixture(); f.storage.set('sroAsistan:v7:profile:default', JSON.stringify({ macro: { berserk: 'always', berserkClasses: { giant: false, titan: true } } })); f.Settings.importOriginal();
+  assert.equal(f.Settings.profile.macro.berserkClasses.titan, true); assert.equal(f.Settings.profile.macro.berserkClasses.giant, false, 'Saved class choices win over the legacy dropdown');
+});
+test('Berserk fires only on ticked classes, with a full gauge', () => {
+  const f = fixture(), kinds = () => f.commands.filter(c => c.kind === 'berserk').length;
+  f.World.berserkGauge = 5;
+  assert.equal(f.Combat.berserk('champion'), false); assert.equal(f.Combat.berserk('normal'), false); assert.equal(kinds(), 0);
+  assert.equal(f.Combat.berserk('giant'), true); assert.equal(kinds(), 1);
+  f.advance(2000); f.World.berserkGauge = 4; assert.equal(f.Combat.berserk('giant'), false);
+  f.World.berserkGauge = 5; f.Settings.profile.macro.berserkClasses.champion = true; assert.equal(f.Combat.berserk('champion'), true);
+  f.advance(2000); f.Settings.profile.macro.berserkClasses.giant = false; assert.equal(f.Combat.berserk('giant'), false);
+});
 test('town cycle does not repeat unconfirmed pet transfers and stops on full storage', () => {
   const f = townFixture(); f.Town.begin(); f.Town.enter('store');
   f.World.gp.storage = { npc: 60, phase: 'open', capacity: 1, items: [] }; f.World.gp.target = 60;

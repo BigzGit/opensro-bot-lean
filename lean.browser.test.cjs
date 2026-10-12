@@ -361,7 +361,7 @@ const server = http.createServer((req, res) => {
     await page.getByLabel('Always include names',{exact:true}).dispatchEvent('change');
     await page.getByRole('button',{name:'Elixirs only',exact:true}).click();
     assert.equal(await page.getByLabel('Elixirs',{exact:true}).isChecked(),true);
-    for(const label of ['Gold','Potions and cure pills','Equipment','Lucky powders','Other alchemy items / stones','Other items']) assert.equal(await page.getByLabel(label,{exact:true}).isChecked(),false);
+    for(const label of ['Gold','Potions and cure pills','Equipment','Lucky powders','Magic stones (stored in the warehouse)','Attribute stones (stored in the warehouse)','Other alchemy items','Other items']) assert.equal(await page.getByLabel(label,{exact:true}).isChecked(),false);
     assert.equal(await page.getByLabel('Always include names',{exact:true}).inputValue(),'');
     await page.getByRole('button',{name:'Elixirs + gold',exact:true}).click();
     assert.equal(await page.getByLabel('Gold',{exact:true}).isChecked(),true);

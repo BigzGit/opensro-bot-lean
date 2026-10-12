@@ -8,7 +8,8 @@ const DEFAULT_PROFILE = {
   macro: {
     rotations: { normal: [], champion: [], giant: [], party: [], elite: [], unique: [] },
     fallbackToNormal: true, normalAttack: true, buffs: [], imbue: null, buffSwap: false, buffSets: [],
-    imbueBeforeAttack: true, berserk: 'strong', minMpPct: 0, castGapMs: 350,
+    imbueBeforeAttack: true, berserkClasses: { normal: false, champion: false, giant: true, party: false, elite: false, unique: false, titan: false },
+    minMpPct: 0, castGapMs: 350,
   },
   potion: {
     enabled: true, speedScroll: false, hp: { on: true, pct: 60 }, mp: { on: true, pct: 40 },
@@ -29,7 +30,7 @@ const DEFAULT_PROFILE = {
     classes: { normal: true, champion: true, giant: true, party: false, elite: false, unique: false, titan: false },
     levelMin: 0, levelMax: 0, include: '', exclude: '', priority: 'attackers', avoidKs: true,
     targetTimeoutS: 25,
-    pickup: { enabled: true, soxOnly: false, gold: true, potions: true, equipment: true, elixirs: true, powders: true, alchemy: true, others: true,
+    pickup: { enabled: true, soxOnly: false, gold: true, potions: true, equipment: true, elixirs: true, powders: true, magicStones: true, attrStones: true, alchemy: true, others: true,
       collector: 'character', petFullSound: true, soxSound: true, include: '', exclude: '', radius: 300, afterKillOnly: true, retries: 2 },
     sit: { enabled: true, hpBelow: 35, mpBelow: 20, resumeAt: 90 },
     antiStuck: { enabled: true, minutes: 3, maxRecoveries: 3 },
@@ -61,6 +62,15 @@ function botProfile(input) {
   const pickup = input.hunt?.pickup;
   for (const key of ['elixirs', 'powders', 'alchemy']) {
     if (pickup && !(key in pickup)) result.hunt.pickup[key] = pickup.others ?? true;
+  }
+  // The old Berserk dropdown: Off and Whenever full carry over; Champion and above becomes Giants only.
+  const mode = input.macro?.berserk;
+  if (!input.macro?.berserkClasses && (mode === 'off' || mode === 'always')) {
+    for (const key of Object.keys(result.macro.berserkClasses)) result.macro.berserkClasses[key] = mode === 'always';
+  }
+  // Magic and attribute stones used to sit in the alchemy switch, so they keep its setting.
+  for (const key of ['magicStones', 'attrStones']) {
+    if (pickup && !(key in pickup)) result.hunt.pickup[key] = pickup.alchemy ?? pickup.others ?? true;
   }
   return result;
 }

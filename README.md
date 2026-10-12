@@ -9,7 +9,7 @@ A compact OpenSRO bot for hunting, potions, pet loot and automatic town trips.
 1. Install the script with **Tampermonkey**. Disable any other OpenSRO bot script.
 2. Reload the game after installing or updating.
 3. In **Combat**, save your hunting spot and choose your attack skills, buffs and imbue.
-4. In **Loot**, choose what to collect. Tick **Equipment: only SoX** to take only Seal of Star, Moon and Sun equipment; gold, potions and other items follow their own switches. For pet collection, summon your pickup pet and select it as the collector.
+4. In **Combat**, tick the monster kinds **Berserk** should be used on (only Giants by default; it fires once the gauge is full, so the gauge waits for a Giant). In **Loot**, choose what to collect, including **Magic stones** and **Attribute stones**. Tick **Equipment: only SoX** to take only Seal of Star, Moon and Sun equipment; gold, potions and other items follow their own switches. For pet collection, summon your pickup pet and select it as the collector.
 5. In **Supplies**, set your HP/MP potion thresholds. Enable **Use beginner +100% speed scroll automatically** if wanted.
 6. Press **F8** to start hunting.
 
@@ -37,7 +37,7 @@ Set this up once in **Supplies → Hotan scroll town cycle**:
 
 When supplies run low or a bag reaches its capacity trigger, the bot recalls to town, handles pet loot, refills pots, repairs gear and reverses to the **last return-scroll point**.
 
-- **Pet elixirs:** stored in the warehouse.
+- **Pet elixirs, magic stones and attribute stones:** stored in the warehouse. Stones are also deposited from your own bag; elixirs stay in your bag so alchemy can use them. Magic stones include the Astral, Luck, Steady and Immortal stones. Attribute tablets are not stones and count as other alchemy items.
 - **SoX gear:** Star, Moon and Sun equipment is deposited in the warehouse from your own bag and from the pet, on the next trip that visits the warehouse. Nothing is stored right after pickup. SoX gear that is part of a saved buff set, the weapon chosen for alchemy, or matches the **Keep in pet (names)** list is never deposited. Switch it off with **Deposit SoX gear in the warehouse**.
 - **Gear by required level:** list levels in **Also deposit gear requiring level** (for example `85`, or `80-90, 100`) and equipment of any kind that requires one of those character levels is deposited the same way, from your bag and from the pet. Listed gear is never sold, even if the warehouse cannot be used. The same protections apply as for SoX. Empty by default.
 - **Other unprotected pet loot:** sold at the repair merchant. Ordinary equipment can be sold even with + or blue options.

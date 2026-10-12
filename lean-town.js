@@ -150,8 +150,12 @@ const Town = {
     if (BuffGear.cfg().buffSets.some(s => s.weapon === key || s.shield === key)) return false;
     return !(fromBag && Alchemy.selected && Alchemy.selected.slot === item.slot);
   },
-  eligible(item) { return this.depositItem(item) || this.disposable(item) && Loot.category(item.typeFlags) === 'elixirs'; },
-  sellable(item) { return this.disposable(item) && Loot.category(item.typeFlags) !== 'elixirs'; },
+  // Loot kept in the warehouse instead of being sold. Stones are also deposited from the character bag; elixirs are
+  // not, because alchemy takes them from there.
+  kept: ['elixirs', 'magicStones', 'attrStones'],
+  stone(item) { return this.disposable(item) && ['magicStones', 'attrStones'].includes(Loot.category(item.typeFlags)); },
+  eligible(item) { return this.depositItem(item) || this.disposable(item) && this.kept.includes(Loot.category(item.typeFlags)); },
+  sellable(item) { return this.disposable(item) && !this.kept.includes(Loot.category(item.typeFlags)); },
   autoRevive() { return this.cfg().enabled && this.cfg().revive; },
   reason() {
     const c = this.cfg(), pet = Loot.pet();
@@ -302,7 +306,7 @@ const Town = {
     const bagItem = t.staged ? World.items().find(i => i.slot === t.staged.slot && i.refObjId === t.staged.ref) : null;
     if (t.staged && !bagItem) return this.fail('Staged pet item changed unexpectedly.');
     // Gear the character picked up is deposited straight from the bag, then pet loot is staged through it.
-    const bagSox = bagItem ? null : World.items().find(i => this.depositItem(i, true));
+    const bagSox = bagItem ? null : World.items().find(i => this.depositItem(i, true) || this.stone(i));
     const direct = bagItem || bagSox;
     const item = direct || pet?.rec.inventory.find(i => this.eligible(i));
     if (!item) {

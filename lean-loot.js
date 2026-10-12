@@ -66,7 +66,7 @@ const Loot = {
     // A threshold margin can otherwise block the pet indefinitely.
     return Potion.lastUse > 0 && now() - Potion.lastUse < 350;
   },
-  categories: ['gold', 'potions', 'equipment', 'elixirs', 'powders', 'alchemy', 'others'],
+  categories: ['gold', 'potions', 'equipment', 'elixirs', 'powders', 'magicStones', 'attrStones', 'alchemy', 'others'],
   category(tf) {
     if (ItemType.isGold(tf)) return 'gold';
     if (ItemType.isPotion(tf) || ItemType.isCure(tf)) return 'potions';
@@ -75,6 +75,9 @@ const Loot = {
     const consumable = (tf & 126) === 108, t3 = (tf >>> 7) & 15, t4 = (tf >>> 11) & 31;
     if (consumable && t3 === 10 && t4 === 1) return 'elixirs';
     if (consumable && t3 === 10 && t4 === 2) return 'powders';
+    // Magic stones also cover the Astral, Luck, Steady and Immortal stones; tablets stay under other alchemy items.
+    if (consumable && t3 === 11 && (t4 === 1 || t4 === 7)) return 'magicStones';
+    if (consumable && t3 === 11 && t4 === 2) return 'attrStones';
     if (consumable && (t3 === 10 || t3 === 11)) return 'alchemy';
     return 'others';
   },
