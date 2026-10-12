@@ -106,6 +106,7 @@ const Controller = {
   },
   tick() {
     try {
+      this.guard('Reconnect', () => Reconnect.tick());
       Restock.sample();
       Alchemy.tick();
       if (BuffGear.run) {

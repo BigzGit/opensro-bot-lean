@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, AntiStuck, Items, AutoMastery, PetPotion, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, AntiStuck, Items, AutoMastery, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -1272,6 +1272,48 @@ test('vigor potions are a restock supply with a chosen size, bought on town trip
   g.Town.begin(); g.Town.enter('buy'); g.World.gp.target = 61; g.World.gp.targetCapabilities = 1;
   g.World.gp.shop = { npc: 61, offers: [offer(15, 4332)] }; g.World.gp.inventory = g.World.gp.inventory.map(i => i.refObjId === 15 ? { ...i, quantity: 50 } : i);
   g.Town.tick(); assert.equal(g.Town.trip, null); assert.match(g.Town.message, /vigor potion size is unavailable/);
+});
+function reconnectFixture() {
+  const f = fixture(), sent = []; f.World.charName = 'Tester'; f.Hunt.start();
+  f.Hook.post = msg => { if (msg.kind === 'session') sent.push(JSON.parse(JSON.stringify(msg.command))); };
+  const lose = (phase = 'disconnected') => { f.World.phase = phase; f.bus.emit('phase', phase, 'world', true); f.stopAll(); f.World.gp = null; };
+  const back = () => { f.World.phase = 'world'; f.World.gp = { ...fixture().World.gp }; };
+  return { f, sent, lose, back };
+}
+test('the bot reconnects by itself after a server restart: resume first, then a fresh entry, then hunting again', () => {
+  const { f, sent, lose } = reconnectFixture();
+  lose(); assert.equal(f.Reconnect.active(), true); assert.equal(f.Hunt.running, false);
+  f.advance(3000); f.Controller.tick(); assert.deepEqual(sent, [{ kind: 'reconnect' }], 'the game\'s own resume first');
+  f.advance(3000); f.Controller.tick(); assert.equal(sent.length, 1, 'waits for the attempt to play out');
+  f.advance(9000); f.Controller.tick(); assert.deepEqual(sent.at(-1), { kind: 'enter-world', character: 'Tester' }, 'then a fresh entry with the held login');
+  f.advance(8000); f.Controller.tick(); f.advance(11000); f.Controller.tick(); assert.ok(sent.length >= 3);
+  assert.ok(f.notices.some(n => /reconnecting automatically/.test(n)));
+  assert.match(f.Diagnostics.main(), /Reconnecting/);
+});
+test('after reconnecting, hunting that was running resumes at the hunting spot, and only then', () => {
+  let { f, lose, back } = reconnectFixture();
+  lose(); back(); f.advance(100); f.Controller.tick(); assert.equal(f.Hunt.running, false, 'settles for a moment first');
+  f.advance(3500); f.Controller.tick(); assert.equal(f.Hunt.running, true); assert.equal(f.Reconnect.active(), false);
+  ({ f, lose, back } = reconnectFixture()); f.Hunt.stop(); lose('reconnecting'); back(); f.advance(4000); f.Controller.tick(); f.advance(4000); f.Controller.tick();
+  assert.equal(f.Hunt.running, false, 'a stopped bot is reconnected but not started');
+  ({ f, lose, back } = reconnectFixture()); lose(); back(); f.World.gp.pose = { ...f.World.gp.pose, x: 200000 }; f.advance(4000); f.Controller.tick(); f.advance(4000); f.Controller.tick();
+  assert.equal(f.Hunt.running, false); assert.equal(f.Reconnect.active(), false);
+  ({ f, lose, back } = reconnectFixture()); lose(); back(); f.World.isDead = () => true; f.advance(4000); f.Controller.tick(); f.advance(4000); f.Controller.tick();
+  assert.equal(f.Hunt.running, false, 'a dead character is never started');
+  ({ f, lose, back } = reconnectFixture()); lose('reconnecting'); back(); f.advance(4000); f.Controller.tick(); f.advance(4000); f.Controller.tick();
+  assert.equal(f.Hunt.running, true, 'a short drop the game recovered from resumes too');
+});
+test('reconnect never fights the player: logout, disconnect, exit or a manual login cancel it; a lost login is reported', () => {
+  for (const kind of ['logout', 'disconnect', 'exit', 'restart', 'login', 'enter-world']) {
+    const { f, sent, lose } = reconnectFixture(); lose(); f.Hook.observers.forEach(fn => fn({ kind, password: 'secret' }));
+    assert.equal(f.Reconnect.active(), false, kind); f.advance(60000); f.Controller.tick(); assert.equal(sent.length, 0, kind);
+  }
+  const { f, sent, lose } = reconnectFixture(); lose(); f.World.phase = 'signed-out'; f.advance(5000); f.Controller.tick();
+  assert.equal(sent.length, 0, 'no credentials, no attempts'); assert.match(f.Reconnect.message, /login is gone/);
+  const g = reconnectFixture(); g.lose(); g.f.World.session = { phase: 'disconnected', error: 'Authentication required' }; g.f.advance(5000); g.f.Controller.tick();
+  assert.equal(g.sent.length, 0); assert.match(g.f.Reconnect.message, /login is gone/);
+  const h = reconnectFixture(); h.lose(); h.f.advance(13 * 3600 * 1000); h.f.Controller.tick(); assert.equal(h.f.Reconnect.active(), false); assert.match(h.f.Reconnect.message, /Gave up/);
+  assert.equal(JSON.stringify(h.sent).includes('secret'), false);
 });
 test('auto mastery is off by default, ignores dead characters and pending training, and backs off after a refusal', () => {
   assert.equal(fixture().Settings.profile.mastery.enabled, false);

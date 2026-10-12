@@ -77,6 +77,7 @@ const Diagnostics = {
     if (BuffGear.recovery) return 'Buff gear: manual equipment review needed.';
     if (Alchemy.pending) return Alchemy.run ? 'Alchemy: waiting for the server result.' : 'Alchemy stopped; outstanding result unconfirmed.';
     if (Alchemy.run) return 'Alchemy: preparing the next attempt.';
+    if (Reconnect.active() && Reconnect.message && !World.inWorld()) return Reconnect.message;
     if (!World.inWorld()) return 'Waiting for game world.';
     if (World.isDead()) return 'Character dead; waiting for recovery.';
     if (Town.trip) {

@@ -466,6 +466,7 @@ const UI = {
     const distance = center ? dist2D(World.pose(), center) : Infinity;
     this.status.textContent = `${World.charName || 'No character'} · ${World.inWorld() ? Controller.mode : World.phase}\nHP ${Math.round(me.hpPct)}% · MP ${Math.round(me.mpPct)}% · Potions ${Potion.count('hp')}/${Potion.count('mp')} · Pickups ${Stats.values.loot}\nHunting spot: ${Number.isFinite(distance) ? Math.round(distance / 10) + ' m away' : center ? 'another region' : 'not saved'}${Restock.recording ? '\nRecording route: ' + Restock.draft.route.length + ' points' : ''}`;
     if (Town.cfg().enabled) this.status.textContent += '\n' + Town.status();
+    if (Reconnect.active() && Reconnect.message) this.status.textContent += '\n' + Reconnect.message;
     this.refreshers.forEach(refresh => refresh());
     for (const slot of this.pane.querySelectorAll('.slot[data-skill]')) {
       const id = Number(slot.dataset.skill), left = World.cooldownLeft(id), total = World.skill(id)?.cooldownMs || 0;
