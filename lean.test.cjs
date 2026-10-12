@@ -1421,6 +1421,33 @@ function townFixture() {
   f.Hunt.start();
   return { ...f, pet };
 }
+test('automatic town setup detects the town and fills only what is missing', () => {
+  const f = fixture(), c = f.Town.cfg(), at = (regionId, x, z) => ({ regionId, x, y: 243, z });
+  assert.deepEqual(JSON.parse(JSON.stringify(f.Town.towns.map(t => t.name))), ['Constantinople', 'Donwhang', 'Hotan', 'Jangan', 'Samarkand']);
+  f.World.gp.pose = at(23687, 1100, 600);
+  assert.equal(f.Town.detect().name, 'Hotan'); assert.equal(f.Town.detect(at(25000, 900, 900)).name, 'Jangan');
+  assert.equal(f.Town.detect(at(27244, 900, 400)).name, 'Samarkand', 'a town spread over three regions is recognised');
+  assert.equal(f.Town.detect(at(1, 100, 100)), null);
+  f.Hunt.running = true; assert.equal(f.Town.autoSetup(), null); assert.equal(c.arrival, null); f.Hunt.running = false;
+  const done = f.Town.autoSetup();
+  assert.equal(done.town, 'Hotan'); assert.deepEqual(JSON.parse(JSON.stringify(done.saved)), ['arrival point', 'warehouse', 'potion merchant', 'repair merchant', 'world statue']);
+  assert.equal(c.arrival.regionId, 23687); assert.equal(c.storage.refObjId, 2083); assert.equal(c.vendor.refObjId, 2074);
+  assert.equal(c.smith.refObjId, 2072); assert.equal(c.gate.refObjId, 2096); assert.equal(f.Town.validate().includes('Save missing town services'), false);
+  for (const role of ['storage', 'vendor', 'smith', 'gate']) {
+    const npc = c[role].npc, spot = c[role];
+    const gap = Math.hypot(spot.x - npc.x, spot.z - npc.z); assert.ok(gap >= 39 && gap <= 81, role + ' stands a few metres from the NPC');
+    assert.equal(spot.regionId, npc.regionId);
+  }
+  c.vendor = { ...c.vendor, name: 'Mine' }; c.smith = null;
+  assert.deepEqual(JSON.parse(JSON.stringify(f.Town.autoSetup().saved)), ['repair merchant']); assert.equal(c.vendor.name, 'Mine', 'saved services are kept');
+  assert.equal(f.Town.autoSetup().saved.length, 0); assert.match(f.Town.message, /already saved/);
+  assert.equal(f.Town.autoSetup(true).saved.length, 5); assert.equal(c.vendor.name, 'Hotan potion merchant');
+  f.World.gp.pose = at(25000, 900, 900); const other = f.Town.autoSetup();
+  assert.equal(other.town, 'Jangan'); assert.equal(other.saved.length, 5, 'an arrival point from another town replaces everything');
+  assert.equal(c.arrival.regionId, 25000); assert.equal(c.gate.refObjId, 2094);
+  f.World.gp.pose = at(1, 100, 100); const before = JSON.stringify(c); assert.equal(f.Town.autoSetup(), null); assert.equal(JSON.stringify(c), before);
+  assert.match(f.Town.message, /no known town around you/);
+});
 test('town cycle recalls, confirms pet storage and purchases, repairs, reverses and resumes', () => {
   const f = townFixture(), gp = f.World.gp, commands = f.commands;
   f.UI.mount = f.UI.draw = f.UI.update = f.Ticker.start = () => {}; f.boot();

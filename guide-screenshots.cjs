@@ -102,7 +102,7 @@ const gameplay = { localGid: 1, target: 0, targetPending: false, inventoryPendin
     await tab('Loot'); await snap('05-loot');
     await tab('Supplies'); await snap('06-potions');
     await jump('Potion restock'); await snap('07-restock');
-    await jump('Hotan scroll town cycle'); await snap('08-town-cycle');
+    await jump('Scroll town cycle'); await snap('08-town-cycle');
     await tab('Alchemy'); await snap('09-alchemy');
     await tab('Settings'); await snap('10-settings');
     await jump('Anti-stuck'); await snap('11-anti-stuck');

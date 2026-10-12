@@ -370,7 +370,7 @@ const UI = {
       shop.append(el('p', 'Refill targets are total potion counts, including what is already in your bag. Used for low-supply, full-bag and revival trips, and walking-route restock when the town cycle is off. Set MP refill to 1000 for 1,000 MP potions. Changes apply to the next trip.', 'muted'));
       this.pane.append(shop);
       const town = () => Town.cfg();
-      const services = this.group('Hotan scroll town cycle',
+      const services = this.group('Scroll town cycle',
         this.check('Use return scroll → town services → reverse return', () => town().enabled, v => { town().enabled = v; this.draw(); }),
         this.check('Revive in town and reverse to last scroll point', () => town().revive, v => town().revive = v),
         this.check('Deposit SoX gear in the warehouse (character and pet bags)', () => town().storeSox, v => town().storeSox = v),
@@ -378,9 +378,10 @@ const UI = {
         this.check('Return when pickup pet is nearly full', () => town().petFull, v => town().petFull = v),
         this.number('Pet free slots ≤', () => town().petFree, v => town().petFree = v, 0, 10),
         this.number('Town arrival tolerance (m)', () => town().arrivalRadius / 10, v => town().arrivalRadius = v * 10, 10, 150),
-        el('p', 'Bind your recall to Hotan in the game. While stopped, save the arrival point where a return scroll places you. Stand near, select and save the warehouse, potion merchant, repair merchant and world statue / teleport. Open the potion shop before saving its merchant. Saves your standing position for each approach. Uses collision-aware walking between services. Overrides the recorded walking restock while enabled.', 'muted'));
+        el('p', 'Bind your recall to Hotan, Jangan, Donwhang, Constantinople or Samarkand in the game. Quickest: while stopped, use a return scroll and press Auto-set town services where it puts you; it fills the arrival point and the four services. To do it by hand instead, save the arrival point where a return scroll places you, then stand near, select and save the warehouse, potion merchant, repair merchant and world statue / teleport. Open the potion shop before saving its merchant. Saves your standing position for each approach. Uses collision-aware walking between services. Overrides the recorded walking restock while enabled.', 'muted'));
       for (const [role, label] of [['arrival', 'Arrival point'], ['storage', 'Warehouse'], ['vendor', 'Potion merchant'], ['smith', 'Repair merchant'], ['gate', 'World statue / teleport']]) services.append(
         this.row(this.button('Save ' + label.toLowerCase(), () => Town.save(role)), el('span', town()[role]?.name || (town()[role] ? 'Saved' : 'Not saved'), 'muted')));
+      services.append(this.button('Auto-set town services', () => Town.autoSetup(false)), this.button('Redo all automatically', () => Town.autoSetup(true)));
       services.append(el('p', 'Pet loot: store elixirs, and Star / Moon / Sun gear when SoX deposit is on (needs the saved warehouse; SoX gear in your own bag goes in too, all other character items stay). Nothing is deposited right after pickup, only on the next town trip. Gear requiring one of the levels you list above (for example 85) is deposited the same way and never sold. SoX gear that is part of a saved buff set, the weapon chosen for alchemy, or matches the Keep names stays in your bag. Sell other unprotected pet items at the saved weapon / repair merchant before repairing. Other seal/rare equipment and equipment with unknown rarity stays in the pet. Ordinary equipment is sold regardless of + or blue options. Existing character bag items are never sold.', 'muted'));
       services.append(this.text('Keep in pet (names)', () => town().keep, v => town().keep = v),
         el('p', 'Town buys X-Large potions using the Buy HP/MP switches, low-stock thresholds and refill counts above. Keep each low-stock threshold below its refill target. Potion selections apply to walking-route restock. Returns when the character bag has at most one free slot. Free at least two slots before hunting again; existing character items stay protected. Revival uses the saved town services and a reverse scroll, without using a return scroll in town. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. F8 cancels.', 'muted'));
@@ -392,7 +393,7 @@ const UI = {
     } else {
       Stats.draw(this.pane);
       this.pane.append(this.group('Behaviour',
-        ...(Town.autoRevive() ? [el('p', 'On death: the town cycle revives you in town and reverses back (Supplies → Hotan scroll town cycle).', 'muted')]
+        ...(Town.autoRevive() ? [el('p', 'On death: the town cycle revives you in town and reverses back (Supplies → Scroll town cycle).', 'muted')]
           : [this.select('On death', [['stop', 'Stop'], ['wait', 'Wait'], ['revive', 'Revive and walk back']], () => H().onDeath, v => H().onDeath = v)]),
         this.check('Rest when low', () => H().sit.enabled, v => { H().sit.enabled = v; this.draw(); }),
         ...(H().sit.enabled ? [

@@ -27,10 +27,10 @@ Under **Supplies → Automatic potion use**:
 
 With the town cycle on, the walking-route restock controls are hidden because every trip buys potions in town. The **On death** setting is replaced by the town revive option, and the rest thresholds only show while **Rest when low** is ticked.
 
-Set this up once in **Supplies → Hotan scroll town cycle**:
+Set this up once in **Supplies → Scroll town cycle**:
 
-1. Bind your recall to **Hotan** in the game. Use a return scroll, stop the bot, then click **Save arrival point** where you land.
-2. Stand near and select each service, then save its point: **Warehouse**, **Potion merchant**, **Repair merchant** and **World statue / teleport**. Open the potion shop before saving its merchant.
+1. Bind your recall to **Hotan, Jangan, Donwhang, Constantinople or Samarkand** in the game. Use a return scroll, stop the bot, and where you land click **Auto-set town services**. It saves that spot as the arrival point and fills the **Warehouse**, **Potion merchant**, **Repair merchant** and **World statue / teleport** from the server's NPC data, each as a spot a few metres from the NPC. It only fills what is empty; **Redo all automatically** replaces every saved point, and an arrival point from another town is replaced automatically. Stand where the scroll puts you when you press it, because the bot waits for that exact place after a recall.
+2. To do it by hand instead, stand near and select each service, then save its point: **Warehouse**, **Potion merchant**, **Repair merchant** and **World statue / teleport**. Open the potion shop before saving its merchant. Manual saves override the automatic ones.
 3. Enable **Buy HP** and/or **Buy MP**, and set the low-stock thresholds. Set **HP refill to** and **MP refill to** in potion counts (defaults: **100 HP / 300 MP**). These targets apply to walking restock and every town trip, including full bags and revival. Town buys X-Large potions.
 4. Enable **Use return scroll → town services → reverse return**. Enable the pickup-pet capacity option if wanted.
 5. Carry gold, spare return/reverse scrolls and at least **two free character bag slots**. Save your hunting spot and start the bot.

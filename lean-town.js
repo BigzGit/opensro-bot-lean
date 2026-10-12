@@ -105,6 +105,62 @@ const Town = {
     this.message = 'Town setup updated.';
     Settings.saveProfile(); UI.toast('Saved town ' + role + '.'); UI.draw();
   },
+  // Where each town's services stand, from the server data (see gen-towns.py).
+  towns: TOWN_TABLE,
+  // The known town whose four services all lie within 500 m of the position; the nearest overall wins.
+  detect(point = World.pose()) {
+    let best = null, bestTotal = Infinity;
+    for (const town of this.towns) {
+      const distances = Object.values(town.services).map(s => dist2D(point, s));
+      if (distances.some(d => !(d <= 5000))) continue;
+      const total = distances.reduce((a, b) => a + b, 0);
+      if (total < bestTotal) { best = town; bestTotal = total; }
+    }
+    return best;
+  },
+  // A spot a few metres from the NPC on the side facing `from`: the NPC's own position is usually blocked. With
+  // collision data for the area the spot must be walkable; without it the first choice is used and marked unverified.
+  standPoint(npc, from) {
+    const toward = regionDelta(npc, from) || [1, 0], base = Math.atan2(toward[1], toward[0]);
+    let first = null;
+    for (const distance of [40, 60, 80]) for (const turn of [0, 0.8, -0.8, 1.6, -1.6, 2.4, -2.4, Math.PI]) {
+      const angle = base + turn, x = npc.x + Math.cos(angle) * distance, z = npc.z + Math.sin(angle) * distance;
+      const sx = Math.floor(x / SECTOR), sz = Math.floor(z / SECTOR);
+      const point = { regionId: ((npc.regionId & 255) + sx) | (((npc.regionId >>> 8) + sz) << 8), x: x - sx * SECTOR, y: npc.y, z: z - sz * SECTOR };
+      first ||= point;
+      const local = Navigation.scene && Navigation.local(point);
+      if (local && Navigation.open(local.x, local.z)) return { point, verified: true };
+    }
+    return { point: first, verified: false };
+  },
+  // Fills the arrival point and the four services from the town table. Only empty entries are filled unless
+  // `overwrite` is set; an arrival point that belongs to another town replaces everything.
+  autoSetup(overwrite = false) {
+    if (Hunt.running || this.trip || Restock.recording || !World.inWorld()) { UI.toast('Stop hunting and route recording before setting up the town.', 'warn'); return null; }
+    const c = this.cfg(), here = World.pose();
+    if (!here) return null;
+    const town = this.detect(here);
+    if (!town) {
+      this.message = 'Automatic setup: no known town around you. Use a return scroll, then press the button where it puts you.';
+      UI.toast(this.message, 'warn', 6000); return null;
+    }
+    if (!(c.arrival && this.detect(c.arrival)?.key === town.key)) overwrite = true;
+    const saved = [];
+    if (overwrite || !c.arrival) { c.arrival = { ...here }; saved.push('arrival point'); }
+    let unverified = 0;
+    for (const [role, label] of [['storage', 'warehouse'], ['vendor', 'potion merchant'], ['smith', 'repair merchant'], ['gate', 'world statue']]) {
+      if (c[role] && !overwrite) continue;
+      const s = town.services[role], stand = this.standPoint(s, c.arrival);
+      if (!stand.verified) unverified++;
+      c[role] = { ...stand.point, refObjId: s.refObjId, name: town.name + ' ' + label,
+        npc: { regionId: s.regionId, x: s.x, y: s.y, z: s.z } };
+      saved.push(label);
+    }
+    this.message = saved.length ? `Automatic setup for ${town.name}: saved ${saved.join(', ')}.` + (unverified ? ' Walkable spots could not be checked without collision data; the first trip will tell.' : '')
+      : `Automatic setup for ${town.name}: everything was already saved.`;
+    Settings.saveProfile(); UI.toast(this.message, 'info', 6000); UI.draw();
+    return { town: town.name, saved, unverified };
+  },
   disposable(item) {
     const c = this.cfg(), name = (item.name || '').toLowerCase(), tf = item.typeFlags;
     // Missing type metadata must never turn an item into a disposal candidate; gear marked for deposit is never sold.
@@ -209,7 +265,7 @@ const Town = {
     this.trip.haltAt = now();
     this.trip.haltAttempts = this.trip.haltSent ? 1 : 0;
     if (revival) this.enter('revive-arrival');
-    else this.message = 'Using return scroll; recall must be bound to Hotan.';
+    else this.message = 'Using return scroll; recall must be bound to your town.';
   },
   arrived() {
     this.trip.scrollAttempts = 0; this.trip.scrollRequest = null;
