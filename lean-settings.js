@@ -12,7 +12,7 @@ const DEFAULT_PROFILE = {
   },
   potion: {
     enabled: true, speedScroll: false, hp: { on: true, pct: 60 }, mp: { on: true, pct: 40 },
-    vigor: { on: true, hpPct: 30, mpPct: 15 }, cure: { on: true },
+    vigor: { on: true, hpPct: 30, mpPct: 15 }, cure: { on: true }, petHp: { on: false, pct: 50 },
     prefer: { hp: 0, mp: 0, vigor: 0, cure: 0 }, delayMs: 350,
     restock: {
       enabled: false, vendor: null, route: [], offers: [],

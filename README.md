@@ -15,6 +15,13 @@ A compact OpenSRO bot for hunting, potions, pet loot and automatic town trips.
 
 Settings are saved separately for each character. The bot checks for updates on load and every 15 minutes; click **Update** beside the version when it appears, install, then reload when ready.
 
+## Vigor and pet potions
+
+Under **Supplies → Automatic potion use**:
+
+- **Vigor potions:** tick **Use vigor potions** and set **Vigor when HP below** and **Vigor when MP below**. Vigor potions are used when your HP or MP drops that low and the normal HP and MP potions have not been enough.
+- **Pet recovery kits:** tick **Use recovery kits on my pets** and set **Pet HP below**. When an attack or pickup pet drops below that HP, the bot uses one recovery kit on it, choosing the smallest kit that covers the missing HP (or the largest if none does). Your own potions always go first. Each kit has to be seen consumed before the next one is used; a pet that does not take a kit is left alone for 30 seconds. It is off by default, needs the master **Use potions automatically** switch, and does not buy kits in town.
+
 ## Automatic town trips
 
 With the town cycle on, the walking-route restock controls are hidden because every trip buys potions in town. The **On death** setting is replaced by the town revive option, and the rest thresholds only show while **Rest when low** is ticked.

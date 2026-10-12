@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, AntiStuck, Items, AutoMastery, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, AntiStuck, Items, AutoMastery, PetPotion, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -1213,6 +1213,46 @@ test('town trip stores level-listed gear from the bag and the pet, and protects 
   assert.deepEqual(stored.sort(), [5001, 5005]);
   assert.ok([5002, 5003, 5004].every(ref => gp.inventory.some(i => i.refObjId === ref)), 'buff, alchemy and ordinary bag gear stay');
   assert.ok(f.pet.inventory.some(i => i.refObjId === 5006), 'other pet gear stays for the selling step');
+});
+const PET_KIT = 8428; // consumable 3/3/1/4: the companion HP recovery kit
+function petPotionFixture(change = {}) {
+  const f = fixture(); f.Settings.profile.potion.petHp.on = true;
+  f.PetPotion.maxHp = new Map([[500, 1000]]);
+  const kit = (slot, ref, heal, quantity = 5) => ({ slot, refObjId: ref, typeFlags: PET_KIT, quantity, name: 'Recovery kit', tooltip: { fields: { itemParam1_29c: heal } } });
+  f.World.applyGameplay({ ...f.World.gp, inventory: [kit(20, 2143, 360), kit(21, 2144, 800), kit(22, 9237, 3000)],
+    cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 300, mp: 0, status: 5, dead: false }], ...change });
+  return f;
+}
+const petUses = f => f.commands.filter(c => c.kind === 'item-use');
+test('pet auto potion heals a low attack or pickup pet with the smallest kit that covers the damage', () => {
+  assert.equal(fixture().Settings.profile.potion.petHp.on, false);
+  const f = petPotionFixture(); f.Controller.tick();
+  assert.deepEqual(JSON.parse(JSON.stringify(petUses(f))), [{ kind: 'item-use', slot: 21, companionGid: 50 }], '300/1000 HP is 700 missing: the 800 kit is the smallest that covers it');
+  let g = petPotionFixture(); g.World.applyGameplay({ ...g.World.gp, cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 900, status: 5, dead: false }] });
+  g.Controller.tick(); assert.equal(petUses(g).length, 0, 'above the threshold');
+  g = petPotionFixture(); g.World.applyGameplay({ ...g.World.gp, cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 10, status: 5, dead: false }] });
+  g.Controller.tick(); assert.equal(petUses(g)[0].slot, 22, 'very low HP takes the biggest kit when none covers it exactly');
+  g = petPotionFixture(); g.World.applyGameplay({ ...g.World.gp, cosRecords: [{ gid: 51, refObjId: 500, band: 4, hp: 300, status: 5, dead: false }] });
+  g.Controller.tick(); assert.equal(petUses(g)[0].companionGid, 51, 'pickup pets are healed too');
+});
+test('pet auto potion never touches the wrong pets, the player potions or an unconfirmed retry', () => {
+  let f = petPotionFixture(); f.World.applyGameplay({ ...f.World.gp, cosRecords: [{ gid: 60, refObjId: 500, band: 2, hp: 100, status: 5, dead: false }, { gid: 61, refObjId: 500, band: 3, hp: 100, status: 5, dead: true }] });
+  f.Controller.tick(); assert.equal(petUses(f).length, 0, 'transports and dead pets are ignored');
+  f = petPotionFixture(); f.Settings.profile.potion.petHp.on = false; f.Controller.tick(); assert.equal(petUses(f).length, 0);
+  f = petPotionFixture(); f.Settings.profile.potion.enabled = false; f.Controller.tick(); assert.equal(petUses(f).length, 0, 'the master potion switch also stops pet kits');
+  f = petPotionFixture(); f.World.applyGameplay({ ...f.World.gp, inventory: [] }); f.Controller.tick(); assert.equal(petUses(f).length, 0); assert.match(f.PetPotion.message, /no pet recovery kits/);
+  f = petPotionFixture({ vitals: [{ gid: 1, hp: 30, mp: 100, maxHp: 100, maxMp: 100 }] }); f.World.applyGameplay({ ...f.World.gp, inventory: [...f.World.gp.inventory, { slot: 30, refObjId: 8, typeFlags: 2284, quantity: 5 }] });
+  f.Controller.tick(); assert.equal(petUses(f).length, 1); assert.equal(petUses(f)[0].companionGid, undefined, 'the player potion went first, the pet waits for the next tick');
+  f = petPotionFixture(); f.Controller.tick(); assert.equal(petUses(f).length, 1);
+  f.advance(2000); f.Controller.tick(); assert.equal(petUses(f).length, 1, 'no second kit until the first is seen consumed');
+  f.advance(4000); f.Controller.tick(); assert.equal(petUses(f).length, 1); assert.match(f.PetPotion.message, /did not take/);
+  f.advance(31000); f.Controller.tick(); assert.equal(petUses(f).length, 2, 'retried after the 30 s pause');
+  f = petPotionFixture(); f.Controller.tick(); assert.equal(petUses(f).length, 1);
+  f.World.applyGameplay({ ...f.World.gp, inventory: f.World.gp.inventory.map(i => i.slot === 21 ? { ...i, quantity: 4 } : i), cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 300, status: 5, dead: false }] });
+  f.advance(2000); f.Controller.tick(); assert.equal(petUses(f).length, 2, 'consumption confirms the first and the next kit may follow');
+  f = petPotionFixture(); f.PetPotion.maxHp = null; f.Controller.tick(); assert.equal(petUses(f).length, 0); assert.match(f.PetPotion.message, /Waiting for pet HP data/);
+  f = petPotionFixture(); assert.equal(f.Cmd.itemUseOnPet(20, 999), false, 'unknown pet'); assert.equal(f.Cmd.itemUseOnPet(99, 50), false, 'unknown item');
+  assert.equal(f.Cmd.itemUseOnPet(20, 50), true);
 });
 test('auto mastery is off by default, ignores dead characters and pending training, and backs off after a refusal', () => {
   assert.equal(fixture().Settings.profile.mastery.enabled, false);

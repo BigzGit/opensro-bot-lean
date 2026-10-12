@@ -336,7 +336,14 @@ const UI = {
       pots.append(this.check('Use beginner +100% speed scroll automatically', () => P().speedScroll, v => { P().speedScroll = v; SpeedScroll.reset(); }),
         el('p', 'Uses only the beginner scroll during hunting or travel when no movement-speed buff is active. Works during combat casts; potions have priority. Waits for buff confirmation and stops retrying after three unconfirmed attempts.', 'muted'), this.speedNote);
       for (const kind of ['hp', 'mp']) pots.append(this.check('Use ' + kind.toUpperCase(), () => P()[kind].on, v => P()[kind].on = v), this.number(kind.toUpperCase() + ' below (%)', () => P()[kind].pct, v => P()[kind].pct = v, 5, 95));
-      pots.append(this.check('Use vigor potions', () => P().vigor.on, v => P().vigor.on = v), this.check('Use cure pills', () => P().cure.on, v => P().cure.on = v));
+      pots.append(this.check('Use vigor potions', () => P().vigor.on, v => P().vigor.on = v),
+        this.number('Vigor when HP below (%)', () => P().vigor.hpPct, v => P().vigor.hpPct = v, 0, 95),
+        this.number('Vigor when MP below (%)', () => P().vigor.mpPct, v => P().vigor.mpPct = v, 0, 95),
+        this.check('Use cure pills', () => P().cure.on, v => P().cure.on = v),
+        this.check('Use recovery kits on my pets', () => P().petHp.on, v => { P().petHp.on = v; PetPotion.reset(); }),
+        this.number('Pet HP below (%)', () => P().petHp.pct, v => P().petHp.pct = v, 5, 95),
+        el('p', 'Pets: when an attack or pickup pet drops below this HP, one recovery kit (the smallest that covers the missing HP) is used on it. Your own potions always go first; each kit must be seen consumed before the next. Vigor potions need no setting beyond the two thresholds above; they are used only when the HP and MP potions are not enough.', 'muted'));
+      this.petPotionNote = el('p', PetPotion.message, 'muted'); pots.append(this.petPotionNote);
       this.pane.append(pots);
       const townOn = Town.cfg().enabled;
       const shop = this.group('Potion restock');
@@ -445,6 +452,7 @@ const UI = {
       this.partyNote.textContent = notes.join(' ');
     }
     if (!this.status) return;
+    if (this.current === 'Supplies' && this.petPotionNote) this.petPotionNote.textContent = PetPotion.message;
     if (this.current === 'Supplies' && this.speedNote) this.speedNote.textContent = SpeedScroll.message;
     if (this.current === 'Loot' && this.petNote) { this.petNote.hidden = !Loot.petMode(); this.petNote.textContent = Loot.petStatus(); }
     Learned.repair();
