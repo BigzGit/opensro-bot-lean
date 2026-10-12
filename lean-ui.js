@@ -413,6 +413,7 @@ const UI = {
         this.check('Auto-resurrect party members', () => party().autoRes, v => { party().autoRes = v; Resurrect.reset(); }),
         this.number('Maximum res distance from hunt spot (m)', () => party().resRadius / 10, v => party().resRadius = v * 10, 1, 100),
         el('p', 'Works during hunting and while stopped. Walks into skill range for visible dead members within the maximum radius, casts Rebirth, then returns. During hunting the radius is measured from the saved hunt spot; while stopped it uses your starting position. Collision data is required for walking. Travel stops after 30 seconds or 12 seconds without progress per leg. The member must accept the revival. Travel, shopping and manual control take priority.', 'muted')));
+      AutoMastery.draw(this.pane);
       this.pane.append(this.group('Profiles', el('p', 'Settings are saved separately for each character.', 'muted'),
         this.button('Export nixxane bot settings', () => {
           const url = URL.createObjectURL(new Blob([JSON.stringify({ app: 'sro-bot-lean', version: VERSION, profile: Settings.profile }, null, 2)], { type: 'application/json' }));
@@ -435,6 +436,7 @@ const UI = {
     const diagnosticState = Diagnostics.sample();
     if (this.waitNote) this.waitNote.textContent = Diagnostics.lines(diagnosticState);
     if (this.townNote) this.townNote.textContent = Town.status();
+    if (this.current === 'Settings' && AutoMastery.note) AutoMastery.note.textContent = AutoMastery.status();
     if (this.current === 'Settings' && this.stuckNote) this.stuckNote.textContent = AntiStuck.status();
     if (this.current === 'Settings' && this.partyNote) {
       const notes = [Settings.profile.party.autoRecruit ? Party.message : 'Auto-recruit off.'];

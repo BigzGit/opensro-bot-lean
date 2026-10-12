@@ -127,6 +127,7 @@ const Controller = {
       }
       if (!World.inWorld()) { this.mode = 'waiting'; return; }
       Party.tick();
+      AutoMastery.tick();
       Potion.tick();
       Loot.checkPetFull();
       if (Town.tick()) { this.mode = 'town service'; return; }

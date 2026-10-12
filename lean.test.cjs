@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, AntiStuck, Items, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, AntiStuck, Items, AutoMastery, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -1022,6 +1022,45 @@ test('SoX chime is a distinct audible alert and unknown sounds stay silent', () 
     createGain: () => ({ gain: { setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {}, disconnect() {} }) };
   assert.equal(f.Sound.play('sox'), true); assert.equal(notes.length, 4);
   assert.equal(f.Sound.play('good'), false); assert.equal(notes.length, 4);
+});
+function masteryFixture(extra = {}) {
+  const f = fixture(), m = f.Settings.profile.mastery;
+  m.enabled = true; m.ids = [257, 273];
+  f.Stats.levels = { 1: { masteryTrainSpCost: 1 }, 10: { masteryTrainSpCost: 9 }, 11: { masteryTrainSpCost: 10 }, 12: { masteryTrainSpCost: 11 } };
+  const progression = { ...f.World.gp.progression, level: 30, skillPoints: 100, masteries: [{ id: 257, level: 10 }, { id: 273, level: 0 }, { id: 274, level: 30 }], ...extra };
+  f.World.applyGameplay({ ...f.World.gp, progression });
+  return f;
+}
+const trains = f => f.commands.filter(c => c.kind === 'mastery-train').map(c => c.id);
+test('auto mastery raises the first selected mastery one confirmed level at a time', () => {
+  const f = masteryFixture();
+  f.Controller.tick(); assert.deepEqual(trains(f), [257]);
+  f.advance(3000); f.Controller.tick(); assert.deepEqual(trains(f), [257], 'no second request before the first is confirmed');
+  f.World.applyGameplay({ ...f.World.gp, progression: { ...f.World.gp.progression, skillPoints: 91, masteries: [{ id: 257, level: 11 }, { id: 273, level: 0 }, { id: 274, level: 30 }] } });
+  f.advance(2000); f.Controller.tick();
+  assert.ok(f.notices.some(n => /raised to 11/.test(n))); assert.deepEqual(trains(f), [257, 257]);
+});
+test('auto mastery follows the game rules: level cap, skill points, free level 0, selected only', () => {
+  let f = masteryFixture({ skillPoints: 5 }); f.Controller.tick(); assert.deepEqual(trains(f), [273], 'level 0 is free; 257 needs 9 points');
+  f = masteryFixture(); f.Settings.profile.mastery.ids = [274]; f.Controller.tick(); assert.deepEqual(trains(f), []);
+  assert.match(f.AutoMastery.status(), /character level limit/);
+  f = masteryFixture(); f.Settings.profile.mastery.ids = []; f.Controller.tick(); assert.deepEqual(trains(f), []);
+  f = masteryFixture({ level: 10 }); f.Settings.profile.mastery.ids = [257]; f.Controller.tick(); assert.deepEqual(trains(f), [], 'a mastery cannot pass the character level');
+  f = masteryFixture(); f.Stats.levels = { 1: { masteryTrainSpCost: 1 } }; f.Settings.profile.mastery.ids = [257]; f.Controller.tick();
+  assert.deepEqual(trains(f), []); assert.match(f.AutoMastery.status(), /price unknown/);
+});
+test('auto mastery is off by default, ignores dead characters and pending training, and backs off after a refusal', () => {
+  assert.equal(fixture().Settings.profile.mastery.enabled, false);
+  let f = masteryFixture(); f.Settings.profile.mastery.enabled = false; f.Controller.tick(); assert.deepEqual(trains(f), []);
+  f = masteryFixture(); f.World.isDead = () => true; f.Controller.tick(); assert.deepEqual(trains(f), []);
+  f = masteryFixture(); f.World.applyGameplay({ ...f.World.gp, trainingPending: true }); f.Controller.tick(); assert.deepEqual(trains(f), []);
+  f = masteryFixture(); f.World.applyGameplay({ ...f.World.gp, trainingError: 'Training result is unknown. Reconnect before trying again.' }); f.Controller.tick();
+  assert.deepEqual(trains(f), []); assert.match(f.AutoMastery.status(), /Reconnect/);
+  f = masteryFixture(); f.Controller.tick(); assert.deepEqual(trains(f), [257]);
+  f.advance(11000); f.Controller.tick(); assert.deepEqual(trains(f), [257, 273], 'refused mastery is skipped, the next one is tried');
+  f.advance(3000); f.Controller.tick(); assert.deepEqual(trains(f), [257, 273]);
+  f.advance(61000); f.World.applyGameplay({ ...f.World.gp, progression: { ...f.World.gp.progression, masteries: [{ id: 257, level: 10 }, { id: 273, level: 1 }, { id: 274, level: 30 }] } });
+  f.Controller.tick(); assert.equal(trains(f).at(-1), 257, 'retried after the backoff');
 });
 test('pet picks up during combat and casting even with finish-fight enabled', () => {
   const f = fixture(); petFight(f); f.drop(20, 3436); let fights = 0;
