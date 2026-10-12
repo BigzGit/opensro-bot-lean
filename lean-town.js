@@ -512,8 +512,19 @@ const Town = {
       if (!gp.inventoryPending && !gp.returnScroll && dist2D(World.pose(), c.arrival) <= clamp(Number(c.arrivalRadius) || 500, 100, 1500)) this.arrived();
       else this.message = 'Waiting for revival at the saved town arrival area.';
     } else if (['recall-wait', 'reverse-wait'].includes(t.phase)) {
-      const dest = t.phase === 'recall-wait' ? c.arrival : t.origin;
       const radius = t.phase === 'recall-wait' ? clamp(Number(c.arrivalRadius) || 500, 100, 1500) : 300;
+      // The scroll always lands on the same spot. If the saved arrival point is not it (saved where you happened to
+      // stand, say), adopt the spot the character settled on after a confirmed trip, but only in the saved services' town.
+      if (t.phase === 'recall-wait' && t.transition && dist2D(World.pose(), c.arrival) > radius && !gp.inventoryPending && !gp.returnScroll) {
+        const here = World.pose(), town = this.detect(here), saved = this.detect(c.vendor || c.storage || c.arrival);
+        if (!town || !saved || town.key !== saved.key) t.landed = null;
+        else if (!t.landed || dist2D(t.landed.pose, here) > 3) t.landed = { pose: { ...here }, at: now() };
+        else if (now() - t.landed.at >= 3000) {
+          c.arrival = { ...here }; t.config = JSON.stringify(c); t.landed = null; Settings.saveProfile();
+          Log.info('Town arrival point updated to where the return scroll landed.');
+        }
+      }
+      const dest = t.phase === 'recall-wait' ? c.arrival : t.origin;
       const distance = dist2D(World.pose(), dest);
       // After death the game's last scroll point need not equal the saved
       // hunt center (or an older remembered scroll point). Accept the saved

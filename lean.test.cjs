@@ -1421,6 +1421,23 @@ function townFixture() {
   f.Hunt.start();
   return { ...f, pet };
 }
+test('a wrong saved arrival point is replaced by where the return scroll actually lands', () => {
+  const f = townFixture(), c = f.Town.cfg(), gp = f.World.gp;
+  f.Town.detect = () => ({ key: 'KT' });
+  c.arrivalRadius = 500; c.arrival = { ...gp.pose, x: gp.pose.x + 760 };
+  f.Town.begin(); const t = f.Town.trip; t.phase = 'recall-wait'; t.at = f.now ? f.now() : t.at; t.transition = true;
+  t.scrollRequest = { slot: 13, ref: 200, quantity: 3, state: gp, accepted: true, at: t.at };
+  f.World.gp.returnScroll = false; const here = { ...gp.pose };
+  assert.equal(f.Town.tick(), true); assert.match(f.Town.message, /Waiting for arrival area: 76 m/);
+  f.advance(1500); f.Town.tick(); assert.notDeepEqual(JSON.parse(JSON.stringify(c.arrival)), JSON.parse(JSON.stringify(here)), 'not yet: it must settle first');
+  f.advance(1600); f.Town.tick();
+  assert.equal(c.arrival.x, here.x); assert.notEqual(f.Town.trip, null, 'the trip carries on after the point is replaced');
+  assert.equal(f.Town.trip.phase, 'walk-storage');
+  const g = townFixture(); g.Town.detect = () => null; g.Town.cfg().arrival = { ...g.World.gp.pose, x: g.World.gp.pose.x + 760 };
+  g.Town.begin(); g.Town.trip.phase = 'recall-wait'; g.Town.trip.transition = true; g.Town.trip.scrollRequest = { slot: 13, ref: 200, quantity: 3, state: g.World.gp, accepted: true, at: 0 };
+  g.World.gp.returnScroll = false; g.Town.tick(); g.advance(4000); g.Town.tick();
+  assert.equal(g.Town.cfg().arrival.x, g.World.gp.pose.x + 760, 'outside any known town the saved point is left alone');
+});
 test('automatic town setup detects the town and fills only what is missing', () => {
   const f = fixture(), c = f.Town.cfg(), at = (regionId, x, z) => ({ regionId, x, y: 243, z });
   assert.deepEqual(JSON.parse(JSON.stringify(f.Town.towns.map(t => t.name))), ['Constantinople', 'Donwhang', 'Hotan', 'Jangan', 'Samarkand']);
