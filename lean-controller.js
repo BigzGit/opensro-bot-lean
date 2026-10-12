@@ -89,7 +89,14 @@ function stopAll() {
 }
 
 const Controller = {
-  mode: 'idle', lastErrorAt: -Infinity, resumeAfterRevive: false,
+  mode: 'idle', lastErrorAt: -Infinity, resumeAfterRevive: false, guardAt: {},
+  // Optional features must never stop hunting: an error in one is logged (at most every 5 s) and skipped.
+  guard(name, fn) {
+    try { return fn(); } catch (e) {
+      if (now() - (this.guardAt[name] ?? -Infinity) > 5000) { this.guardAt[name] = now(); Log.error(name + ' error: ' + (e?.message || e)); }
+      return false;
+    }
+  },
   returnAfterRevive() {
     this.resumeAfterRevive = false;
     Hunt.deathAt = 0; Hunt.revived = false; Hunt.targetGid = 0;

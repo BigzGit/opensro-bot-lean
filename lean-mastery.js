@@ -130,3 +130,8 @@ const AutoMastery = {
     parent.append(box);
   },
 };
+// Optional features run behind the controller's guard so a bug in one can never stop hunting.
+for (const [name, owner, method] of [['Party', Party, 'tick'], ['Party resurrection', Party, 'acceptResurrection'], ['Auto mastery', AutoMastery, 'tick'], ['SoX alerts', Stats, 'soxFound']]) {
+  const original = owner[method];
+  owner[method] = function (...args) { return Controller.guard(name, () => original.apply(this, args)); };
+}

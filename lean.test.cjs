@@ -1158,6 +1158,25 @@ test('a skill is not blamed for a slow game snapshot, only for a real rejection'
   f.advance(800); f.World.applyGameplay({ ...f.World.gp }); assert.equal(f.Combat.cast(500, 30), false);
   assert.equal(f.Combat.blocked(500), true, 'two real rejections still pause the skill');
 });
+test('town never deposits SoX gear that a buff set, alchemy or the Keep names rely on', () => {
+  const f = townFixture(), gp = f.World.gp;
+  const gear = (slot, ref, name) => ({ slot, refObjId: ref, typeFlags: 44 | (6 << 7), quantity: 1, name, magic: [], plus: 0, tooltip: { fields: { rarity: 2, itemClass: 1 } } });
+  const buffWeapon = gear(20, 3001, 'Buff staff'), spare = gear(21, 3002, 'Spare sword'), alchemy = gear(22, 3003, 'Alchemy sword'), favorite = gear(23, 3004, 'Favorite blade');
+  gp.inventory.push(buffWeapon, spare, alchemy, favorite);
+  f.Settings.profile.macro.buffSets = [{ id: 1, name: 'Cleric', weapon: f.BuffGear.key(buffWeapon), shield: null }];
+  f.Alchemy.selected = { slot: 22, fingerprint: 'x' };
+  assert.deepEqual([buffWeapon, spare, alchemy, favorite].map(i => f.Town.soxItem(i, true)), [false, true, false, false]);
+  assert.equal(f.Town.soxItem(alchemy, false), true, 'an alchemy slot number means nothing for pet items');
+});
+test('an error in an optional feature is logged and skipped instead of stopping the bot', () => {
+  const f = fixture(); f.Hunt.start(); f.notices.length = 0;
+  f.Settings.profile.mastery.enabled = true; f.Settings.profile.mastery.ids = [257]; f.AutoMastery.rows = () => { throw Error('boom'); };
+  f.Stats.levels = {}; f.World.applyGameplay({ ...f.World.gp, progression: { ...f.World.gp.progression, level: 30, skillPoints: 5, masteries: [{ id: 257, level: 1 }] } });
+  f.Controller.tick(); f.Controller.tick();
+  assert.equal(f.Hunt.running, true); assert.equal(f.notices.some(n => /Bot stopped/.test(n)), false);
+  f.Party.tick = f.Party.tick; f.Controller.guard('x', () => { throw Error('again'); });
+  assert.equal(f.Controller.guard('y', () => 7), 7);
+});
 test('auto mastery is off by default, ignores dead characters and pending training, and backs off after a refusal', () => {
   assert.equal(fixture().Settings.profile.mastery.enabled, false);
   let f = masteryFixture(); f.Settings.profile.mastery.enabled = false; f.Controller.tick(); assert.deepEqual(trains(f), []);

@@ -119,7 +119,15 @@ const Town = {
     return true;
   },
   // Deposit-worthy gear: Star/Moon/Sun equipment from the character bag or the pickup pet.
-  soxItem(item) { return !!this.cfg().storeSox && Number.isInteger(item.typeFlags) && ItemType.isEquipment(item.typeFlags) && Items.soxOf(item) > 0; },
+  // Gear the bot or the player relies on stays put: names in Keep, a saved buff set's weapon or shield, and the
+  // weapon picked for alchemy (checked by bag slot, so only for items from the character bag).
+  soxItem(item, fromBag = false) {
+    if (!this.cfg().storeSox || !Number.isInteger(item.typeFlags) || !ItemType.isEquipment(item.typeFlags) || Items.soxOf(item) <= 0) return false;
+    if (splitList(this.cfg().keep).some(s => (item.name || '').toLowerCase().includes(s))) return false;
+    const key = BuffGear.key(item);
+    if (BuffGear.cfg().buffSets.some(s => s.weapon === key || s.shield === key)) return false;
+    return !(fromBag && Alchemy.selected && Alchemy.selected.slot === item.slot);
+  },
   eligible(item) { return this.soxItem(item) || this.disposable(item) && Loot.category(item.typeFlags) === 'elixirs'; },
   sellable(item) { return this.disposable(item) && Loot.category(item.typeFlags) !== 'elixirs'; },
   autoRevive() { return this.cfg().enabled && this.cfg().revive; },
@@ -270,7 +278,7 @@ const Town = {
     const bagItem = t.staged ? World.items().find(i => i.slot === t.staged.slot && i.refObjId === t.staged.ref) : null;
     if (t.staged && !bagItem) return this.fail('Staged pet item changed unexpectedly.');
     // Gear the character picked up is deposited straight from the bag, then pet loot is staged through it.
-    const bagSox = bagItem ? null : World.items().find(i => this.soxItem(i));
+    const bagSox = bagItem ? null : World.items().find(i => this.soxItem(i, true));
     const direct = bagItem || bagSox;
     const item = direct || pet?.rec.inventory.find(i => this.eligible(i));
     if (!item) {
