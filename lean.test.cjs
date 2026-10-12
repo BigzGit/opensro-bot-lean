@@ -1070,6 +1070,55 @@ test('auto mastery can leave a gap below the character level', () => {
   f = masteryFixture({ masteries: [{ id: 257, level: 29 }] }); f.Stats.levels = { 29: { masteryTrainSpCost: 5 } };
   f.Settings.profile.mastery.ids = [257]; f.Settings.profile.mastery.gap = 'x'; f.Controller.tick(); assert.deepEqual(trains(f), [257]);
 });
+function skillFixture(extra = {}, learned = [1001]) {
+  const f = masteryFixture(extra); f.Settings.profile.mastery.enabled = false; f.Settings.profile.mastery.skills = true;
+  const row = (id, level, more = {}) => ({ id, group: 100, level, trainable: true, spCost: 50, masteries: [{ ID: 257, Level: 10 }], prerequisites: [], reqStr: 0, reqInt: 0, ...more });
+  f.World.rebuildCatalog([row(1001, 1), row(1002, 2), row(1003, 3, { spCost: 80 }), { id: 2001, group: 200, level: 1, trainable: true, spCost: 10, masteries: [], prerequisites: [], reqStr: 0, reqInt: 0 }]);
+  f.World.applyGameplay({ ...f.World.gp, skills: learned });
+  f.Settings.profile.macro.rotations.normal = [{ id: 1001, group: 100 }];
+  return f;
+}
+const skillTrains = f => f.commands.filter(c => c.kind === 'skill-train').map(c => c.id);
+test('auto skill upper learns the next level of skills in the rotation, one confirmed level at a time', () => {
+  const f = skillFixture();
+  f.Controller.tick(); assert.deepEqual(skillTrains(f), [1002]);
+  f.advance(3000); f.Controller.tick(); assert.deepEqual(skillTrains(f), [1002], 'no second request before the first is confirmed');
+  f.World.applyGameplay({ ...f.World.gp, skills: [1001, 1002], progression: { ...f.World.gp.progression, skillPoints: 90 } });
+  f.advance(2000); f.Controller.tick();
+  assert.ok(f.notices.some(n => /learned/.test(n))); assert.deepEqual(skillTrains(f), [1002, 1003]);
+  f.World.applyGameplay({ ...f.World.gp, skills: [1001, 1002, 1003] }); f.advance(2000); f.Controller.tick(); f.advance(2000); f.Controller.tick();
+  assert.deepEqual(skillTrains(f), [1002, 1003], 'no further level exists');
+  const buffs = skillFixture(); buffs.Settings.profile.macro.rotations.normal = []; buffs.Settings.profile.macro.buffs = [{ id: 1001, group: 100 }];
+  buffs.Controller.tick(); assert.deepEqual(skillTrains(buffs), [1002], 'buff skills are upgraded too');
+});
+test('auto skill upper follows the game requirements and never trains skills you do not use', () => {
+  let f = skillFixture(); f.Settings.profile.macro.rotations.normal = []; f.Controller.tick(); assert.deepEqual(skillTrains(f), [], 'only skills in rotations, buffs or imbue');
+  f = skillFixture({ masteries: [{ id: 257, level: 9 }, { id: 273, level: 0 }] }); f.Controller.tick(); assert.deepEqual(skillTrains(f), []); assert.match(f.AutoMastery.status(), /mastery level too low/);
+  f = skillFixture({ skillPoints: 49 }); f.Controller.tick(); assert.deepEqual(skillTrains(f), []); assert.match(f.AutoMastery.status(), /needs 50 skill points/);
+  f = skillFixture(); f.World.rebuildCatalog([...f.World.catalog.values()].map(s => s.id === 1002 ? { ...s, reqStr: 99 } : s)); f.Controller.tick();
+  assert.deepEqual(skillTrains(f), []); assert.match(f.AutoMastery.status(), /strength too low/);
+  f = skillFixture(); f.World.rebuildCatalog([...f.World.catalog.values()].map(s => s.id === 1002 ? { ...s, prerequisites: [{ ID: 300, Level: 1 }] } : s)); f.Controller.tick();
+  assert.deepEqual(skillTrains(f), []); assert.match(f.AutoMastery.status(), /prerequisite/);
+  f = skillFixture(); f.World.rebuildCatalog([...f.World.catalog.values()].map(s => s.id === 1002 ? { ...s, trainable: false } : s)); f.Controller.tick(); assert.deepEqual(skillTrains(f), []);
+  f = skillFixture(); f.Settings.profile.mastery.skills = false; f.Controller.tick(); assert.deepEqual(skillTrains(f), []);
+});
+test('the skill point reserve is never spent on masteries or skills', () => {
+  let f = masteryFixture({ skillPoints: 20 }); f.Settings.profile.mastery.ids = [257]; f.Settings.profile.mastery.reserve = 12; f.Controller.tick();
+  assert.deepEqual(trains(f), [], '20 points leaves 8 after the reserve, below the price of 9'); assert.match(f.AutoMastery.status(), /beyond the 12 reserve/);
+  f.Settings.profile.mastery.reserve = 11; f.advance(2000); f.Controller.tick(); assert.deepEqual(trains(f), [257]);
+  f = skillFixture({ skillPoints: 60 }); f.Settings.profile.mastery.reserve = 11; f.Controller.tick(); assert.deepEqual(skillTrains(f), []);
+  f.Settings.profile.mastery.reserve = 10; f.advance(2000); f.Controller.tick(); assert.deepEqual(skillTrains(f), [1002]);
+  f = skillFixture({ skillPoints: 60 }); f.Settings.profile.mastery.reserve = 'x'; f.Controller.tick(); assert.deepEqual(skillTrains(f), [1002], 'bad saved values mean no reserve');
+});
+test('spend order: masteries first, skills first, or alternating', () => {
+  const both = order => { const f = skillFixture(); f.Settings.profile.mastery.enabled = true; f.Settings.profile.mastery.ids = [273]; f.Settings.profile.mastery.order = order; return f; };
+  let f = both('masteries'); f.Controller.tick(); assert.equal(f.commands.at(-1).kind, 'mastery-train');
+  f = both('skills'); f.Controller.tick(); assert.equal(f.commands.at(-1).kind, 'skill-train');
+  f = both('alternate'); f.Controller.tick(); assert.equal(f.commands.at(-1).kind, 'mastery-train');
+  f.World.applyGameplay({ ...f.World.gp, progression: { ...f.World.gp.progression, masteries: [{ id: 257, level: 10 }, { id: 273, level: 1 }, { id: 274, level: 30 }] } });
+  f.advance(2000); f.Controller.tick(); assert.equal(f.commands.at(-1).kind, 'skill-train', 'alternates to skills after a mastery is confirmed');
+  assert.equal(fixture().Settings.profile.mastery.skills, false); assert.equal(fixture().Settings.profile.mastery.order, 'masteries');
+});
 test('auto mastery is off by default, ignores dead characters and pending training, and backs off after a refusal', () => {
   assert.equal(fixture().Settings.profile.mastery.enabled, false);
   let f = masteryFixture(); f.Settings.profile.mastery.enabled = false; f.Controller.tick(); assert.deepEqual(trains(f), []);

@@ -60,9 +60,16 @@ Leave **Revive in town and reverse to last scroll point** enabled under the town
 
 If something stalls, use **Settings → Send bug report**, which opens a draggable report window over the game. Preview the diagnostics, optionally add an explanation and screenshot, then click **Send to developer**. Check screenshots for private details. Nothing sends automatically.
 
-## Auto mastery
+## Auto mastery and skills
 
-Under **Settings → Auto mastery**, tick **Raise selected masteries automatically** and tick the masteries you want, in the order you want them raised. The bot spends skill points one level at a time and waits for each level to be confirmed. Set **Keep this many levels below my level** to leave a gap: with a gap of 2 on a level 30 character, no mastery goes past 28. It follows the game's rules: a mastery cannot pass your character level or 120, level 0 is free, and otherwise the price is the table cost of the mastery's current level. It works while hunting is stopped and does nothing while you are dead. If the server refuses a level (for example its mastery total limit), the bot waits a minute before trying that mastery again. It is off by default and saved per character; it never touches skills.
+Under **Settings → Auto mastery and skills** the bot can spend skill points for you, one confirmed level at a time. It is off by default and saved per character.
+
+- **Masteries:** tick **Raise selected masteries automatically** and tick the masteries you want, in the order you want them raised. A mastery stops at your character level (or 120) minus **Keep this many levels below my level**. Level 0 is free; otherwise the price is the table cost of its current level.
+- **Skills:** tick **Upgrade my rotation and buff skills automatically** to learn the next level of the attack, buff and imbue skills you already use. It applies the game's own requirements: the skill must be trainable and the next level of its group, and your mastery levels, prerequisite skills, STR, INT and skill points must be enough. Skills outside your rotations, buffs and imbue are never touched.
+- **Reserve:** **Keep this many skill points unspent** is never spent on masteries or skills, for example to save points for something you will learn by hand.
+- **Order:** **Spend skill points on** chooses masteries first, skills first, or alternating after each confirmed level.
+
+It works while hunting is stopped and does nothing while you are dead or during a town trip. If the server refuses a level (for example its mastery total limit) the bot waits a minute before trying that one again.
 
 ## Anti-stuck
 
