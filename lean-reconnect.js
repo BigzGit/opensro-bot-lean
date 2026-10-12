@@ -54,10 +54,8 @@ const Reconnect = {
       this.clear(i.hunting && World.isDead() ? 'Back in the game, but the character is dead; hunting was not resumed.' : 'Back in the game.');
       return UI.toast(this.message, 'info', 4000);
     }
-    const H = Hunt.cfg(), pose = World.pose(), distance = H.center && pose ? dist2D(pose, H.center) : Infinity;
-    if (Number.isFinite(distance) && distance <= Math.max(H.radius * 1.5, 600)) { this.clear(); UI.toast('Back in the game; resuming hunting.', 'info', 4000); Hunt.start(); }
-    else if (Number.isFinite(distance)) { this.clear(); UI.toast('Back in the game; walking back to the hunting spot.', 'info', 4000); WalkBack.start(true); }
-    else { this.clear('Back in the game, but not at the hunting spot. Use Return & hunt when ready.'); UI.toast(this.message, 'warn', 6000); }
+    const outcome = Controller.resumeHunting('Back in the game');
+    this.clear(outcome === 'stopped' ? 'Back in the game, but not at the hunting spot. Use Return & hunt when ready.' : '');
   },
 };
 bus.on('phase', phase => {

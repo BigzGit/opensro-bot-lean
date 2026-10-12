@@ -52,6 +52,36 @@ const Party = {
       this.message = 'Waiting for registration confirmation.';
     }
   },
+  // Hunting at the moment of death is remembered, so a resurrection accepted within 15 minutes resumes it whatever the
+  // "On death" setting did. A revive the player or the bot does itself never resumes anything.
+  huntAtDeath: null, resumeHunt: null, consentAt: -Infinity, aliveSince: 0,
+  noteDeath() { if (Hunt.running && !this.huntAtDeath) this.huntAtDeath = { at: now() }; },
+  // Another online party member who is up and in view might resurrect us.
+  helperNearby() {
+    const social = World.gp?.social;
+    return !!social?.members?.some(m => m && m.name && m.name !== social.localName && (m.status & 15) === 0 &&
+      [...World.ents.values()].some(e => e.kind === 'player' && e.name === m.name && e.appearanceState?.[0] !== 2));
+  },
+  // With Accept resurrection on and a helper at hand, wait longer before the bot revives itself.
+  reviveDelay() { return Settings.profile.party.acceptRes && this.helperNearby() ? 20000 : 5000; },
+  // Never revive while an offer is open or an acceptance was just sent.
+  resBusy() { return !!World.gp?.social?.resurrection || now() - this.consentAt < 4000; },
+  resumeTick() {
+    const r = this.resumeHunt;
+    if (this.huntAtDeath && now() - this.huntAtDeath.at > 15 * 60000) this.huntAtDeath = null;
+    if (!World.inWorld() || World.isDead()) { this.aliveSince = 0; return; }
+    if (!this.aliveSince) this.aliveSince = now();
+    if (!r) {
+      // Alive without an accepted resurrection: the memory belongs to a death that is over.
+      if (this.huntAtDeath && now() - this.aliveSince > 10000) this.huntAtDeath = null;
+      return;
+    }
+    if (Hunt.running) { this.resumeHunt = this.huntAtDeath = null; return; }
+    if (now() - r.at > 120000) { this.resumeHunt = this.huntAtDeath = null; return; }
+    if (now() - this.aliveSince < 2000 || !World.local() || World.gp?.inventoryPending) return;
+    this.resumeHunt = this.huntAtDeath = null;
+    Controller.resumeHunting('Resurrected');
+  },
   // A dead character gets a Yes/No resurrection question from a caster's Rebirth skill. Only party members
   // are answered, and only while dead; other questions (including mutation proposals) are left to the player.
   acceptResurrection() {
@@ -61,6 +91,8 @@ const Party = {
     if (!caster?.name || !social.members.some(m => m?.name === caster.name && m.name !== social.localName)) return;
     if (!Cmd.spaced('resurrection-consent')) return;
     if (Cmd.raw({ kind: 'resurrection-consent', accept: true }, 'Accept resurrection from ' + caster.name)) {
+      this.consentAt = now();
+      this.resumeHunt = this.huntAtDeath && !Hunt.running && now() - this.huntAtDeath.at < 15 * 60000 ? { at: now() } : null;
       UI.toast('Accepted resurrection from ' + caster.name, 'info', 3000);
     }
   },

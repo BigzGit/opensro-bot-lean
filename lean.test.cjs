@@ -1315,6 +1315,48 @@ test('reconnect never fights the player: logout, disconnect, exit or a manual lo
   const h = reconnectFixture(); h.lose(); h.f.advance(13 * 3600 * 1000); h.f.Controller.tick(); assert.equal(h.f.Reconnect.active(), false); assert.match(h.f.Reconnect.message, /Gave up/);
   assert.equal(JSON.stringify(h.sent).includes('secret'), false);
 });
+function deathFixture(onDeath = 'stop') {
+  const f = fixture(); f.Settings.profile.party.acceptRes = true; f.Settings.profile.hunt.onDeath = onDeath;
+  f.World.ents.set(77, { gid: 77, kind: 'player', name: 'Healer', appearanceState: [0] });
+  const social = (extra = {}) => ({ localName: 'Me', self: 10, leader: 10, options: 1, members: [{ id: 10, name: 'Me', status: 0 }, { id: 11, name: 'Healer', status: 0 }], ...extra });
+  f.World.gp.social = social(); f.Hunt.start();
+  const state = { dead: false }; f.World.isDead = () => state.dead;
+  return { f, state, social, die() { state.dead = true; f.World.ents.get(1).appearanceState = [2, 0, 0]; f.Controller.tick(); }, offer() { f.World.gp.social = social({ resurrection: { gid: 77 } }); }, live() { state.dead = false; f.World.ents.get(1).appearanceState = [0, 0, 0]; } };
+}
+const consents = f => f.commands.filter(c => c.kind === 'resurrection-consent').length;
+test('hunting that was on when the character died resumes after an accepted resurrection, whatever On death does', () => {
+  for (const mode of ['stop', 'wait', 'revive']) {
+    const { f, die, offer, live } = deathFixture(mode); die();
+    if (mode === 'stop') assert.equal(f.Hunt.running, false, 'stop mode stops at death as before');
+    offer(); f.advance(300); f.Controller.tick(); assert.equal(consents(f), 1, mode);
+    f.World.gp.social = { ...f.World.gp.social, resurrection: undefined }; live(); f.advance(300); f.Controller.tick(); f.advance(2500); f.Controller.tick();
+    assert.equal(f.Hunt.running, true, mode + ' resumes hunting'); assert.equal(f.Party.resumeHunt, null, mode + ' resume memory consumed');
+    assert.equal(f.commands.filter(c => c.kind === 'rebirth').length, 0, mode + ': the bot never revived itself');
+  }
+});
+test('resurrection resume is only for accepted resurrections, expires, and respects where the character is', () => {
+  let t = deathFixture('stop'); t.die(); t.live(); t.f.advance(300); t.f.Controller.tick(); t.f.advance(11000); t.f.Controller.tick(); t.f.advance(3000); t.f.Controller.tick();
+  assert.equal(t.f.Hunt.running, false, 'a revive that was not an accepted resurrection resumes nothing'); assert.equal(t.f.Party.huntAtDeath, null);
+  t = deathFixture('stop'); t.die(); t.f.advance(16 * 60000); t.offer(); t.f.Controller.tick(); t.live(); t.f.advance(300); t.f.Controller.tick(); t.f.advance(2500); t.f.Controller.tick();
+  assert.equal(t.f.Hunt.running, false, 'after 15 minutes the memory is gone');
+  t = deathFixture('stop'); t.f.Hunt.stop(); t.die(); t.offer(); t.f.Controller.tick(); t.live(); t.f.advance(300); t.f.Controller.tick(); t.f.advance(2500); t.f.Controller.tick();
+  assert.equal(t.f.Hunt.running, false, 'a bot that was not hunting stays stopped');
+  t = deathFixture('stop'); t.die(); t.offer(); t.f.Controller.tick(); t.live(); t.f.World.gp.pose = { ...t.f.World.gp.pose, x: 100 + 3000 }; t.f.advance(300); t.f.Controller.tick(); t.f.advance(2500); t.f.Controller.tick();
+  assert.equal(t.f.Hunt.running, false); assert.ok(t.f.WalkBack.active, 'a little way off, it walks back to the hunting spot first');
+  t = deathFixture('stop'); t.die(); t.offer(); t.f.Controller.tick(); t.live(); t.f.World.gp.pose = { ...t.f.World.gp.pose, regionId: 999, x: 100 }; t.f.advance(300); t.f.Controller.tick(); t.f.advance(2500); t.f.Controller.tick();
+  assert.equal(t.f.Hunt.running, false); assert.equal(t.f.WalkBack.active, null, 'elsewhere it stays stopped');
+  assert.ok(t.f.notices.some(n => /not at the hunting spot/.test(n)));
+});
+test('with Accept resurrection on and a helper in view the bot waits before reviving itself, never during an open offer', () => {
+  const rebirths = f => f.commands.filter(c => c.kind === 'rebirth').length;
+  let t = deathFixture('revive'); t.die(); t.f.advance(6000); t.f.Controller.tick(); assert.equal(rebirths(t.f), 0, 'helper nearby: still waiting after 6 s');
+  t.f.advance(15000); t.f.Controller.tick(); assert.equal(rebirths(t.f), 1, 'then it revives itself');
+  t = deathFixture('revive'); t.f.World.ents.delete(77); t.die(); t.f.advance(6000); t.f.Controller.tick(); assert.equal(rebirths(t.f), 1, 'nobody in view: the usual 5 s');
+  t = deathFixture('revive'); t.f.Settings.profile.party.acceptRes = false; t.die(); t.f.advance(6000); t.f.Controller.tick(); assert.equal(rebirths(t.f), 1, 'switch off: unchanged');
+  t = deathFixture('revive'); t.f.World.ents.set(77, { gid: 77, kind: 'player', name: 'Healer', appearanceState: [2] }); t.die(); t.f.advance(6000); t.f.Controller.tick();
+  assert.equal(rebirths(t.f), 1, 'a dead helper cannot resurrect us');
+  t = deathFixture('revive'); t.f.Settings.profile.party.acceptRes = false; t.die(); t.offer(); t.f.advance(6000); t.f.Controller.tick(); assert.equal(rebirths(t.f), 0, 'an open resurrection offer is never answered by reviving');
+});
 test('auto mastery is off by default, ignores dead characters and pending training, and backs off after a refusal', () => {
   assert.equal(fixture().Settings.profile.mastery.enabled, false);
   let f = masteryFixture(); f.Settings.profile.mastery.enabled = false; f.Controller.tick(); assert.deepEqual(trains(f), []);

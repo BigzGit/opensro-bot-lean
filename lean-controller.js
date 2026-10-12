@@ -15,8 +15,8 @@ Hunt.tick = function () {
   if (World.isDead()) {
     Loot.suspend();
     this.state = 'dead';
-    if (!this.deathAt) { this.deathAt = now(); }
-    if ((Town.autoRevive() || H.onDeath === 'revive') && !this.revived && now() - this.deathAt > 5000) {
+    if (!this.deathAt) { this.deathAt = now(); Party.noteDeath(); }
+    if ((Town.autoRevive() || H.onDeath === 'revive') && !this.revived && now() - this.deathAt > Party.reviveDelay() && !Party.resBusy()) {
       if (Cmd.rebirth(1)) this.revived = true;
     } else if (!Town.autoRevive() && H.onDeath === 'stop') this.stop('character died');
     return;
@@ -97,6 +97,15 @@ const Controller = {
       return false;
     }
   },
+  // Start hunting again after an interruption, but only where that is safe: at the hunting spot it just starts, a
+  // little way off (within 600 m) it walks back first, anywhere else it stays stopped. Returns 'started', 'walking' or 'stopped'.
+  resumeHunting(prefix) {
+    const H = Hunt.cfg(), pose = World.pose(), distance = H.center && pose ? dist2D(pose, H.center) : Infinity;
+    if (Number.isFinite(distance) && distance <= Math.max(H.radius * 1.5, 600)) { UI.toast(prefix + '; resuming hunting.', 'info', 4000); Hunt.start(); return 'started'; }
+    if (distance <= 6000) { UI.toast(prefix + '; walking back to the hunting spot.', 'info', 4000); WalkBack.start(true); return 'walking'; }
+    UI.toast(prefix + ', but not at the hunting spot. Use Return & hunt when ready.', 'warn', 6000);
+    return 'stopped';
+  },
   returnAfterRevive() {
     this.resumeAfterRevive = false;
     Hunt.deathAt = 0; Hunt.revived = false; Hunt.targetGid = 0;
@@ -135,6 +144,7 @@ const Controller = {
       }
       if (!World.inWorld()) { this.mode = 'waiting'; return; }
       Party.tick();
+      Party.resumeTick();
       AutoMastery.tick();
       Potion.tick();
       Loot.checkPetFull();

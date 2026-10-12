@@ -63,6 +63,8 @@ Stops at the target, attempt limit or missing materials. Failures can reduce +, 
 
 Tick **Accept resurrection from party members** under **Settings → Party**. When you are dead and a party member casts Rebirth on you, the bot answers Yes, whether or not hunting is running. Offers from players outside your party, and mutation offers, are left to you. The switch is off by default and saved per character.
 
+If hunting was running when the character died, it resumes after a resurrection you accepted, whatever **On death** is set to: at the hunting spot it simply starts, up to 600 m away it walks back first, and anywhere else it stays stopped and tells you to use **Return & hunt**. The memory lasts 15 minutes; a revive you or the bot does yourselves resumes nothing. While this switch is on and an online party member is in view, a bot set to revive (or the town cycle's revive) waits up to 20 seconds instead of 5 before reviving itself, and never revives while a resurrection offer is open.
+
 ## Automatic reconnect
 
 This is always on; there is no switch. When the connection to the game is lost (a server restart, a network drop), the bot waits for the game's own retries, then asks the game to resume, and if that fails re-enters the world with the login the page already holds, exactly like pressing Enter at character select. It keeps trying every few seconds, then every 30 seconds, for up to 12 hours. It never types or stores your password: if the login itself is gone after a restart, the status line says so and the bot waits for you.

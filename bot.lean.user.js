@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.64
+// @version      1.2.65
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.64';
+const VERSION = '1.2.65';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -2457,6 +2457,36 @@ const Party = {
       this.message = 'Waiting for registration confirmation.';
     }
   },
+  // Hunting at the moment of death is remembered, so a resurrection accepted within 15 minutes resumes it whatever the
+  // "On death" setting did. A revive the player or the bot does itself never resumes anything.
+  huntAtDeath: null, resumeHunt: null, consentAt: -Infinity, aliveSince: 0,
+  noteDeath() { if (Hunt.running && !this.huntAtDeath) this.huntAtDeath = { at: now() }; },
+  // Another online party member who is up and in view might resurrect us.
+  helperNearby() {
+    const social = World.gp?.social;
+    return !!social?.members?.some(m => m && m.name && m.name !== social.localName && (m.status & 15) === 0 &&
+      [...World.ents.values()].some(e => e.kind === 'player' && e.name === m.name && e.appearanceState?.[0] !== 2));
+  },
+  // With Accept resurrection on and a helper at hand, wait longer before the bot revives itself.
+  reviveDelay() { return Settings.profile.party.acceptRes && this.helperNearby() ? 20000 : 5000; },
+  // Never revive while an offer is open or an acceptance was just sent.
+  resBusy() { return !!World.gp?.social?.resurrection || now() - this.consentAt < 4000; },
+  resumeTick() {
+    const r = this.resumeHunt;
+    if (this.huntAtDeath && now() - this.huntAtDeath.at > 15 * 60000) this.huntAtDeath = null;
+    if (!World.inWorld() || World.isDead()) { this.aliveSince = 0; return; }
+    if (!this.aliveSince) this.aliveSince = now();
+    if (!r) {
+      // Alive without an accepted resurrection: the memory belongs to a death that is over.
+      if (this.huntAtDeath && now() - this.aliveSince > 10000) this.huntAtDeath = null;
+      return;
+    }
+    if (Hunt.running) { this.resumeHunt = this.huntAtDeath = null; return; }
+    if (now() - r.at > 120000) { this.resumeHunt = this.huntAtDeath = null; return; }
+    if (now() - this.aliveSince < 2000 || !World.local() || World.gp?.inventoryPending) return;
+    this.resumeHunt = this.huntAtDeath = null;
+    Controller.resumeHunting('Resurrected');
+  },
   // A dead character gets a Yes/No resurrection question from a caster's Rebirth skill. Only party members
   // are answered, and only while dead; other questions (including mutation proposals) are left to the player.
   acceptResurrection() {
@@ -2466,6 +2496,8 @@ const Party = {
     if (!caster?.name || !social.members.some(m => m?.name === caster.name && m.name !== social.localName)) return;
     if (!Cmd.spaced('resurrection-consent')) return;
     if (Cmd.raw({ kind: 'resurrection-consent', accept: true }, 'Accept resurrection from ' + caster.name)) {
+      this.consentAt = now();
+      this.resumeHunt = this.huntAtDeath && !Hunt.running && now() - this.huntAtDeath.at < 15 * 60000 ? { at: now() } : null;
       UI.toast('Accepted resurrection from ' + caster.name, 'info', 3000);
     }
   },
@@ -3422,8 +3454,8 @@ Hunt.tick = function () {
   if (World.isDead()) {
     Loot.suspend();
     this.state = 'dead';
-    if (!this.deathAt) { this.deathAt = now(); }
-    if ((Town.autoRevive() || H.onDeath === 'revive') && !this.revived && now() - this.deathAt > 5000) {
+    if (!this.deathAt) { this.deathAt = now(); Party.noteDeath(); }
+    if ((Town.autoRevive() || H.onDeath === 'revive') && !this.revived && now() - this.deathAt > Party.reviveDelay() && !Party.resBusy()) {
       if (Cmd.rebirth(1)) this.revived = true;
     } else if (!Town.autoRevive() && H.onDeath === 'stop') this.stop('character died');
     return;
@@ -3504,6 +3536,15 @@ const Controller = {
       return false;
     }
   },
+  // Start hunting again after an interruption, but only where that is safe: at the hunting spot it just starts, a
+  // little way off (within 600 m) it walks back first, anywhere else it stays stopped. Returns 'started', 'walking' or 'stopped'.
+  resumeHunting(prefix) {
+    const H = Hunt.cfg(), pose = World.pose(), distance = H.center && pose ? dist2D(pose, H.center) : Infinity;
+    if (Number.isFinite(distance) && distance <= Math.max(H.radius * 1.5, 600)) { UI.toast(prefix + '; resuming hunting.', 'info', 4000); Hunt.start(); return 'started'; }
+    if (distance <= 6000) { UI.toast(prefix + '; walking back to the hunting spot.', 'info', 4000); WalkBack.start(true); return 'walking'; }
+    UI.toast(prefix + ', but not at the hunting spot. Use Return & hunt when ready.', 'warn', 6000);
+    return 'stopped';
+  },
   returnAfterRevive() {
     this.resumeAfterRevive = false;
     Hunt.deathAt = 0; Hunt.revived = false; Hunt.targetGid = 0;
@@ -3542,6 +3583,7 @@ const Controller = {
       }
       if (!World.inWorld()) { this.mode = 'waiting'; return; }
       Party.tick();
+      Party.resumeTick();
       AutoMastery.tick();
       Potion.tick();
       Loot.checkPetFull();
@@ -3697,10 +3739,8 @@ const Reconnect = {
       this.clear(i.hunting && World.isDead() ? 'Back in the game, but the character is dead; hunting was not resumed.' : 'Back in the game.');
       return UI.toast(this.message, 'info', 4000);
     }
-    const H = Hunt.cfg(), pose = World.pose(), distance = H.center && pose ? dist2D(pose, H.center) : Infinity;
-    if (Number.isFinite(distance) && distance <= Math.max(H.radius * 1.5, 600)) { this.clear(); UI.toast('Back in the game; resuming hunting.', 'info', 4000); Hunt.start(); }
-    else if (Number.isFinite(distance)) { this.clear(); UI.toast('Back in the game; walking back to the hunting spot.', 'info', 4000); WalkBack.start(true); }
-    else { this.clear('Back in the game, but not at the hunting spot. Use Return & hunt when ready.'); UI.toast(this.message, 'warn', 6000); }
+    const outcome = Controller.resumeHunting('Back in the game');
+    this.clear(outcome === 'stopped' ? 'Back in the game, but not at the hunting spot. Use Return & hunt when ready.' : '');
   },
 };
 bus.on('phase', phase => {
@@ -3842,7 +3882,7 @@ const AutoMastery = {
   },
 };
 // Optional features run behind the controller's guard so a bug in one can never stop hunting.
-for (const [name, owner, method] of [['Party', Party, 'tick'], ['Party resurrection', Party, 'acceptResurrection'], ['Auto mastery', AutoMastery, 'tick'], ['SoX alerts', Stats, 'soxFound']]) {
+for (const [name, owner, method] of [['Party', Party, 'tick'], ['Party resurrection', Party, 'acceptResurrection'], ['Party resume', Party, 'resumeTick'], ['Auto mastery', AutoMastery, 'tick'], ['SoX alerts', Stats, 'soxFound']]) {
   const original = owner[method];
   owner[method] = function (...args) { return Controller.guard(name, () => original.apply(this, args)); };
 }
