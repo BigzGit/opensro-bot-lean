@@ -1,0 +1,19 @@
+name: Announce release on Discord
+on:
+  release:
+    types: [published]
+jobs:
+  discord:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to Discord
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          TITLE: ${{ github.event.release.name }}
+          BODY: ${{ github.event.release.body }}
+          URL: ${{ github.event.release.html_url }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then echo "DISCORD_WEBHOOK secret is not set; skipping."; exit 0; fi
+          jq -n --arg title "$TITLE" --arg url "$URL" --arg body "${BODY:0:3500}" \
+            '{embeds: [{title: $title, url: $url, description: $body, color: 5793266}]}' > payload.json
+          curl -sS -f -H "Content-Type: application/json" -d @payload.json "$WEBHOOK"

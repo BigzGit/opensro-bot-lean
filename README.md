@@ -75,6 +75,8 @@ Once the character is back, hunting that was running resumes: at the hunting spo
 
 Leave **Revive in town and reverse to last scroll point** enabled under the town-cycle settings. With the town cycle enabled, the bot revives, completes town services and reverses back to hunt. Hunting resumes within 30 metres of the last scroll point, or within your saved hunting area after death. Carry reverse scrolls.
 
+Updates, suggestions and bug reports are on Discord (https://discord.gg/Ju4WtWCRTa); the **Discord** button at the top of the panel opens the invite, and a short notice points to it once after each update.
+
 If something stalls, use **Settings → Send bug report**, which opens a draggable report window over the game. Preview the diagnostics, optionally add an explanation and screenshot, then click **Send to developer**. Check screenshots for private details. Nothing sends automatically.
 
 ## Auto mastery and skills

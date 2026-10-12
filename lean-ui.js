@@ -149,7 +149,12 @@ const UI = {
     header.title = 'Shift+F7 hides or shows the whole window; F7 folds it.';
     this.updateButton = this.button('Update', () => Updates.open());
     this.updateButton.className = 'update'; this.updateButton.hidden = true;
-    header.append(el('strong', 'nixxane bot ' + VERSION), this.updateButton, fold);
+    // Updates are announced on Discord, so the invite sits next to the version.
+    const discord = this.button('Discord', () => {
+      W.open(DISCORD_URL, '_blank', 'noopener,noreferrer');
+    });
+    discord.className = 'discord'; discord.title = 'Updates, suggestions and bug reports';
+    header.append(el('strong', 'nixxane bot ' + VERSION), discord, this.updateButton, fold);
     Updates.render();
     this.body = el('div', null, 'body'); this.status = el('div', 'Waiting for game…', 'status'); this.status.setAttribute('role', 'status');
     const controls = this.row(this.button('Start / stop · F8', () => toggleBot()), this.button('Return & hunt', () => WalkBack.start(true)), this.button('Stop all', () => stopAll()));

@@ -1,3 +1,4 @@
+const DISCORD_URL = 'https://discord.gg/Ju4WtWCRTa';
 const CLASS_KEYS = ['normal', 'champion', 'giant', 'party', 'elite', 'unique'];
 const DEFAULT_PROFILE = {
   alchemy: { target: 3, limit: 20, elixir: 0, powder: false },

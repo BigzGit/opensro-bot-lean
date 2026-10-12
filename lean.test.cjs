@@ -1634,6 +1634,15 @@ test('party members and their pets do not make a monster another player\'s targe
   f.Hunt.running = true; f.Hunt.state = 'search'; f.World.hitByOthers.clear(); cast(5);
   assert.equal(f.Hunt.chooseTarget()?.gid, 30, 'the monster the party is fighting can be chosen');
 });
+test('the Discord invite is real and the update notice shows once per version', () => {
+  const f = fixture(), invite = /^https:\/\/discord\.gg\/[\w-]+$/;
+  assert.match(source.match(/const DISCORD_URL = '([^']+)'/)?.[1], invite); assert.doesNotMatch(source, /INVITE-CODE/);
+  assert.equal(f.Updates.announce(), true); assert.match(f.notices.at(-1), /Welcome/);
+  assert.equal(f.Updates.announce(), false); assert.equal(f.notices.length, 1, 'shown once');
+  f.storage.set('sroBotLean:v1:seenVersion', JSON.stringify('0.0.1')); assert.equal(f.Updates.announce(), true); assert.match(f.notices.at(-1), /Updated to/);
+  f.storage.delete('sroBotLean:v1:seenVersion'); f.storage.set('sroBotLean:v1:profile:default', JSON.stringify({}));
+  assert.equal(f.Updates.announce(), true); assert.match(f.notices.at(-1), /Updated to/, 'an existing install is not welcomed as new');
+});
 test('the searching status says why no monster is eligible', () => {
   const f = fixture(), mob = (gid, extra = {}) => f.World.ents.set(gid, { gid, kind: 'monster', name: 'Wolf', level: 40, regionId: 1, x: 120, y: 0, z: 100, attackFlags: 16, appearanceState: [0], ...extra });
   f.Hunt.running = true; f.Hunt.state = 'search';

@@ -41,9 +41,20 @@ const Updates = {
   open() {
     if (this.latest) W.open(this.latest.url, '_blank', 'noopener,noreferrer');
   },
+  // Once per installed version: points at Discord, where the patch notes are posted.
+  announce() {
+    const seen = Store.get('seenVersion', null);
+    if (seen === VERSION) return false;
+    Store.set('seenVersion', VERSION);
+    const existing = seen || Store.get('profile:default', null);
+    UI.toast(existing ? `Updated to ${VERSION}. Patch notes are on Discord: use the Discord button at the top of the panel.`
+      : 'Welcome! Updates, suggestions and bug reports are on Discord: use the Discord button at the top of the panel.', 'info', 12000);
+    return true;
+  },
   start() {
     if (this.started) return;
     this.started = true;
+    setTimeout(() => this.announce(), 5000);
     void this.check();
     setInterval(() => { void this.check(); }, 15 * 60 * 1000);
   },

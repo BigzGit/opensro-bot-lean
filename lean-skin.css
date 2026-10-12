@@ -12,7 +12,7 @@
 .frame.md{left:40px;right:40px;bottom:0;height:48px;background-image:var(--s-f_md);background-repeat:repeat-x}
 .frame.rd{right:0;bottom:0;width:40px;height:48px;background-image:var(--s-f_rd)}
 header{position:relative;z-index:1;height:34px;display:flex;align-items:center;justify-content:center;cursor:move;touch-action:none;padding:6px 32px 0;color:#fff}
-header button.update{height:22px;min-width:0;margin-left:8px;font-size:11px}
+header button.update,header button.discord{height:22px;min-width:0;margin-left:8px;font-size:11px}
 header strong{font-weight:normal;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 header button.fold{position:absolute;right:10px;top:10px;width:16px;min-width:16px;height:16px;padding:0;border:0;background:var(--s-close);color:transparent;font-size:0}
 header button.fold:hover{background-image:var(--s-close_f)}
