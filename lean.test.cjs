@@ -1579,6 +1579,18 @@ test('pet storage protects supplies, keep names and items with missing metadata'
   f.Town.cfg().store.elixirs = false; assert.equal(f.Town.eligible(f.pet.inventory[0]), true, 'Legacy category switches cannot store other items or sell elixirs');
   assert.equal(f.Town.eligible(f.pet.inventory[1]), false);
 });
+test('the searching status says why no monster is eligible', () => {
+  const f = fixture(), mob = (gid, extra = {}) => f.World.ents.set(gid, { gid, kind: 'monster', name: 'Wolf', level: 40, regionId: 1, x: 120, y: 0, z: 100, attackFlags: 16, appearanceState: [0], ...extra });
+  f.Hunt.running = true; f.Hunt.state = 'search';
+  assert.match(f.Diagnostics.main(), /searching for an eligible target\. No monsters in view/);
+  mob(30, { rarity: 1 }); mob(31, { x: 5000 }); mob(32, { level: 5 });
+  f.Settings.profile.hunt.classes.champion = false; f.Settings.profile.hunt.levelMin = 20;
+  const text = f.Diagnostics.main();
+  assert.match(text, /Monsters in view: 3\./); assert.match(text, /1: level is outside/); assert.match(text, /1: too far/);
+  mob(33, { name: 'Boar' }); f.Settings.profile.hunt.exclude = 'boar';
+  assert.match(f.Diagnostics.main(), /1: name is not in/);
+  f.Hunt.ban.set(32, 1e12); assert.match(f.Diagnostics.main(), /1: recently given up/);
+});
 test('magic and attribute stones are stored in the warehouse, never sold, and have their own pickup switches', () => {
   const f = townFixture(), magic = { slot: 5, refObjId: 1010, typeFlags: 108 | (11 << 7) | (1 << 11), quantity: 4, name: 'Magic stone' };
   const astral = { slot: 6, refObjId: 1011, typeFlags: 108 | (11 << 7) | (7 << 11), quantity: 1, name: 'Astral stone' };

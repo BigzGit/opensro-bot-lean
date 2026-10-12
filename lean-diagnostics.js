@@ -72,6 +72,36 @@ const Diagnostics = {
   },
   // What the town trip is doing right now, in plain words (no names): the phase text it shows on the panel.
   townDetail() { return Town.trip ? String(Town.message || '').slice(0, 200) : ''; },
+  // Why no monster is being attacked, counted from the monsters in view with the same checks the hunt uses.
+  // Counts only, no names. Short plain sentences, because the panel and bug reports are read by many languages.
+  noTarget() {
+    const H = Hunt.cfg(), pose = World.pose();
+    if (!pose) return '';
+    const sim = World.simNow() ?? 0, include = splitList(H.include), exclude = splitList(H.exclude);
+    const why = { banned: 0, kind: 0, level: 0, name: 0, far: 0, others: 0 };
+    let seen = 0;
+    for (const e of World.ents.values()) {
+      if (!isAttackableMob(e)) continue;
+      seen++;
+      const name = (e.name || '').toLowerCase(), level = e.level ?? 0;
+      if (Hunt.banned(Hunt.ban, e.gid)) why.banned++;
+      else if (!Hunt.classAllowed(e)) why.kind++;
+      else if (H.levelMin && level < H.levelMin || H.levelMax && level > H.levelMax) why.level++;
+      else if (include.length && !include.some(s => name.includes(s)) || exclude.some(s => name.includes(s))) why.name++;
+      else if (!Hunt.inArea(e) || dist2D(pose, e) > H.chase) why.far++;
+      else if (H.avoidKs && sim - (World.hitByOthers.get(e.gid) ?? -Infinity) < 8000 && sim - (World.hitByUs.get(e.gid) ?? -Infinity) > 8000) why.others++;
+    }
+    if (!seen) return 'No monsters in view. Move to a place with monsters and press "Set hunting spot here".';
+    const parts = [
+      [why.kind, 'monster type is switched off (Combat > Hunt area > Monster classes)'],
+      [why.level, 'level is outside your minimum or maximum level'],
+      [why.name, 'name is not in "Only these mobs" or is in "Skip these mobs"'],
+      [why.far, 'too far (Hunt radius or Chase distance)'],
+      [why.others, 'another player is fighting it'],
+      [why.banned, 'recently given up (blocked or cannot be selected)'],
+    ].filter(([n]) => n).map(([n, text]) => `${n}: ${text}`);
+    return `Monsters in view: ${seen}. Skipped: ${parts.join('; ') || 'none'}.`;
+  },
   main() {
     if (BuffGear.run) return BuffGear.run.restoring ? 'Buff gear: restoring combat equipment.' : 'Buff gear: swapping or casting.';
     if (BuffGear.recovery) return 'Buff gear: manual equipment review needed.';
@@ -97,7 +127,7 @@ const Diagnostics = {
     if (World.isCasting()) return 'Combat: waiting for the current cast.';
     if (Hunt.state === 'fight' && Combat.fallbackNote()) return 'Combat: normal attack (' + Combat.fallbackNote() + ').';
     if (Hunt.targetGid) return 'Combat: approaching or attacking the target.';
-    return 'Hunting: searching for an eligible target.';
+    return 'Hunting: searching for an eligible target. ' + this.noTarget();
   },
   snapshot() {
     const gp = World.gp, c = Settings.profile, pet = Loot.pet(), social = gp?.social, matching = gp?.partyMatching;
