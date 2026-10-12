@@ -356,7 +356,12 @@ const UI = {
         if (!townOn) shop.append(this.select(kind.toUpperCase() + ' potion', () => [[0, 'Record a merchant route first'], ...C().offers.filter(o => o.kind === kind).map(o => [o.refObjId, o.name])], () => C()[kind].refObjId, v => C()[kind].refObjId = Number(v)));
         shop.append(this.number('Low stock ≤', () => C()[kind].low, v => C()[kind].low = v, 0, 9999), this.number(kind.toUpperCase() + ' refill to', () => C()[kind].target, v => C()[kind].target = v, 1, 10000));
       }
-      shop.append(this.check('Buy abnormal pills (best)', () => C().cure.on, v => C().cure.on = v),
+      shop.append(this.check('Buy vigor potions', () => C().vigor.on, v => C().vigor.on = v),
+        this.select('Vigor potion size', [[18, 'Herb (smallest)'], [19, 'Small'], [20, 'Medium'], [21, 'Large'], [22, 'X-Large']], () => C().vigor.refObjId, v => C().vigor.refObjId = Number(v)),
+        this.number('Vigor low stock ≤', () => C().vigor.low, v => C().vigor.low = v, 0, 9999),
+        this.number('Vigor refill to', () => C().vigor.target, v => C().vigor.target = v, 1, 10000),
+        el('p', 'Vigor potions use the size you pick here on every town trip and walking restock. Pick a size the potion merchant sells, or the trip stops with a message. Using them is set under Automatic potion use.', 'muted'),
+        this.check('Buy abnormal pills (best)', () => C().cure.on, v => C().cure.on = v),
         this.number('Pills low stock ≤', () => C().cure.low, v => C().cure.low = v, 0, 9999),
         this.number('Pills refill to', () => C().cure.target, v => C().cure.target = v, 1, 10000),
         el('p', 'Buys only Special Universal Pill (small), the strongest universal cure. No cheaper substitute. Uses the same refill trips as HP/MP. Use cure pills above controls automatic use.', 'muted'));

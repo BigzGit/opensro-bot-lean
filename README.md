@@ -20,6 +20,7 @@ Settings are saved separately for each character. The bot checks for updates on 
 Under **Supplies → Automatic potion use**:
 
 - **Vigor potions:** tick **Use vigor potions** and set **Vigor when HP below** and **Vigor when MP below**. Vigor potions are used when your HP or MP drops that low and the normal HP and MP potions have not been enough.
+- **Buying vigor potions:** under **Supplies → Potion restock**, tick **Buy vigor potions**, pick the **Vigor potion size** (Herb, Small, Medium, Large or X-Large; X-Large by default) and set **Vigor low stock** and **Vigor refill to**. Town trips and walking restock buy that size, and a trip is also started when the vigor stock runs low. If the potion merchant does not sell the size you picked, the trip stops with a message so you can choose another.
 - **Pet recovery kits:** tick **Use recovery kits on my pets** and set **Pet HP below**. When an attack or pickup pet drops below that HP, the bot uses one recovery kit on it, choosing the smallest kit that covers the missing HP (or the largest if none does). Your own potions always go first. Each kit has to be seen consumed before the next one is used; a pet that does not take a kit is left alone for 30 seconds. It is off by default, needs the master **Use potions automatically** switch, and does not buy kits in town.
 
 ## Automatic town trips

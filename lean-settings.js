@@ -21,6 +21,7 @@ const DEFAULT_PROFILE = {
       hp: { on: true, refObjId: 0, low: 20, target: 100 },
       mp: { on: true, refObjId: 0, low: 20, target: 300 },
       cure: { on: false, refObjId: 58, low: 10, target: 50 },
+      vigor: { on: false, refObjId: 22, low: 10, target: 50 },
     },
   },
   hunt: {

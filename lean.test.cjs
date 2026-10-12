@@ -1254,6 +1254,25 @@ test('pet auto potion never touches the wrong pets, the player potions or an unc
   f = petPotionFixture(); assert.equal(f.Cmd.itemUseOnPet(20, 999), false, 'unknown pet'); assert.equal(f.Cmd.itemUseOnPet(99, 50), false, 'unknown item');
   assert.equal(f.Cmd.itemUseOnPet(20, 50), true);
 });
+test('vigor potions are a restock supply with a chosen size, bought on town trips and recognised in shops', () => {
+  const f = townFixture(), r = f.Restock.cfg(), c = f.Town;
+  assert.equal(fixture().Restock.cfg().vigor.on, false); assert.equal(fixture().Restock.cfg().vigor.refObjId, 22);
+  const offer = (ref, tf) => ({ refObjId: ref, name: 'Vigor', tab: 0, slot: 0, maxStack: 100, price: '10', previews: [{ refObjId: ref, typeFlags: tf }] });
+  const vigorTf = (3 << 11) | 236;
+  assert.equal(f.Restock.offerKind(offer(22, vigorTf)), 'vigor'); assert.equal(f.Restock.offerKind(offer(15, 4332)), 'mp');
+  r.vigor.on = true; r.vigor.refObjId = 21; r.vigor.low = 5; r.vigor.target = 40;
+  assert.deepEqual(JSON.parse(JSON.stringify(c.supplies().map(s => [s.kind, s.refObjId]))), [['mp', 15], ['vigor', 21]], 'HP/MP keep their fixed X-Large ids; vigor uses the chosen size');
+  r.mp.on = false; c.cfg().petFull = false; assert.equal(c.reason(), 'potions running low', 'an empty vigor stock alone triggers a trip'); c.cfg().petFull = true;
+  c.begin(); c.enter('buy');
+  const gp = f.World.gp; gp.target = 61; gp.targetCapabilities = 1;
+  gp.shop = { npc: 61, offers: [offer(15, 4332), offer(21, vigorTf)] }; gp.inventory = gp.inventory.map(i => i.refObjId === 15 ? { ...i, quantity: 50 } : i);
+  c.tick();
+  assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'shop-buy', tab: 0, slot: 0, quantity: 40 });
+  const g = townFixture(); g.Restock.cfg().vigor.on = true; g.Restock.cfg().vigor.refObjId = 20; g.Restock.cfg().vigor.target = 40;
+  g.Town.begin(); g.Town.enter('buy'); g.World.gp.target = 61; g.World.gp.targetCapabilities = 1;
+  g.World.gp.shop = { npc: 61, offers: [offer(15, 4332)] }; g.World.gp.inventory = g.World.gp.inventory.map(i => i.refObjId === 15 ? { ...i, quantity: 50 } : i);
+  g.Town.tick(); assert.equal(g.Town.trip, null); assert.match(g.Town.message, /vigor potion size is unavailable/);
+});
 test('auto mastery is off by default, ignores dead characters and pending training, and backs off after a refusal', () => {
   assert.equal(fixture().Settings.profile.mastery.enabled, false);
   let f = masteryFixture(); f.Settings.profile.mastery.enabled = false; f.Controller.tick(); assert.deepEqual(trains(f), []);
