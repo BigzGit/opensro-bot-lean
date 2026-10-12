@@ -357,6 +357,13 @@ const UI = {
         this.check('Stop when HP potions run out', () => H().stopNoHpPotion, v => H().stopNoHpPotion = v),
         this.check('Stop when bag is full', () => H().stopInvFull, v => H().stopInvFull = v),
         this.number('Manual control pause (s)', () => H().manualPauseS, v => H().manualPauseS = v, 1, 30)));
+      this.stuckNote = el('p', AntiStuck.status(), 'muted');
+      this.pane.append(this.group('Anti-stuck',
+        this.check('Recover when hunting makes no progress', () => H().antiStuck.enabled, v => H().antiStuck.enabled = v),
+        this.number('No progress for (minutes)', () => H().antiStuck.minutes, v => H().antiStuck.minutes = v, 1, 30),
+        this.number('Stop after failed recoveries', () => H().antiStuck.maxRecoveries, v => H().antiStuck.maxRecoveries = v, 1, 10),
+        this.stuckNote,
+        el('p', 'Progress means a confirmed kill, XP, gold, a pickup, or damage to your target. Resting, buffing, looting, shopping and town trips do not count against you. First recovery drops the current target; the next ones walk back to the saved hunting spot; after the last one hunting stops.', 'muted')));
       const party = () => Settings.profile.party;
       this.partyNote = el('p', '', 'muted');
       this.pane.append(this.group('Party',
@@ -396,6 +403,7 @@ const UI = {
     const diagnosticState = Diagnostics.sample();
     if (this.waitNote) this.waitNote.textContent = Diagnostics.lines(diagnosticState);
     if (this.townNote) this.townNote.textContent = Town.status();
+    if (this.current === 'Settings' && this.stuckNote) this.stuckNote.textContent = AntiStuck.status();
     if (this.current === 'Settings' && this.partyNote) {
       const notes = [Settings.profile.party.autoRecruit ? Party.message : 'Auto-recruit off.'];
       if (Settings.profile.party.autoRes) notes.push(Resurrect.message);

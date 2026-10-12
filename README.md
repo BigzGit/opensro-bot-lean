@@ -53,6 +53,10 @@ Leave **Revive in town and reverse to last scroll point** enabled under the town
 
 If something stalls, use **Settings → Send bug report**. Preview the diagnostics, optionally add an explanation and screenshot, then click **Send to developer**. Check screenshots for private details. Nothing sends automatically. **Copy diagnostics** remains available.
 
+## Anti-stuck
+
+Under **Settings → Anti-stuck**, the bot watches for progress while hunting: a confirmed kill, XP, gold, a pickup, or damage to your target. If nothing happens for the set time (default 3 minutes), it recovers in steps: first it drops the current target, then it walks back to the saved hunting spot and resumes, and after the set number of failed recoveries (default 3) it stops hunting. Any confirmed gain clears the count. Resting, buffing, looting, shopping, town trips and manual control do not count as stuck.
+
 ## Session stats
 
 Open **Settings → Session stats** for hunting time, XP/hour, net gold, confirmed kills, deaths, potion use and pickups. Totals pause when hunting stops and stay across toggles. **Reset session**, reloading or changing character clears them. Stats stay local to the page.

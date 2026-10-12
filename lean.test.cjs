@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, AntiStuck, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -917,6 +917,29 @@ function petFight(f) {
   f.World.attackers.set(30, 100000);
   return pet;
 }
+function idleFor(f, ms) { for (let t = 0; t < ms; t += 100) { f.advance(100); f.Controller.tick(); } }
+test('anti-stuck drops the target, then walks back, then stops after the configured recoveries', () => {
+  const f = fixture(); f.Hunt.start(); idleFor(f, 1000);
+  assert.equal(f.Hunt.state, 'search');
+  idleFor(f, 180000); assert.equal(f.AntiStuck.recoveries, 1);
+  assert.equal(f.Hunt.running, true); assert.equal(f.WalkBack.active, null);
+  idleFor(f, 180000); assert.equal(f.AntiStuck.recoveries, 2); assert.equal(f.Hunt.running, true);
+  idleFor(f, 180000); assert.equal(f.AntiStuck.recoveries, 3); assert.equal(f.Hunt.running, true);
+  idleFor(f, 180000); assert.equal(f.Hunt.running, false);
+  assert.ok(f.notices.some(m => /stuck/.test(m)));
+});
+test('anti-stuck is cleared by confirmed progress, damage and non-working states', () => {
+  const f = fixture(); f.Hunt.start(); idleFor(f, 1000);
+  idleFor(f, 150000); f.Stats.session.kills++; idleFor(f, 150000);
+  assert.equal(f.AntiStuck.recoveries, 0);
+  f.Hunt.tick = () => { f.Hunt.state = 'resting'; }; idleFor(f, 600000);
+  assert.equal(f.AntiStuck.recoveries, 0); assert.equal(f.Hunt.running, true);
+});
+test('anti-stuck can be switched off and does not run while hunting is stopped', () => {
+  const f = fixture(); f.Settings.profile.hunt.antiStuck.enabled = false; f.Hunt.start(); idleFor(f, 400000);
+  assert.equal(f.AntiStuck.recoveries, 0); f.Settings.profile.hunt.antiStuck.enabled = true; f.Hunt.stop(); idleFor(f, 400000);
+  assert.equal(f.AntiStuck.recoveries, 0);
+});
 test('pet picks up during combat and casting even with finish-fight enabled', () => {
   const f = fixture(); petFight(f); f.drop(20, 3436); let fights = 0;
   f.Combat.fight = () => { fights++; }; f.World.isCasting = () => true;

@@ -30,6 +30,7 @@ const DEFAULT_PROFILE = {
     pickup: { enabled: true, gold: true, potions: true, equipment: true, elixirs: true, powders: true, alchemy: true, others: true,
       collector: 'character', petFullSound: true, include: '', exclude: '', radius: 300, afterKillOnly: true, retries: 2 },
     sit: { enabled: true, hpBelow: 35, mpBelow: 20, resumeAt: 90 },
+    antiStuck: { enabled: true, minutes: 3, maxRecoveries: 3 },
     onDeath: 'stop', stopNoHpPotion: false, stopInvFull: false,
     playerAlert: { enabled: false, radius: 250, pause: false }, manualPauseS: 6,
   },
