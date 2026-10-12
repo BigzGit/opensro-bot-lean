@@ -1579,6 +1579,20 @@ test('pet storage protects supplies, keep names and items with missing metadata'
   f.Town.cfg().store.elixirs = false; assert.equal(f.Town.eligible(f.pet.inventory[0]), true, 'Legacy category switches cannot store other items or sell elixirs');
   assert.equal(f.Town.eligible(f.pet.inventory[1]), false);
 });
+test('party members and their pets do not make a monster another player\'s target', () => {
+  const f = fixture(); f.World.gp.social = { localName: 'Me', members: [{ id: 5, name: 'Mate' }, { id: 1, name: 'Me' }] };
+  f.World.ents.set(30, { gid: 30, kind: 'monster', name: 'Wolf', regionId: 1, x: 120, y: 0, z: 100, attackFlags: 16, appearanceState: [0] });
+  f.World.ents.set(5, { gid: 5, kind: 'player', name: 'Mate' }); f.World.ents.set(6, { gid: 6, kind: 'player', name: 'Stranger' });
+  f.World.ents.set(7, { gid: 7, kind: 'cos', ownerGid: 5, name: 'Pet' }); f.World.ents.set(8, { gid: 8, kind: 'cos', ownerGid: 6, name: 'Pet' });
+  const cast = caster => f.World.onCast({ caster, target: 30, results: [{ target: 30 }] });
+  cast(5); assert.equal(f.World.hitByOthers.has(30), false, 'a party member');
+  cast(7); assert.equal(f.World.hitByOthers.has(30), false, 'a party member\'s pet');
+  cast(6); assert.equal(f.World.hitByOthers.has(30), true, 'a stranger still counts');
+  f.World.hitByOthers.clear(); cast(8); assert.equal(f.World.hitByOthers.has(30), true, 'a stranger\'s pet still counts');
+  const stamp = f.World.hitByOthers.get(30); f.advance(1000); cast(5); assert.equal(f.World.hitByOthers.get(30), stamp, 'a member does not refresh a stranger\'s mark');
+  f.Hunt.running = true; f.Hunt.state = 'search'; f.World.hitByOthers.clear(); cast(5);
+  assert.equal(f.Hunt.chooseTarget()?.gid, 30, 'the monster the party is fighting can be chosen');
+});
 test('the searching status says why no monster is eligible', () => {
   const f = fixture(), mob = (gid, extra = {}) => f.World.ents.set(gid, { gid, kind: 'monster', name: 'Wolf', level: 40, regionId: 1, x: 120, y: 0, z: 100, attackFlags: 16, appearanceState: [0], ...extra });
   f.Hunt.running = true; f.Hunt.state = 'search';

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.67
+// @version      1.2.68
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.67';
+const VERSION = '1.2.68';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -2543,6 +2543,22 @@ const Party = {
     }
   },
 };
+// Hits by party members, and by their pets, do not make a monster "another player's target": hunting together is the
+// point of a party, and No-KS would otherwise skip every monster the party is already fighting.
+{
+  const record = World.onCast;
+  World.onCast = function (cast) {
+    const social = this.gp?.social, caster = this.ents.get(cast.caster);
+    const owner = caster?.kind === 'cos' ? this.ents.get(caster.ownerGid) : caster;
+    const name = owner?.name || (caster?.kind === 'cos' ? caster.ownerName : '');
+    const member = !!name && Array.isArray(social?.members) && name !== social.localName && social.members.some(m => m?.name === name);
+    if (!member) return record.call(this, cast);
+    const targets = new Set([cast.target, ...(cast.results || []).map(r => r?.target)].filter(Boolean));
+    const before = new Map([...targets].map(gid => [gid, this.hitByOthers.get(gid)]));
+    try { return record.call(this, cast); }
+    finally { for (const [gid, at] of before) at === undefined ? this.hitByOthers.delete(gid) : this.hitByOthers.set(gid, at); }
+  };
+}
 
 
 // Auto-resurrect dead party members with a learned corpse-targeted skill.

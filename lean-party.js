@@ -125,3 +125,19 @@ const Party = {
     }
   },
 };
+// Hits by party members, and by their pets, do not make a monster "another player's target": hunting together is the
+// point of a party, and No-KS would otherwise skip every monster the party is already fighting.
+{
+  const record = World.onCast;
+  World.onCast = function (cast) {
+    const social = this.gp?.social, caster = this.ents.get(cast.caster);
+    const owner = caster?.kind === 'cos' ? this.ents.get(caster.ownerGid) : caster;
+    const name = owner?.name || (caster?.kind === 'cos' ? caster.ownerName : '');
+    const member = !!name && Array.isArray(social?.members) && name !== social.localName && social.members.some(m => m?.name === name);
+    if (!member) return record.call(this, cast);
+    const targets = new Set([cast.target, ...(cast.results || []).map(r => r?.target)].filter(Boolean));
+    const before = new Map([...targets].map(gid => [gid, this.hitByOthers.get(gid)]));
+    try { return record.call(this, cast); }
+    finally { for (const [gid, at] of before) at === undefined ? this.hitByOthers.delete(gid) : this.hitByOthers.set(gid, at); }
+  };
+}
