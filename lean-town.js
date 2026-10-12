@@ -107,8 +107,8 @@ const Town = {
   },
   disposable(item) {
     const c = this.cfg(), name = (item.name || '').toLowerCase(), tf = item.typeFlags;
-    // Missing type metadata must never turn an item into a disposal candidate.
-    if (!Number.isInteger(tf) || ItemType.isPotion(tf) || ItemType.isCure(tf) ||
+    // Missing type metadata must never turn an item into a disposal candidate; gear marked for deposit is never sold.
+    if (!Number.isInteger(tf) || this.depositItem(item) || ItemType.isPotion(tf) || ItemType.isCure(tf) ||
         (tf & 0x7fc) === 0x1ec || item.refObjId === 24198 ||
         Restock.supplies().some(s => s.refObjId === item.refObjId) ||
         splitList(c.keep).some(s => name.includes(s))) return false;
@@ -119,16 +119,38 @@ const Town = {
     return true;
   },
   // Deposit-worthy gear: Star/Moon/Sun equipment from the character bag or the pickup pet.
-  // Gear the bot or the player relies on stays put: names in Keep, a saved buff set's weapon or shield, and the
-  // weapon picked for alchemy (checked by bag slot, so only for items from the character bag).
-  soxItem(item, fromBag = false) {
-    if (!this.cfg().storeSox || !Number.isInteger(item.typeFlags) || !ItemType.isEquipment(item.typeFlags) || Items.soxOf(item) <= 0) return false;
-    if (splitList(this.cfg().keep).some(s => (item.name || '').toLowerCase().includes(s))) return false;
+  // "85" or "80-90, 100": the character levels whose gear is deposited. Anything unreadable is ignored.
+  levelRanges() {
+    return String(this.cfg().storeLevels ?? '').split(/[,;\s]+/).map(part => {
+      const m = /^(\d{1,3})(?:-(\d{1,3}))?$/.exec(part);
+      return m ? [Math.min(+m[1], +(m[2] ?? m[1])), Math.max(+m[1], +(m[2] ?? m[1]))] : null;
+    }).filter(Boolean);
+  },
+  // Character level an equipment item requires, from its tooltip fields (type 1 = character level), or null.
+  requiredLevel(item) {
+    const f = item.tooltip?.fields;
+    if (!f) return null;
+    for (let i = 1; i <= 4; i++) {
+      if (f['reqLevelType' + i] !== 1) continue;
+      const level = f['requiredLevel' + (i === 1 ? '' : i)];
+      return Number.isInteger(level) ? level : null;
+    }
+    return null;
+  },
+  // Gear to deposit: Star/Moon/Sun equipment, and equipment requiring a character level you listed. Gear the bot or
+  // the player relies on stays put: names in Keep, a saved buff set's weapon or shield, and the weapon picked for
+  // alchemy (checked by bag slot, so only for items from the character bag).
+  depositItem(item, fromBag = false) {
+    const c = this.cfg();
+    if (!Number.isInteger(item.typeFlags) || !ItemType.isEquipment(item.typeFlags)) return false;
+    const level = this.requiredLevel(item);
+    if (!(c.storeSox && Items.soxOf(item) > 0) && !(level !== null && this.levelRanges().some(([a, b]) => level >= a && level <= b))) return false;
+    if (splitList(c.keep).some(s => (item.name || '').toLowerCase().includes(s))) return false;
     const key = BuffGear.key(item);
     if (BuffGear.cfg().buffSets.some(s => s.weapon === key || s.shield === key)) return false;
     return !(fromBag && Alchemy.selected && Alchemy.selected.slot === item.slot);
   },
-  eligible(item) { return this.soxItem(item) || this.disposable(item) && Loot.category(item.typeFlags) === 'elixirs'; },
+  eligible(item) { return this.depositItem(item) || this.disposable(item) && Loot.category(item.typeFlags) === 'elixirs'; },
   sellable(item) { return this.disposable(item) && Loot.category(item.typeFlags) !== 'elixirs'; },
   autoRevive() { return this.cfg().enabled && this.cfg().revive; },
   reason() {
@@ -278,7 +300,7 @@ const Town = {
     const bagItem = t.staged ? World.items().find(i => i.slot === t.staged.slot && i.refObjId === t.staged.ref) : null;
     if (t.staged && !bagItem) return this.fail('Staged pet item changed unexpectedly.');
     // Gear the character picked up is deposited straight from the bag, then pet loot is staged through it.
-    const bagSox = bagItem ? null : World.items().find(i => this.soxItem(i, true));
+    const bagSox = bagItem ? null : World.items().find(i => this.depositItem(i, true));
     const direct = bagItem || bagSox;
     const item = direct || pet?.rec.inventory.find(i => this.eligible(i));
     if (!item) {

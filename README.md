@@ -31,6 +31,7 @@ When supplies run low or a bag reaches its capacity trigger, the bot recalls to 
 
 - **Pet elixirs:** stored in the warehouse.
 - **SoX gear:** Star, Moon and Sun equipment is deposited in the warehouse from your own bag and from the pet, on the next trip that visits the warehouse. Nothing is stored right after pickup. SoX gear that is part of a saved buff set, the weapon chosen for alchemy, or matches the **Keep in pet (names)** list is never deposited. Switch it off with **Deposit SoX gear in the warehouse**.
+- **Gear by required level:** list levels in **Also deposit gear requiring level** (for example `85`, or `80-90, 100`) and equipment of any kind that requires one of those character levels is deposited the same way, from your bag and from the pet. Listed gear is never sold, even if the warehouse cannot be used. The same protections apply as for SoX. Empty by default.
 - **Other unprotected pet loot:** sold at the repair merchant. Ordinary equipment can be sold even with + or blue options.
 - **Other seal/rare gear, supplies and matching Keep names:** protected. Existing character bag items are never sold.
 

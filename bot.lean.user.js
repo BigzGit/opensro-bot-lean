@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.58
+// @version      1.2.59
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.58';
+const VERSION = '1.2.59';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -199,7 +199,7 @@ const DEFAULT_PROFILE = {
     prefer: { hp: 0, mp: 0, vigor: 0, cure: 0 }, delayMs: 350,
     restock: {
       enabled: false, vendor: null, route: [], offers: [],
-      town: { enabled: false, revive: true, storeSox: true, petFull: true, petFree: 1, arrivalRadius: 500, arrival: null, storage: null, vendor: null, smith: null, gate: null,
+      town: { enabled: false, revive: true, storeSox: true, storeLevels: '', petFull: true, petFree: 1, arrivalRadius: 500, arrival: null, storage: null, vendor: null, smith: null, gate: null,
         keep: '', store: { equipment: true, elixirs: true, powders: true, alchemy: true, others: false } },
       hp: { on: true, refObjId: 0, low: 20, target: 100 },
       mp: { on: true, refObjId: 0, low: 20, target: 300 },
@@ -2802,8 +2802,8 @@ const Town = {
   },
   disposable(item) {
     const c = this.cfg(), name = (item.name || '').toLowerCase(), tf = item.typeFlags;
-    // Missing type metadata must never turn an item into a disposal candidate.
-    if (!Number.isInteger(tf) || ItemType.isPotion(tf) || ItemType.isCure(tf) ||
+    // Missing type metadata must never turn an item into a disposal candidate; gear marked for deposit is never sold.
+    if (!Number.isInteger(tf) || this.depositItem(item) || ItemType.isPotion(tf) || ItemType.isCure(tf) ||
         (tf & 0x7fc) === 0x1ec || item.refObjId === 24198 ||
         Restock.supplies().some(s => s.refObjId === item.refObjId) ||
         splitList(c.keep).some(s => name.includes(s))) return false;
@@ -2814,16 +2814,38 @@ const Town = {
     return true;
   },
   // Deposit-worthy gear: Star/Moon/Sun equipment from the character bag or the pickup pet.
-  // Gear the bot or the player relies on stays put: names in Keep, a saved buff set's weapon or shield, and the
-  // weapon picked for alchemy (checked by bag slot, so only for items from the character bag).
-  soxItem(item, fromBag = false) {
-    if (!this.cfg().storeSox || !Number.isInteger(item.typeFlags) || !ItemType.isEquipment(item.typeFlags) || Items.soxOf(item) <= 0) return false;
-    if (splitList(this.cfg().keep).some(s => (item.name || '').toLowerCase().includes(s))) return false;
+  // "85" or "80-90, 100": the character levels whose gear is deposited. Anything unreadable is ignored.
+  levelRanges() {
+    return String(this.cfg().storeLevels ?? '').split(/[,;\s]+/).map(part => {
+      const m = /^(\d{1,3})(?:-(\d{1,3}))?$/.exec(part);
+      return m ? [Math.min(+m[1], +(m[2] ?? m[1])), Math.max(+m[1], +(m[2] ?? m[1]))] : null;
+    }).filter(Boolean);
+  },
+  // Character level an equipment item requires, from its tooltip fields (type 1 = character level), or null.
+  requiredLevel(item) {
+    const f = item.tooltip?.fields;
+    if (!f) return null;
+    for (let i = 1; i <= 4; i++) {
+      if (f['reqLevelType' + i] !== 1) continue;
+      const level = f['requiredLevel' + (i === 1 ? '' : i)];
+      return Number.isInteger(level) ? level : null;
+    }
+    return null;
+  },
+  // Gear to deposit: Star/Moon/Sun equipment, and equipment requiring a character level you listed. Gear the bot or
+  // the player relies on stays put: names in Keep, a saved buff set's weapon or shield, and the weapon picked for
+  // alchemy (checked by bag slot, so only for items from the character bag).
+  depositItem(item, fromBag = false) {
+    const c = this.cfg();
+    if (!Number.isInteger(item.typeFlags) || !ItemType.isEquipment(item.typeFlags)) return false;
+    const level = this.requiredLevel(item);
+    if (!(c.storeSox && Items.soxOf(item) > 0) && !(level !== null && this.levelRanges().some(([a, b]) => level >= a && level <= b))) return false;
+    if (splitList(c.keep).some(s => (item.name || '').toLowerCase().includes(s))) return false;
     const key = BuffGear.key(item);
     if (BuffGear.cfg().buffSets.some(s => s.weapon === key || s.shield === key)) return false;
     return !(fromBag && Alchemy.selected && Alchemy.selected.slot === item.slot);
   },
-  eligible(item) { return this.soxItem(item) || this.disposable(item) && Loot.category(item.typeFlags) === 'elixirs'; },
+  eligible(item) { return this.depositItem(item) || this.disposable(item) && Loot.category(item.typeFlags) === 'elixirs'; },
   sellable(item) { return this.disposable(item) && Loot.category(item.typeFlags) !== 'elixirs'; },
   autoRevive() { return this.cfg().enabled && this.cfg().revive; },
   reason() {
@@ -2973,7 +2995,7 @@ const Town = {
     const bagItem = t.staged ? World.items().find(i => i.slot === t.staged.slot && i.refObjId === t.staged.ref) : null;
     if (t.staged && !bagItem) return this.fail('Staged pet item changed unexpectedly.');
     // Gear the character picked up is deposited straight from the bag, then pet loot is staged through it.
-    const bagSox = bagItem ? null : World.items().find(i => this.soxItem(i, true));
+    const bagSox = bagItem ? null : World.items().find(i => this.depositItem(i, true));
     const direct = bagItem || bagSox;
     const item = direct || pet?.rec.inventory.find(i => this.eligible(i));
     if (!item) {
@@ -5980,8 +6002,8 @@ const UI = {
     });
     return this.field(title, input);
   },
-  text(title, get, set) {
-    const input = el('input'); input.type = 'text'; input.value = get(); input.placeholder = 'comma-separated names';
+  text(title, get, set, placeholder = 'comma-separated names') {
+    const input = el('input'); input.type = 'text'; input.value = get(); input.placeholder = placeholder;
     input.addEventListener('change', () => { set(input.value); Settings.saveProfile(); });
     return this.field(title, input);
   },
@@ -6229,13 +6251,14 @@ const UI = {
         this.check('Use return scroll → town services → reverse return', () => town().enabled, v => { town().enabled = v; this.draw(); }),
         this.check('Revive in town and reverse to last scroll point', () => town().revive, v => town().revive = v),
         this.check('Deposit SoX gear in the warehouse (character and pet bags)', () => town().storeSox, v => town().storeSox = v),
+        this.text('Also deposit gear requiring level', () => town().storeLevels, v => town().storeLevels = v, 'e.g. 85 or 80-90, 100'),
         this.check('Return when pickup pet is nearly full', () => town().petFull, v => town().petFull = v),
         this.number('Pet free slots ≤', () => town().petFree, v => town().petFree = v, 0, 10),
         this.number('Town arrival tolerance (m)', () => town().arrivalRadius / 10, v => town().arrivalRadius = v * 10, 10, 150),
         el('p', 'Bind your recall to Hotan in the game. While stopped, save the arrival point where a return scroll places you. Stand near, select and save the warehouse, potion merchant, repair merchant and world statue / teleport. Open the potion shop before saving its merchant. Saves your standing position for each approach. Uses collision-aware walking between services. Overrides the recorded walking restock while enabled.', 'muted'));
       for (const [role, label] of [['arrival', 'Arrival point'], ['storage', 'Warehouse'], ['vendor', 'Potion merchant'], ['smith', 'Repair merchant'], ['gate', 'World statue / teleport']]) services.append(
         this.row(this.button('Save ' + label.toLowerCase(), () => Town.save(role)), el('span', town()[role]?.name || (town()[role] ? 'Saved' : 'Not saved'), 'muted')));
-      services.append(el('p', 'Pet loot: store elixirs, and Star / Moon / Sun gear when SoX deposit is on (needs the saved warehouse; SoX gear in your own bag goes in too, all other character items stay). Nothing is deposited right after pickup, only on the next town trip. SoX gear that is part of a saved buff set, the weapon chosen for alchemy, or matches the Keep names stays in your bag. Sell other unprotected pet items at the saved weapon / repair merchant before repairing. Other seal/rare equipment and equipment with unknown rarity stays in the pet. Ordinary equipment is sold regardless of + or blue options. Existing character bag items are never sold.', 'muted'));
+      services.append(el('p', 'Pet loot: store elixirs, and Star / Moon / Sun gear when SoX deposit is on (needs the saved warehouse; SoX gear in your own bag goes in too, all other character items stay). Nothing is deposited right after pickup, only on the next town trip. Gear requiring one of the levels you list above (for example 85) is deposited the same way and never sold. SoX gear that is part of a saved buff set, the weapon chosen for alchemy, or matches the Keep names stays in your bag. Sell other unprotected pet items at the saved weapon / repair merchant before repairing. Other seal/rare equipment and equipment with unknown rarity stays in the pet. Ordinary equipment is sold regardless of + or blue options. Existing character bag items are never sold.', 'muted'));
       services.append(this.text('Keep in pet (names)', () => town().keep, v => town().keep = v),
         el('p', 'Town buys X-Large potions using the Buy HP/MP switches, low-stock thresholds and refill counts above. Keep each low-stock threshold below its refill target. Potion selections apply to walking-route restock. Returns when the character bag has at most one free slot. Free at least two slots before hunting again; existing character items stay protected. Revival uses the saved town services and a reverse scroll, without using a return scroll in town. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. F8 cancels.', 'muted'));
       this.townNote = el('p', Town.status(), 'muted'); services.append(this.townNote); this.pane.append(services);

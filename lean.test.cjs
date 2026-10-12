@@ -1165,8 +1165,8 @@ test('town never deposits SoX gear that a buff set, alchemy or the Keep names re
   gp.inventory.push(buffWeapon, spare, alchemy, favorite);
   f.Settings.profile.macro.buffSets = [{ id: 1, name: 'Cleric', weapon: f.BuffGear.key(buffWeapon), shield: null }];
   f.Alchemy.selected = { slot: 22, fingerprint: 'x' };
-  assert.deepEqual([buffWeapon, spare, alchemy, favorite].map(i => f.Town.soxItem(i, true)), [false, true, false, false]);
-  assert.equal(f.Town.soxItem(alchemy, false), true, 'an alchemy slot number means nothing for pet items');
+  assert.deepEqual([buffWeapon, spare, alchemy, favorite].map(i => f.Town.depositItem(i, true)), [false, true, false, false]);
+  assert.equal(f.Town.depositItem(alchemy, false), true, 'an alchemy slot number means nothing for pet items');
 });
 test('an error in an optional feature is logged and skipped instead of stopping the bot', () => {
   const f = fixture(); f.Hunt.start(); f.notices.length = 0;
@@ -1176,6 +1176,43 @@ test('an error in an optional feature is logged and skipped instead of stopping 
   assert.equal(f.Hunt.running, true); assert.equal(f.notices.some(n => /Bot stopped/.test(n)), false);
   f.Party.tick = f.Party.tick; f.Controller.guard('x', () => { throw Error('again'); });
   assert.equal(f.Controller.guard('y', () => 7), 7);
+});
+function levelGear(slot, ref, level, more = {}) {
+  return { slot, refObjId: ref, typeFlags: 44 | (6 << 7), quantity: 1, name: 'Glaive', magic: [], plus: 0, tooltip: { fields: { rarity: 0, reqLevelType1: 1, requiredLevel: level } }, ...more };
+}
+test('town deposits gear requiring the listed levels and never sells it', () => {
+  const f = townFixture(), c = f.Town.cfg();
+  const g85 = levelGear(0, 4001, 85), g84 = levelGear(1, 4002, 84), g90 = levelGear(2, 4003, 90), mastery = levelGear(3, 4004, 85, { tooltip: { fields: { reqLevelType1: 2, requiredLevel: 85 } } });
+  assert.deepEqual([g85, g84, g90, mastery].map(i => f.Town.depositItem(i)), [false, false, false, false], 'off until levels are listed');
+  c.storeLevels = '85';
+  assert.deepEqual([g85, g84, g90, mastery].map(i => f.Town.depositItem(i)), [true, false, false, false]);
+  c.storeLevels = '80-84, 90'; assert.deepEqual([g85, g84, g90].map(i => f.Town.depositItem(i)), [false, true, true]);
+  c.storeLevels = '90-80'; assert.equal(f.Town.depositItem(g85), true, 'reversed ranges are normalised');
+  for (const bad of ['abc', '', '8x', '1000', '85-']) { c.storeLevels = bad; assert.equal(f.Town.depositItem(g85), false, 'ignored: ' + bad); }
+  c.storeLevels = '85';
+  assert.equal(f.Town.eligible(g85), true); assert.equal(f.Town.sellable(g85), false, 'listed gear is never sold, even if storing is not possible');
+  assert.equal(f.Town.sellable(g84), true, 'other ordinary gear is still sold');
+  const potion = { slot: 5, refObjId: 15, typeFlags: 4332, quantity: 1, tooltip: { fields: { reqLevelType1: 1, requiredLevel: 85 } } };
+  assert.equal(f.Town.depositItem(potion), false, 'only equipment');
+  c.keep = 'glaive'; assert.equal(f.Town.depositItem(g85), false, 'Keep names win');
+});
+test('town trip stores level-listed gear from the bag and the pet, and protects buff and alchemy weapons', () => {
+  const f = townFixture(), gp = f.World.gp; f.Town.cfg().storeLevels = '85'; f.Town.cfg().storeSox = false; f.Town.cfg().keep = '';
+  const bag = levelGear(20, 5001, 85), keepBuff = levelGear(21, 5002, 85), keepAlchemy = levelGear(22, 5003, 85), plain = levelGear(23, 5004, 60);
+  gp.inventory.push(bag, keepBuff, keepAlchemy, plain);
+  f.Settings.profile.macro.buffSets = [{ id: 1, name: 'Cleric', weapon: f.BuffGear.key(keepBuff), shield: null }]; f.Alchemy.selected = { slot: 22, fingerprint: 'x' };
+  f.pet.inventory = [levelGear(0, 5005, 85), levelGear(1, 5006, 70)];
+  f.Town.begin(); f.Town.enter('store'); gp.storage = { npc: 60, phase: 'open', capacity: 30, items: [] }; gp.target = 60;
+  const stored = [];
+  for (let n = 0; n < 16 && f.Town.trip?.phase === 'store'; n++) {
+    f.advance(1000); f.Town.store(); const c = f.commands.at(-1);
+    if (c.kind === 'cos-transfer') { const i = f.pet.inventory.find(i => i.slot === c.source); gp.inventory.push({ ...i, slot: c.destination }); f.pet.inventory = f.pet.inventory.filter(i => i.slot !== c.source); }
+    else if (c.kind === 'storage-move' && f.Town.trip?.pending) { const i = gp.inventory.find(i => i.slot === c.move.source); stored.push(i.refObjId); gp.storage.items.push({ ...i, slot: c.move.destination }); gp.inventory = gp.inventory.filter(i => i.slot !== c.move.source); }
+    f.advance(600); f.Town.store();
+  }
+  assert.deepEqual(stored.sort(), [5001, 5005]);
+  assert.ok([5002, 5003, 5004].every(ref => gp.inventory.some(i => i.refObjId === ref)), 'buff, alchemy and ordinary bag gear stay');
+  assert.ok(f.pet.inventory.some(i => i.refObjId === 5006), 'other pet gear stays for the selling step');
 });
 test('auto mastery is off by default, ignores dead characters and pending training, and backs off after a refusal', () => {
   assert.equal(fixture().Settings.profile.mastery.enabled, false);
