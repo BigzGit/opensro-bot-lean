@@ -37,20 +37,55 @@ const UI = {
       this.reportCapture = this.button('Add screenshot (optional)', () => { void Reports.capture(); });
       this.reportRemove = this.button('Remove screenshot', () => Reports.removeImage());
       this.reportSend = this.button('Send to developer', () => { void Reports.send(); });
-      this.reportClose = this.button('Close preview', () => Reports.close());
+      this.reportClose = this.button('Close', () => Reports.close());
       this.reportImage = el('img'); this.reportImage.alt = 'Screenshot preview'; this.reportImage.className = 'report-image'; this.reportImage.hidden = true;
       this.reportStatus = el('p', '', 'muted'); this.reportStatus.setAttribute('role', 'status');
-      this.reportBox = this.group('Preview bug report',
+      this.reportBox = this.windowFrame('Bug report', () => Reports.close(),
         el('p', 'Only Send to developer uploads this preview through Cloudflare to the developer’s Discord. Diagnostics omit names, chat and locations. Your explanation and screenshot may show private details; check them first. Nothing is sent automatically.', 'muted'),
         this.field('What happened? (optional)', this.reportDescription), this.reportText,
         this.row(this.reportCapture, this.reportRemove), this.reportImage, this.reportStatus,
         this.row(this.reportSend, this.reportClose));
       this.reportBox.classList.add('report-preview');
-      this.body.insertBefore(this.reportBox, this.waitNote.nextSibling);
+      this.root.append(this.reportBox);
+      const width = Math.min(430, innerWidth - 8);
+      this.reportBox.style.left = Math.max(4, (innerWidth - width) / 2) + 'px';
+      this.reportBox.style.top = Math.max(4, Math.min(80, innerHeight - 320)) + 'px';
     }
-    this.reportBox.hidden = false;
+    this.reportBox.hidden = false; this.fitWindow(this.reportBox);
     this.reportDescription.value = Reports.draft.description;
     this.reportStatus.textContent = Reports.draft.sent ? 'Report already sent. Close this preview to prepare another.' : 'Review the report before sending. Screenshot is optional.';
+  },
+  // A draggable in-page window in the panel's skin. Lives in the same shadow root, so typing is protected like the panel.
+  windowFrame(title, onClose, ...children) {
+    const win = el('section', null, 'panel dialog'), header = el('header');
+    const close = this.button('×', onClose); close.className = 'fold'; close.setAttribute('aria-label', 'Close ' + title.toLowerCase());
+    header.append(el('strong', title), close);
+    const body = el('div', null, 'body dialog-body'); body.append(...children);
+    for (const corner of ['lu', 'mu', 'ru', 'ls', 'rs', 'ld', 'md', 'rd']) win.append(el('div', null, 'frame ' + corner));
+    win.append(header, body);
+    this.dragBy(header, win);
+    return win;
+  },
+  // Keep a floating window fully on screen after a resize or when it is re-shown.
+  fitWindow(win) {
+    if (!win || win.hidden) return;
+    const r = win.getBoundingClientRect();
+    win.style.left = clamp(r.left, 0, Math.max(0, innerWidth - r.width)) + 'px';
+    win.style.top = clamp(r.top, 0, Math.max(0, innerHeight - r.height)) + 'px';
+  },
+  dragBy(header, target) {
+    header.addEventListener('pointerdown', e => {
+      if (e.button !== 0 || e.target.closest('button')) return;
+      const start = target.getBoundingClientRect(), origin = { x: e.clientX, y: e.clientY };
+      header.setPointerCapture(e.pointerId);
+      const move = event => {
+        target.style.right = 'auto';
+        target.style.left = clamp(start.left + event.clientX - origin.x, 0, Math.max(0, innerWidth - start.width)) + 'px';
+        target.style.top = clamp(start.top + event.clientY - origin.y, 0, Math.max(0, innerHeight - 34)) + 'px';
+      };
+      const done = () => { header.removeEventListener('pointermove', move); header.removeEventListener('pointerup', done); header.removeEventListener('pointercancel', done); };
+      header.addEventListener('pointermove', move); header.addEventListener('pointerup', done); header.addEventListener('pointercancel', done);
+    });
   },
   button(text, action) {
     const b = el('button', text);
@@ -127,18 +162,8 @@ const UI = {
     for (const corner of ['lu', 'mu', 'ru', 'ls', 'rs', 'ld', 'md', 'rd']) panel.append(el('div', null, 'frame ' + corner));
     panel.append(header, this.body); this.root.append(style, panel);
     this.tip = el('div', null, 'skill-tip'); this.tip.hidden = true; this.root.append(this.tip);
-    header.addEventListener('pointerdown', e => {
-      if (e.button !== 0 || e.target.closest('button')) return;
-      const start = host.getBoundingClientRect(), origin = { x: e.clientX, y: e.clientY };
-      header.setPointerCapture(e.pointerId);
-      const move = event => {
-        host.style.right = 'auto';
-        host.style.left = clamp(start.left + event.clientX - origin.x, 0, Math.max(0, innerWidth - start.width)) + 'px';
-        host.style.top = clamp(start.top + event.clientY - origin.y, 0, Math.max(0, innerHeight - 34)) + 'px';
-      };
-      const done = () => { header.removeEventListener('pointermove', move); header.removeEventListener('pointerup', done); header.removeEventListener('pointercancel', done); };
-      header.addEventListener('pointermove', move); header.addEventListener('pointerup', done); header.addEventListener('pointercancel', done);
-    });
+    this.dragBy(header, host);
+    W.addEventListener('resize', () => this.fitWindow(this.reportBox));
     this.draw(); this.update();
   },
   skillOptions() {

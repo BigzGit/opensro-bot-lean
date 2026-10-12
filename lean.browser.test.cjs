@@ -488,6 +488,17 @@ const server = http.createServer((req, res) => {
     await page.getByRole('button',{name:'Send bug report',exact:true}).click();
     const preview = page.getByRole('textbox',{name:'Report preview',exact:true});
     await preview.waitFor(); assert.equal(reportRequests.length,0);
+    // The report is its own floating window: fixed on screen, inside the viewport, draggable, closed from its header.
+    const dialog = () => page.evaluate(() => { const root = document.querySelector('#sro-bot-lean').shadowRoot, d = root.querySelector('.dialog'), r = d.getBoundingClientRect();
+      return { fixed: getComputedStyle(d).position === 'fixed', hidden: d.hidden, left: r.left, top: r.top, inside: r.left >= 0 && r.top >= 0 && r.right <= innerWidth + 1, inPanel: !!root.querySelector('.panel .dialog, .body .dialog') }; });
+    const before = await dialog(); assert.deepEqual([before.fixed, before.hidden, before.inside, before.inPanel], [true, false, true, false]);
+    const titleBox = await page.locator('#sro-bot-lean').locator('css=.dialog header').boundingBox();
+    await page.mouse.move(titleBox.x + 60, titleBox.y + 15); await page.mouse.down(); await page.mouse.move(titleBox.x + 120, titleBox.y + 55, { steps: 4 }); await page.mouse.up();
+    const moved = await dialog(); assert.ok(moved.left > before.left + 30 && moved.top > before.top + 20);
+    await page.getByRole('button',{name:'Close bug report',exact:true}).click();
+    assert.equal((await dialog()).hidden, true);
+    await page.getByRole('button',{name:'Send bug report',exact:true}).click();
+    assert.equal((await dialog()).hidden, false); await preview.waitFor();
     assert.equal(JSON.parse(await preview.inputValue()).app,'nixxane bot');
     await page.getByRole('textbox',{name:'What happened? (optional)',exact:true}).fill('Movement stopped after alchemy.');
     assert.equal(JSON.parse(await preview.inputValue()).description,'Movement stopped after alchemy.');
@@ -522,7 +533,7 @@ const server = http.createServer((req, res) => {
     await page.getByText('Report sent to the developer’s Discord. Thank you.',{exact:true}).waitFor();
     assert.equal(reportRequests.length,1); assert.ok(!reportRequests[0].includes('name="screenshot"'));
     assert.ok(reportRequests[0].includes('Movement stopped after alchemy.'));
-    await page.getByRole('button',{name:'Close preview',exact:true}).click();
+    await page.getByRole('button',{name:'Close',exact:true}).click();
     await preview.waitFor({state:'hidden'});
     await page.getByRole('button',{name:'Send bug report',exact:true}).click();
     // Capture again to exercise the actual browser-generated JPEG multipart upload.
@@ -534,15 +545,15 @@ const server = http.createServer((req, res) => {
     await page.getByText('Report sent to the developer’s Discord. Thank you.',{exact:true}).waitFor();
     assert.equal(reportRequests.length,2); assert.ok(reportRequests[1].includes('name="screenshot"; filename="screenshot.jpg"'));
     assert.ok(reportRequests[1].includes('Content-Type: image/jpeg'));
-    await page.getByRole('button',{name:'Close preview',exact:true}).click();
+    await page.getByRole('button',{name:'Close',exact:true}).click();
     await page.getByRole('button',{name:'Send bug report',exact:true}).click(); reportStatus=429;
     await page.getByRole('button',{name:'Send to developer',exact:true}).click();
     await page.getByText('Too many reports. Wait before trying again.',{exact:true}).waitFor();
     assert.equal(await page.getByRole('button',{name:/^Wait \d+s$/}).isDisabled(),true); assert.equal(reportRequests.length,3);
-    await page.getByRole('button',{name:'Close preview',exact:true}).click();
+    await page.getByRole('button',{name:'Close',exact:true}).click();
     await page.getByRole('button',{name:'Send bug report',exact:true}).click();
     assert.equal(await page.getByRole('button',{name:/^Wait \d+s$/}).isDisabled(),true);
-    await page.getByRole('button',{name:'Close preview',exact:true}).click();
+    await page.getByRole('button',{name:'Close',exact:true}).click();
     assert.deepEqual(errors,[]);
     console.log('PASS browser boot, collision routing, skills and missing Thunderdragon metadata; wardrobe honor and paid avatar skins, all-slot browsing, pagination, slot mapping, search, glow, presets and real-inventory isolation; controls and desktop/mobile bounds; manual reports, synthetic screenshot preview/cleanup/upload and rate limits; zero page errors.');
   } finally { await browser.close(); }
