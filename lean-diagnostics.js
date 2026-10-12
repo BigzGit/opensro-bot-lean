@@ -33,9 +33,8 @@ const Diagnostics = {
     if (!c.autoRecruit && !c.autoAcceptMatching) return 'Party automation off.';
     if (!World.inWorld() || !m || !s || !Array.isArray(s.members)) return 'Party: waiting for game state.';
     if (!m.request) return m.own ? 'Party: waiting for applicants.' : c.autoRecruit ? 'Party: waiting for listing registration.' : 'Party: listing missing.';
-    if (!m.own) return 'Party join blocked: listing missing.';
     if (s.leader && (!s.self || s.self !== s.leader) || !s.leader && s.members.length) return 'Party join blocked: you are not the leader.';
-    const options = s.leader ? s.options : m.own.type;
+    const options = Party.options(m, s);
     if (!Number.isInteger(options)) return 'Party join blocked: sharing options unknown.';
     if (s.members.length >= ((options & 1) ? 8 : 4)) return 'Party join blocked: party full.';
     const sim = World.simNow(), r = m.request;

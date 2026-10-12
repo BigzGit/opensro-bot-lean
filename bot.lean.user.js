@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.51
+// @version      1.2.52
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.51';
+const VERSION = '1.2.52';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -2384,6 +2384,11 @@ const Party = {
   lastRegisterAt: -Infinity,
   message: 'Auto-recruit off.',
   reset() { this.answered = ''; this.registration = null; this.lastRegisterAt = -Infinity; this.message = 'Waiting for party state.'; },
+  // Party sharing options: the party's own once formed, else the listing's, else the saved new-party choice.
+  options(matching, social) {
+    const c = Settings.profile.party;
+    return social.leader ? social.options : matching.own?.type ?? ((c.expShare ? 1 : 0) | (c.itemShare ? 2 : 0));
+  },
   recruit(matching, social) {
     const c = Settings.profile.party;
     if (!c.autoRecruit) { this.message = 'Auto-recruit off.'; return; }
@@ -2433,11 +2438,14 @@ const Party = {
     if (!matching || !social || !Array.isArray(social.members)) return;
     this.recruit(matching, social);
     if (!request) { this.answered = ''; return; }
-    if (!matching.own || !social || !Array.isArray(social.members)) return;
+    if (!social || !Array.isArray(social.members)) return;
     // An owned listing can exist before the first applicant forms the party.
+    // The game only routes applications to the listing's owner, and the local listing record can be
+    // missing while the server's still exists (it is wiped on world entry and after a party dissolves),
+    // so a live application is enough; the leader, capacity and deadline checks below still apply.
     if (social.leader && (!social.self || social.self !== social.leader)) return;
     if (!social.leader && social.members.length) return;
-    const options = social.leader ? social.options : matching.own.type;
+    const options = this.options(matching, social);
     if (!Number.isInteger(options) || social.members.length >= ((options & 1) ? 8 : 4)) return;
     const sim = World.simNow();
     if (!Number.isFinite(sim) || !Number.isFinite(request.expires) || sim >= request.expires) return;
@@ -5396,9 +5404,8 @@ const Diagnostics = {
     if (!c.autoRecruit && !c.autoAcceptMatching) return 'Party automation off.';
     if (!World.inWorld() || !m || !s || !Array.isArray(s.members)) return 'Party: waiting for game state.';
     if (!m.request) return m.own ? 'Party: waiting for applicants.' : c.autoRecruit ? 'Party: waiting for listing registration.' : 'Party: listing missing.';
-    if (!m.own) return 'Party join blocked: listing missing.';
     if (s.leader && (!s.self || s.self !== s.leader) || !s.leader && s.members.length) return 'Party join blocked: you are not the leader.';
-    const options = s.leader ? s.options : m.own.type;
+    const options = Party.options(m, s);
     if (!Number.isInteger(options)) return 'Party join blocked: sharing options unknown.';
     if (s.members.length >= ((options & 1) ? 8 : 4)) return 'Party join blocked: party full.';
     const sim = World.simNow(), r = m.request;

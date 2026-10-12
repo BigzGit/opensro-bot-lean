@@ -482,11 +482,10 @@ test('party matching is opt-in and accepts once while hunting is stopped', () =>
   f.advance(1000); f.Controller.tick(); assert.equal(f.commands.length, 1); assert.equal(f.Hunt.running, false);
 });
 
-test('party matching permits first applicant but never approves for another leader or listing', () => {
+test('party matching permits first applicant but never approves for another leader', () => {
   const f = fixture(), m = partyApplication(f);
   f.World.gp.social.leader = 99; f.Controller.tick(); assert.equal(f.commands.length, 0);
-  f.World.gp.social.leader = 10; m.own = null; f.Controller.tick(); assert.equal(f.commands.length, 0);
-  m.own = { id: 5, type: 1 }; f.World.gp.social = { leader: 0, self: 0, options: 0, members: [] };
+  f.World.gp.social = { leader: 0, self: 0, options: 0, members: [] };
   f.Controller.tick(); assert.equal(f.commands[0].answer, 1);
 });
 
@@ -568,6 +567,28 @@ test('party matching retries failed dispatch and correlates replacement requests
   f.advance(300); f.Controller.tick(); assert.equal(f.commands.length, 2);
 });
 
+test('a live application is accepted even when the local listing record is missing', () => {
+  // Seen in the field: after the first member joined and left, the server still routed applications to the
+  // bot while its own-listing record was empty, so every later application was ignored.
+  for (const autoRecruit of [false, true]) {
+    const f = fixture(); f.Settings.profile.party.autoAcceptMatching = true; f.Settings.profile.party.autoRecruit = autoRecruit;
+    f.Settings.profile.party.expShare = false; f.Settings.profile.party.itemShare = false;
+    const solo = { self: 0, leader: 0, options: 0, members: [] };
+    const request = { a: 40, b: 50, expires: f.World.simNow() + 10000, member: { name: 'Applicant' } };
+    f.World.applyGameplay({ ...f.World.gp, social: solo, partyMatching: { own: null, pending: null, request, result: 2 } });
+    f.Controller.tick();
+    assert.equal(f.commands.filter(c => c.kind === 'party-match-answer').length, 1, 'autoRecruit=' + autoRecruit);
+    assert.equal(f.Diagnostics.party().includes('listing missing'), false);
+    // Still refused when someone else leads, the party is full, or the deadline has passed.
+    const g = fixture(); g.Settings.profile.party.autoAcceptMatching = true;
+    g.World.applyGameplay({ ...g.World.gp, social: { self: 10, leader: 99, options: 1, members: [{ id: 10 }] }, partyMatching: { own: null, pending: null, request } });
+    g.Controller.tick(); assert.equal(g.commands.length, 0);
+    g.World.applyGameplay({ ...g.World.gp, social: { self: 10, leader: 10, options: 0, members: Array.from({ length: 4 }, (_, n) => ({ id: 10 + n })) }, partyMatching: { own: null, pending: null, request } });
+    g.Controller.tick(); assert.equal(g.commands.length, 0);
+    g.World.applyGameplay({ ...g.World.gp, social: { self: 10, leader: 10, options: 1, members: [{ id: 10 }] }, partyMatching: { own: null, pending: null, request: { ...request, expires: g.World.simNow() - 1 } } });
+    g.Controller.tick(); assert.equal(g.commands.length, 0);
+  }
+});
 test('gameplay mirror exposes party matching requests and clears answered requests', () => {
   const f = fixture(), m = partyApplication(f);
   f.World.applyGameplay({ ...f.World.gp, partyMatching: m }); f.Controller.tick(); assert.equal(f.commands.length, 1);
@@ -2096,7 +2117,7 @@ test('diagnostics identify party acceptance gates without changing party command
   const f = fixture(), m = partyApplication(f);
   f.World.gp.social.members = Array.from({ length: 5 }, (_, n) => ({ id: 10 + n }));
   assert.match(f.Diagnostics.party(), /ready for acceptance/);
-  m.own = null; assert.match(f.Diagnostics.party(), /listing missing/);
+  m.own = null; assert.match(f.Diagnostics.party(), /ready for acceptance/);
   m.own = { type: 1 }; f.World.gp.social.leader = 99; assert.match(f.Diagnostics.party(), /not the leader/);
   f.World.gp.social.leader = 10; f.World.gp.social.options = 0; assert.match(f.Diagnostics.party(), /party full/);
   f.World.gp.social.options = 1; m.request.expires = 99999; assert.match(f.Diagnostics.party(), /expired/);

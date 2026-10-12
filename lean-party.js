@@ -5,6 +5,11 @@ const Party = {
   lastRegisterAt: -Infinity,
   message: 'Auto-recruit off.',
   reset() { this.answered = ''; this.registration = null; this.lastRegisterAt = -Infinity; this.message = 'Waiting for party state.'; },
+  // Party sharing options: the party's own once formed, else the listing's, else the saved new-party choice.
+  options(matching, social) {
+    const c = Settings.profile.party;
+    return social.leader ? social.options : matching.own?.type ?? ((c.expShare ? 1 : 0) | (c.itemShare ? 2 : 0));
+  },
   recruit(matching, social) {
     const c = Settings.profile.party;
     if (!c.autoRecruit) { this.message = 'Auto-recruit off.'; return; }
@@ -54,11 +59,14 @@ const Party = {
     if (!matching || !social || !Array.isArray(social.members)) return;
     this.recruit(matching, social);
     if (!request) { this.answered = ''; return; }
-    if (!matching.own || !social || !Array.isArray(social.members)) return;
+    if (!social || !Array.isArray(social.members)) return;
     // An owned listing can exist before the first applicant forms the party.
+    // The game only routes applications to the listing's owner, and the local listing record can be
+    // missing while the server's still exists (it is wiped on world entry and after a party dissolves),
+    // so a live application is enough; the leader, capacity and deadline checks below still apply.
     if (social.leader && (!social.self || social.self !== social.leader)) return;
     if (!social.leader && social.members.length) return;
-    const options = social.leader ? social.options : matching.own.type;
+    const options = this.options(matching, social);
     if (!Number.isInteger(options) || social.members.length >= ((options & 1) ? 8 : 4)) return;
     const sim = World.simNow();
     if (!Number.isFinite(sim) || !Number.isFinite(request.expires) || sim >= request.expires) return;
