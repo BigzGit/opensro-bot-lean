@@ -1579,6 +1579,20 @@ test('pet storage protects supplies, keep names and items with missing metadata'
   f.Town.cfg().store.elixirs = false; assert.equal(f.Town.eligible(f.pet.inventory[0]), true, 'Legacy category switches cannot store other items or sell elixirs');
   assert.equal(f.Town.eligible(f.pet.inventory[1]), false);
 });
+test('the pet status says why drops in view are not collected', () => {
+  const f = fixture(); pickupPet(f, 7); f.Hunt.running = true;
+  assert.match(f.Diagnostics.pet(), /waiting for eligible drops\. No drops in view/);
+  const near = f.drop(40, 3436); near.x = 110; f.Loot.preset('all');
+  const far = f.drop(41, 3436); far.x = 5000; f.Settings.profile.hunt.center = null;
+  const off = f.drop(42, 2284); off.x = 112; f.Settings.profile.hunt.pickup.potions = false;
+  const foreign = f.drop(43, 3436); foreign.x = 114; foreign.groundItem.ownerJid = 999;
+  const text = f.Diagnostics.pet();
+  assert.match(text, /Drops in view: 4, ready to collect: 1\./); assert.match(text, /1: its type is switched off/);
+  assert.match(text, /1: too far from you/); assert.match(text, /1: it belongs to another player/);
+  assert.equal(f.Loot.whyNot(near), ''); assert.equal(f.Loot.choose()?.gid, 40, 'whyNot agrees with the drop choose() takes');
+  f.Settings.profile.hunt.pickup.finishFight = true; f.Settings.profile.hunt.pickup.afterKillOnly = true;
+  assert.equal(f.Loot.whyNot(near), '', 'finish-fight never blocks the pet');
+});
 test('party members and their pets do not make a monster another player\'s target', () => {
   const f = fixture(); f.World.gp.social = { localName: 'Me', members: [{ id: 5, name: 'Mate' }, { id: 1, name: 'Me' }] };
   f.World.ents.set(30, { gid: 30, kind: 'monster', name: 'Wolf', regionId: 1, x: 120, y: 0, z: 100, attackFlags: 16, appearanceState: [0] });

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.68
+// @version      1.2.69
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.68';
+const VERSION = '1.2.69';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -2140,6 +2140,25 @@ const Loot = {
     if (!ItemType.isStackable(tf)) return false;
     return this.items(pet ? pet.rec.gid : 0).some(i => i.refObjId === e.refObjId &&
       (!i.tooltip?.fields?.maxStack || (i.quantity ?? 1) < i.tooltip.fields.maxStack));
+  },
+  // The first reason a drop in view is not collected, or '' when it is eligible. Follows choose() and allowed().
+  whyNot(e) {
+    const H = Hunt.cfg(), P = H.pickup, skip = this.skips.get(e.gid);
+    if (skip && (skip.bag !== null ? skip.bag === this.bagSignature() : skip.until > now())) return 'failed';
+    if (!(dist2D(World.pose(), e) <= P.radius)) return 'far';
+    if (H.center && dist2D(H.center, e) > H.radius + P.radius) return 'area';
+    if (!this.owned(e)) return 'owner';
+    const tf = e.groundItem.typeFlags ?? e.tidWord ?? 0, name = (e.name || '').toLowerCase();
+    const included = splitList(P.include).some(s => name.includes(s));
+    const filtered = splitList(P.exclude).some(s => name.includes(s)) ||
+      (P.soxOnly && ItemType.isEquipment(tf) ? !this.sox(e) : !included && !P[this.category(tf)]);
+    if (filtered) return 'filter';
+    if (this.petMode()) {
+      const pet = this.pet();
+      if (!pet || !Number.isInteger(pet.rec.commandMode) || (pet.rec.commandMode & 128)) return 'pet';
+      if (dist2D(pet.ent, e) > 500) return 'petFar';
+    }
+    return this.allowed(e) ? '' : 'full';
   },
   skip(e, reason, inventoryBound = false) {
     const n = Math.min(6, (this.failureCounts.get(e.gid) || 0) + 1);
@@ -5873,7 +5892,31 @@ const Diagnostics = {
     if (Loot.pressed()) return 'Pet waiting briefly for potion use.';
     if (Loot.active?.petGid) return Loot.active.retryAt ? 'Pet pickup: retry pending.' : 'Pet pickup: waiting for collection confirmation.';
     if (pet.rec.inventory.length >= pet.rec.status) return 'Pet bag full; only compatible stacks can merge.';
-    return 'Pet ready; waiting for eligible drops.';
+    return 'Pet ready; waiting for eligible drops. ' + this.noLoot();
+  },
+  // Why nothing is being collected, counted from the drops in view. Counts only, no item names.
+  noLoot() {
+    const why = { failed: 0, far: 0, area: 0, owner: 0, filter: 0, pet: 0, petFar: 0, full: 0 };
+    let seen = 0, ready = 0;
+    if (!World.pose()) return '';
+    for (const e of World.ents.values()) {
+      if (e.kind !== 'ground-item') continue;
+      seen++;
+      const reason = Loot.whyNot(e);
+      if (reason) why[reason]++; else ready++;
+    }
+    if (!seen) return 'No drops in view.';
+    const parts = [
+      [why.filter, 'its type is switched off in Loot, or it is excluded by name, or SoX only is on'],
+      [why.far, 'too far from you (Pickup radius)'],
+      [why.area, 'outside the hunting area'],
+      [why.owner, 'it belongs to another player'],
+      [why.petFar, 'too far from the pet'],
+      [why.pet, 'the pet is not ready'],
+      [why.full, 'no room in the bag'],
+      [why.failed, 'recently failed'],
+    ].filter(([n]) => n).map(([n, text]) => `${n}: ${text}`);
+    return `Drops in view: ${seen}, ready to collect: ${ready}.` + (parts.length ? ` Not collected: ${parts.join('; ')}.` : '');
   },
   town() {
     if (!Town.cfg().enabled) return '';

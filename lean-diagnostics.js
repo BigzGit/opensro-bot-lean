@@ -55,7 +55,31 @@ const Diagnostics = {
     if (Loot.pressed()) return 'Pet waiting briefly for potion use.';
     if (Loot.active?.petGid) return Loot.active.retryAt ? 'Pet pickup: retry pending.' : 'Pet pickup: waiting for collection confirmation.';
     if (pet.rec.inventory.length >= pet.rec.status) return 'Pet bag full; only compatible stacks can merge.';
-    return 'Pet ready; waiting for eligible drops.';
+    return 'Pet ready; waiting for eligible drops. ' + this.noLoot();
+  },
+  // Why nothing is being collected, counted from the drops in view. Counts only, no item names.
+  noLoot() {
+    const why = { failed: 0, far: 0, area: 0, owner: 0, filter: 0, pet: 0, petFar: 0, full: 0 };
+    let seen = 0, ready = 0;
+    if (!World.pose()) return '';
+    for (const e of World.ents.values()) {
+      if (e.kind !== 'ground-item') continue;
+      seen++;
+      const reason = Loot.whyNot(e);
+      if (reason) why[reason]++; else ready++;
+    }
+    if (!seen) return 'No drops in view.';
+    const parts = [
+      [why.filter, 'its type is switched off in Loot, or it is excluded by name, or SoX only is on'],
+      [why.far, 'too far from you (Pickup radius)'],
+      [why.area, 'outside the hunting area'],
+      [why.owner, 'it belongs to another player'],
+      [why.petFar, 'too far from the pet'],
+      [why.pet, 'the pet is not ready'],
+      [why.full, 'no room in the bag'],
+      [why.failed, 'recently failed'],
+    ].filter(([n]) => n).map(([n, text]) => `${n}: ${text}`);
+    return `Drops in view: ${seen}, ready to collect: ${ready}.` + (parts.length ? ` Not collected: ${parts.join('; ')}.` : '');
   },
   town() {
     if (!Town.cfg().enabled) return '';

@@ -126,6 +126,25 @@ const Loot = {
     return this.items(pet ? pet.rec.gid : 0).some(i => i.refObjId === e.refObjId &&
       (!i.tooltip?.fields?.maxStack || (i.quantity ?? 1) < i.tooltip.fields.maxStack));
   },
+  // The first reason a drop in view is not collected, or '' when it is eligible. Follows choose() and allowed().
+  whyNot(e) {
+    const H = Hunt.cfg(), P = H.pickup, skip = this.skips.get(e.gid);
+    if (skip && (skip.bag !== null ? skip.bag === this.bagSignature() : skip.until > now())) return 'failed';
+    if (!(dist2D(World.pose(), e) <= P.radius)) return 'far';
+    if (H.center && dist2D(H.center, e) > H.radius + P.radius) return 'area';
+    if (!this.owned(e)) return 'owner';
+    const tf = e.groundItem.typeFlags ?? e.tidWord ?? 0, name = (e.name || '').toLowerCase();
+    const included = splitList(P.include).some(s => name.includes(s));
+    const filtered = splitList(P.exclude).some(s => name.includes(s)) ||
+      (P.soxOnly && ItemType.isEquipment(tf) ? !this.sox(e) : !included && !P[this.category(tf)]);
+    if (filtered) return 'filter';
+    if (this.petMode()) {
+      const pet = this.pet();
+      if (!pet || !Number.isInteger(pet.rec.commandMode) || (pet.rec.commandMode & 128)) return 'pet';
+      if (dist2D(pet.ent, e) > 500) return 'petFar';
+    }
+    return this.allowed(e) ? '' : 'full';
+  },
   skip(e, reason, inventoryBound = false) {
     const n = Math.min(6, (this.failureCounts.get(e.gid) || 0) + 1);
     this.failureCounts.set(e.gid, n);
