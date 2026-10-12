@@ -30,8 +30,9 @@ Set this up once in **Supplies → Hotan scroll town cycle**:
 When supplies run low or a bag reaches its capacity trigger, the bot recalls to town, handles pet loot, refills pots, repairs gear and reverses to the **last return-scroll point**.
 
 - **Pet elixirs:** stored in the warehouse.
+- **SoX gear:** Star, Moon and Sun equipment is deposited in the warehouse from your own bag and from the pet, on the next trip that visits the warehouse. Nothing is stored right after pickup. Switch it off with **Deposit SoX gear in the warehouse**.
 - **Other unprotected pet loot:** sold at the repair merchant. Ordinary equipment can be sold even with + or blue options.
-- **Seal/rare gear, supplies and matching Keep names:** protected. Existing character bag items are never sold.
+- **Other seal/rare gear, supplies and matching Keep names:** protected. Existing character bag items are never sold.
 
 If protected items fill a bag, the bot stays in town and asks you to free space.
 

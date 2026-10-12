@@ -38,6 +38,16 @@ const Items = {
   name(id) { return this.data.get(id)?.name || WdData.byId.get(id)?.code || '#' + id; },
   iconDdj(id) { return this.data.get(id)?.icon || ''; },
   // 0 none | 1 Star | 2 Moon | 3 Sun, from the codename rule _[ABC]_RARE (also MAGIC/LEGEND/MYTH, HONOR).
+  // Real inventory/pet items carry tooltip rarity (2 = seal tiers) and a Star/Moon/Sun class; otherwise use the codename rule.
+  soxOf(item) {
+    const f = item?.tooltip?.fields;
+    if (f && f.rarity !== undefined) {
+      if (f.rarity !== 2) return 0;
+      if (f.itemClass) return ((f.itemClass - 1) % 3) + 1;
+    }
+    const m = /_([ABC])_(RARE|MAGIC|LEGEND|MYTH)(?:_HONOR)?$/.exec(item?.codename || this.data.get(item?.refObjId)?.code || '');
+    return m ? 'ABC'.indexOf(m[1]) + 1 : f?.rarity === 2 ? 1 : 0;
+  },
   sox(id) { const m = /_([ABC])_(RARE|MAGIC|LEGEND|MYTH)(?:_HONOR)?$/.exec(this.data.get(id)?.code || ''); return m ? 'ABC'.indexOf(m[1]) + 1 : 0; },
 };
 const LeanWardrobe = {

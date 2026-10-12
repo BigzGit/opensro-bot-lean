@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.49
+// @version      1.2.50
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.49';
+const VERSION = '1.2.50';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -198,7 +198,7 @@ const DEFAULT_PROFILE = {
     prefer: { hp: 0, mp: 0, vigor: 0, cure: 0 }, delayMs: 350,
     restock: {
       enabled: false, vendor: null, route: [], offers: [],
-      town: { enabled: false, revive: true, petFull: true, petFree: 1, arrivalRadius: 500, arrival: null, storage: null, vendor: null, smith: null, gate: null,
+      town: { enabled: false, revive: true, storeSox: true, petFull: true, petFree: 1, arrivalRadius: 500, arrival: null, storage: null, vendor: null, smith: null, gate: null,
         keep: '', store: { equipment: true, elixirs: true, powders: true, alchemy: true, others: false } },
       hp: { on: true, refObjId: 0, low: 20, target: 100 },
       mp: { on: true, refObjId: 0, low: 20, target: 300 },
@@ -2754,7 +2754,9 @@ const Town = {
         /_(RARE|MAGIC|LEGEND|MYTH)(?:_HONOR)?$/i.test(item.codename || ''))) return false;
     return true;
   },
-  eligible(item) { return this.disposable(item) && Loot.category(item.typeFlags) === 'elixirs'; },
+  // Deposit-worthy gear: Star/Moon/Sun equipment from the character bag or the pickup pet.
+  soxItem(item) { return !!this.cfg().storeSox && Number.isInteger(item.typeFlags) && ItemType.isEquipment(item.typeFlags) && Items.soxOf(item) > 0; },
+  eligible(item) { return this.soxItem(item) || this.disposable(item) && Loot.category(item.typeFlags) === 'elixirs'; },
   sellable(item) { return this.disposable(item) && Loot.category(item.typeFlags) !== 'elixirs'; },
   autoRevive() { return this.cfg().enabled && this.cfg().revive; },
   reason() {
@@ -2814,7 +2816,7 @@ const Town = {
   arrived() {
     this.trip.scrollAttempts = 0; this.trip.scrollRequest = null;
     if (World.freeBagSlots() < 1) return this.fail('Returned to town; free a character bag slot for storage and refills.');
-    if (this.cfg().petFull && this.reason() === 'pickup pet nearly full' && !Loot.pet()?.rec.inventory.some(i => this.disposable(i))) return this.fail('Returned to town; pet is full of protected items. Empty it manually.');
+    if (this.cfg().petFull && this.reason() === 'pickup pet nearly full' && !Loot.pet()?.rec.inventory.some(i => this.disposable(i) || this.eligible(i))) return this.fail('Returned to town; pet is full of protected items. Empty it manually.');
     this.enter(this.cfg().storage ? 'walk-storage' : 'walk-vendor');
   },
   enter(phase) {
@@ -2903,14 +2905,17 @@ const Town = {
     }) || !this.trip || gp.inventoryPending) return;
     const bagItem = t.staged ? World.items().find(i => i.slot === t.staged.slot && i.refObjId === t.staged.ref) : null;
     if (t.staged && !bagItem) return this.fail('Staged pet item changed unexpectedly.');
-    const item = bagItem || pet?.rec.inventory.find(i => this.eligible(i));
+    // Gear the character picked up is deposited straight from the bag, then pet loot is staged through it.
+    const bagSox = bagItem ? null : World.items().find(i => this.soxItem(i));
+    const direct = bagItem || bagSox;
+    const item = direct || pet?.rec.inventory.find(i => this.eligible(i));
     if (!item) {
       this.enter('close-storage'); return;
     }
     const destination = this.free(st.items, 0, st.capacity);
     if (destination === null) return this.fail('Storage is full.');
     let command, pending;
-    if (bagItem) {
+    if (direct) {
       command = { kind: 'storage-move', move: { type: 2, source: item.slot, destination, quantity: 0, gold: 0 } };
       pending = { kind: 'store', source: item.slot, destination, ref: item.refObjId, quantity: item.quantity ?? 1 };
     } else {
@@ -2919,9 +2924,9 @@ const Town = {
       command = { kind: 'cos-transfer', gid: pet.rec.gid, toCos: false, source: item.slot, destination: slot };
       pending = { kind: 'pet', source: item.slot, destination: slot, ref: item.refObjId, quantity: item.quantity ?? 1 };
     }
-    if (Cmd.raw(command, 'Town: move selected pet loot')) {
+    if (Cmd.raw(command, direct ? 'Town: deposit item' : 'Town: move selected pet loot')) {
       t.pending = { ...pending, at: now() };
-      t.staged = bagItem ? null : { slot: pending.destination, ref: pending.ref };
+      t.staged = direct ? null : { slot: pending.destination, ref: pending.ref };
     }
   },
   sell() {
@@ -4998,6 +5003,16 @@ const Items = {
   name(id) { return this.data.get(id)?.name || WdData.byId.get(id)?.code || '#' + id; },
   iconDdj(id) { return this.data.get(id)?.icon || ''; },
   // 0 none | 1 Star | 2 Moon | 3 Sun, from the codename rule _[ABC]_RARE (also MAGIC/LEGEND/MYTH, HONOR).
+  // Real inventory/pet items carry tooltip rarity (2 = seal tiers) and a Star/Moon/Sun class; otherwise use the codename rule.
+  soxOf(item) {
+    const f = item?.tooltip?.fields;
+    if (f && f.rarity !== undefined) {
+      if (f.rarity !== 2) return 0;
+      if (f.itemClass) return ((f.itemClass - 1) % 3) + 1;
+    }
+    const m = /_([ABC])_(RARE|MAGIC|LEGEND|MYTH)(?:_HONOR)?$/.exec(item?.codename || this.data.get(item?.refObjId)?.code || '');
+    return m ? 'ABC'.indexOf(m[1]) + 1 : f?.rarity === 2 ? 1 : 0;
+  },
   sox(id) { const m = /_([ABC])_(RARE|MAGIC|LEGEND|MYTH)(?:_HONOR)?$/.exec(this.data.get(id)?.code || ''); return m ? 'ABC'.indexOf(m[1]) + 1 : 0; },
 };
 const LeanWardrobe = {
@@ -5416,7 +5431,7 @@ const Diagnostics = {
     if (Town.trip) {
       if (Town.trip.phase === 'buy') return Town.trip.supplies.map(s => `Refilling ${s.kind === 'hp' ? 'HP' : s.kind === 'mp' ? 'MP' : 'abnormal pills'}: ${Restock.count(s.refObjId)} / ${s.target}`).join(' · ');
       if (World.gp?.inventoryPending) return 'Town services: waiting for inventory transaction.';
-      const phases = { recall: 'stopping combat for recall', 'recall-wait': 'waiting for recall arrival', 'reverse-wait': 'waiting for reverse arrival', 'revive-arrival': 'waiting for town revival', store: 'depositing pet loot', sell: 'selling pet loot', repair: 'repairing equipment', reverse: 'opening reverse return' };
+      const phases = { recall: 'stopping combat for recall', 'recall-wait': 'waiting for recall arrival', 'reverse-wait': 'waiting for reverse arrival', 'revive-arrival': 'waiting for town revival', store: 'depositing loot', sell: 'selling pet loot', repair: 'repairing equipment', reverse: 'opening reverse return' };
       return 'Town services: ' + (phases[Town.trip.phase] || 'travelling between or opening services') + '.';
     }
     if (WalkBack.active || Restock.trip || Resurrect.trip) return 'Travelling; waiting to reach the destination.';
@@ -5997,13 +6012,14 @@ const UI = {
       const services = this.group('Hotan scroll town cycle',
         this.check('Use return scroll → town services → reverse return', () => town().enabled, v => { town().enabled = v; this.draw(); }),
         this.check('Revive in town and reverse to last scroll point', () => town().revive, v => town().revive = v),
+        this.check('Deposit SoX gear in the warehouse (character and pet bags)', () => town().storeSox, v => town().storeSox = v),
         this.check('Return when pickup pet is nearly full', () => town().petFull, v => town().petFull = v),
         this.number('Pet free slots ≤', () => town().petFree, v => town().petFree = v, 0, 10),
         this.number('Town arrival tolerance (m)', () => town().arrivalRadius / 10, v => town().arrivalRadius = v * 10, 10, 150),
         el('p', 'Bind your recall to Hotan in the game. While stopped, save the arrival point where a return scroll places you. Stand near, select and save the warehouse, potion merchant, repair merchant and world statue / teleport. Open the potion shop before saving its merchant. Saves your standing position for each approach. Uses collision-aware walking between services. Overrides the recorded walking restock while enabled.', 'muted'));
       for (const [role, label] of [['arrival', 'Arrival point'], ['storage', 'Warehouse'], ['vendor', 'Potion merchant'], ['smith', 'Repair merchant'], ['gate', 'World statue / teleport']]) services.append(
         this.row(this.button('Save ' + label.toLowerCase(), () => Town.save(role)), el('span', town()[role]?.name || (town()[role] ? 'Saved' : 'Not saved'), 'muted')));
-      services.append(el('p', 'Pet loot: store elixirs only. Sell other unprotected pet items at the saved weapon / repair merchant before repairing. Keep seal/rare equipment and equipment with unknown rarity in the pet. Ordinary equipment is sold regardless of + or blue options. Existing character bag items are never sold.', 'muted'));
+      services.append(el('p', 'Pet loot: store elixirs, and Star / Moon / Sun gear when SoX deposit is on (needs the saved warehouse; SoX gear in your own bag goes in too, all other character items stay). Nothing is deposited right after pickup, only on the next town trip. Sell other unprotected pet items at the saved weapon / repair merchant before repairing. Other seal/rare equipment and equipment with unknown rarity stays in the pet. Ordinary equipment is sold regardless of + or blue options. Existing character bag items are never sold.', 'muted'));
       services.append(this.text('Keep in pet (names)', () => town().keep, v => town().keep = v),
         el('p', 'Town buys X-Large potions using the Buy HP/MP switches, low-stock thresholds and refill counts above. Keep each low-stock threshold below its refill target. Potion selections apply to walking-route restock. Returns when the character bag has at most one free slot. Free at least two slots before hunting again; existing character items stay protected. Revival uses the saved town services and a reverse scroll, without using a return scroll in town. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. F8 cancels.', 'muted'));
       this.townNote = el('p', Town.status(), 'muted'); services.append(this.townNote); this.pane.append(services);

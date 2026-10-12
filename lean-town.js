@@ -118,7 +118,9 @@ const Town = {
         /_(RARE|MAGIC|LEGEND|MYTH)(?:_HONOR)?$/i.test(item.codename || ''))) return false;
     return true;
   },
-  eligible(item) { return this.disposable(item) && Loot.category(item.typeFlags) === 'elixirs'; },
+  // Deposit-worthy gear: Star/Moon/Sun equipment from the character bag or the pickup pet.
+  soxItem(item) { return !!this.cfg().storeSox && Number.isInteger(item.typeFlags) && ItemType.isEquipment(item.typeFlags) && Items.soxOf(item) > 0; },
+  eligible(item) { return this.soxItem(item) || this.disposable(item) && Loot.category(item.typeFlags) === 'elixirs'; },
   sellable(item) { return this.disposable(item) && Loot.category(item.typeFlags) !== 'elixirs'; },
   autoRevive() { return this.cfg().enabled && this.cfg().revive; },
   reason() {
@@ -178,7 +180,7 @@ const Town = {
   arrived() {
     this.trip.scrollAttempts = 0; this.trip.scrollRequest = null;
     if (World.freeBagSlots() < 1) return this.fail('Returned to town; free a character bag slot for storage and refills.');
-    if (this.cfg().petFull && this.reason() === 'pickup pet nearly full' && !Loot.pet()?.rec.inventory.some(i => this.disposable(i))) return this.fail('Returned to town; pet is full of protected items. Empty it manually.');
+    if (this.cfg().petFull && this.reason() === 'pickup pet nearly full' && !Loot.pet()?.rec.inventory.some(i => this.disposable(i) || this.eligible(i))) return this.fail('Returned to town; pet is full of protected items. Empty it manually.');
     this.enter(this.cfg().storage ? 'walk-storage' : 'walk-vendor');
   },
   enter(phase) {
@@ -267,14 +269,17 @@ const Town = {
     }) || !this.trip || gp.inventoryPending) return;
     const bagItem = t.staged ? World.items().find(i => i.slot === t.staged.slot && i.refObjId === t.staged.ref) : null;
     if (t.staged && !bagItem) return this.fail('Staged pet item changed unexpectedly.');
-    const item = bagItem || pet?.rec.inventory.find(i => this.eligible(i));
+    // Gear the character picked up is deposited straight from the bag, then pet loot is staged through it.
+    const bagSox = bagItem ? null : World.items().find(i => this.soxItem(i));
+    const direct = bagItem || bagSox;
+    const item = direct || pet?.rec.inventory.find(i => this.eligible(i));
     if (!item) {
       this.enter('close-storage'); return;
     }
     const destination = this.free(st.items, 0, st.capacity);
     if (destination === null) return this.fail('Storage is full.');
     let command, pending;
-    if (bagItem) {
+    if (direct) {
       command = { kind: 'storage-move', move: { type: 2, source: item.slot, destination, quantity: 0, gold: 0 } };
       pending = { kind: 'store', source: item.slot, destination, ref: item.refObjId, quantity: item.quantity ?? 1 };
     } else {
@@ -283,9 +288,9 @@ const Town = {
       command = { kind: 'cos-transfer', gid: pet.rec.gid, toCos: false, source: item.slot, destination: slot };
       pending = { kind: 'pet', source: item.slot, destination: slot, ref: item.refObjId, quantity: item.quantity ?? 1 };
     }
-    if (Cmd.raw(command, 'Town: move selected pet loot')) {
+    if (Cmd.raw(command, direct ? 'Town: deposit item' : 'Town: move selected pet loot')) {
       t.pending = { ...pending, at: now() };
-      t.staged = bagItem ? null : { slot: pending.destination, ref: pending.ref };
+      t.staged = direct ? null : { slot: pending.destination, ref: pending.ref };
     }
   },
   sell() {

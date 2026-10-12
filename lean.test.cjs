@@ -1269,6 +1269,7 @@ test('town sells only unprotected non-elixir pet loot and waits for a full sale 
 
 test('town keeps sealed equipment and unknown rarity while allowing plus and blue gear', () => {
   const f = townFixture(), normal = { refObjId: 1100, typeFlags: 44 | (6 << 7), name: 'Sword', plus: 0, magic: [], tooltip: { fields: { rarity: 0 } } };
+  f.Town.cfg().storeSox = false;
   assert.equal(f.Town.sellable(normal), true);
   for (const item of [{ ...normal, plus: 12 }, { ...normal, magic: ['123'] }, { ...normal, plus: undefined, magic: undefined }, { ...normal, tooltip: { fields: { rarity: 1 } } }]) assert.equal(f.Town.sellable(item), true);
   for (const item of [
@@ -1281,6 +1282,32 @@ test('town keeps sealed equipment and unknown rarity while allowing plus and blu
   }
 });
 
+test('town deposits Star, Moon and Sun gear from the character bag and the pet, and nothing else', () => {
+  const f = townFixture(), gp = f.World.gp;
+  const gear = (slot, ref, tooltip) => ({ slot, refObjId: ref, typeFlags: 44 | (6 << 7), quantity: 1, name: 'Gear', tooltip });
+  gp.inventory.push(gear(20, 2001, { fields: { rarity: 2, itemClass: 2 } }), gear(21, 2002, { fields: { rarity: 0 } }), gear(22, 2003, { fields: { rarity: 1 } }));
+  f.pet.inventory = [gear(0, 2004, { fields: { rarity: 2, itemClass: 3 } }), gear(1, 2005, { fields: { rarity: 0 } })];
+  f.Town.begin(); f.Town.enter('store');
+  gp.storage = { npc: 60, phase: 'open', capacity: 30, items: [] }; gp.target = 60;
+  const stored = [];
+  for (let n = 0; n < 12 && f.Town.trip?.phase === 'store'; n++) {
+    f.advance(1000); f.Town.store(); const c = f.commands.at(-1);
+    if (c.kind === 'cos-transfer') { const i = f.pet.inventory.find(i => i.slot === c.source); gp.inventory.push({ ...i, slot: c.destination }); f.pet.inventory = f.pet.inventory.filter(i => i.slot !== c.source); }
+    else if (c.kind === 'storage-move' && f.Town.trip?.pending) { const i = gp.inventory.find(i => i.slot === c.move.source); stored.push(i.refObjId); gp.storage.items.push({ ...i, slot: c.move.destination }); gp.inventory = gp.inventory.filter(i => i.slot !== c.move.source); }
+    f.advance(600); f.Town.store();
+  }
+  assert.deepEqual(stored.sort(), [2001, 2004]);
+  assert.equal(f.Town.trip.phase, 'close-storage');
+  assert.ok(gp.inventory.some(i => i.refObjId === 2002) && gp.inventory.some(i => i.refObjId === 2003));
+  assert.ok(f.pet.inventory.some(i => i.refObjId === 2005));
+});
+test('SoX deposit can be switched off, leaving gear where it is', () => {
+  const f = townFixture(), gp = f.World.gp; f.Town.cfg().storeSox = false;
+  gp.inventory.push({ slot: 20, refObjId: 2001, typeFlags: 44 | (6 << 7), quantity: 1, tooltip: { fields: { rarity: 2, itemClass: 1 } } });
+  f.Town.begin(); f.Town.enter('store'); gp.storage = { npc: 60, phase: 'open', capacity: 30, items: [] }; gp.target = 60;
+  f.Town.store(); assert.notEqual(f.commands.at(-1).kind, 'storage-move');
+  assert.equal(f.Town.eligible(gp.inventory.at(-1)), false);
+});
 test('town sells ordinary pet equipment while leaving valuable equipment in the pet bag', () => {
   const f = townFixture(), gp = f.World.gp;
   const normal = { slot: 5, refObjId: 1100, typeFlags: 44 | (6 << 7), quantity: 1, plus: 12, magic: ['123'], tooltip: { fields: { rarity: 0 } } };
