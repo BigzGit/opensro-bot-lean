@@ -1119,6 +1119,45 @@ test('spend order: masteries first, skills first, or alternating', () => {
   f.advance(2000); f.Controller.tick(); assert.equal(f.commands.at(-1).kind, 'skill-train', 'alternates to skills after a mastery is confirmed');
   assert.equal(fixture().Settings.profile.mastery.skills, false); assert.equal(fixture().Settings.profile.mastery.order, 'masteries');
 });
+function combatFixture(change = {}) {
+  const f = fixture();
+  f.World.rebuildCatalog([{ id: 500, group: 50, level: 1, name: 'Slash', targetRequired: true, mp: 5, cooldownGroup: 0 }]);
+  f.World.ents.set(30, { gid: 30, kind: 'monster', name: 'Mob', regionId: 1, x: 120, z: 100, attackFlags: 16, appearanceState: [0] });
+  f.World.applyGameplay({ ...f.World.gp, skills: [500], target: 30, vitals: [{ gid: 1, hp: 100, mp: 100, maxHp: 100, maxMp: 100 }], skillCooldowns: [], ...change });
+  f.Settings.profile.macro.rotations.normal = [{ id: 500, group: 50 }];
+  f.Settings.profile.macro.imbueBeforeAttack = false;
+  return f;
+}
+const sentKinds = f => f.commands.map(c => c.kind);
+test('combat uses the rotation skill when it can, and explains every normal attack that replaces one', () => {
+  let f = combatFixture(); f.Combat.fight(f.World.ents.get(30));
+  assert.deepEqual(sentKinds(f), ['skill']); assert.equal(f.Combat.fallbackNote(), '');
+  f = combatFixture({ skillCooldowns: [{ skill: 500, group: 0, startedAtMs: 99900, durationMs: 5000 }] }); f.Combat.fight(f.World.ents.get(30));
+  assert.deepEqual(sentKinds(f), ['attack']); assert.match(f.Combat.fallbackNote(), /1 cooling down/);
+  f = combatFixture({ vitals: [{ gid: 1, hp: 100, mp: 0, maxHp: 100, maxMp: 100 }] }); f.Combat.fight(f.World.ents.get(30));
+  assert.deepEqual(sentKinds(f), ['attack']); assert.match(f.Combat.fallbackNote(), /1 not enough MP/);
+  f = combatFixture(); f.Combat.fail(500); f.Combat.fight(f.World.ents.get(30));
+  assert.deepEqual(sentKinds(f), ['attack']); assert.match(f.Combat.fallbackNote(), /1 paused after a server rejection/);
+  f = combatFixture({ skills: [] }); f.Combat.fight(f.World.ents.get(30)); assert.match(f.Combat.fallbackNote(), /1 not learned/);
+  f = combatFixture(); f.Settings.profile.macro.rotations.normal = []; f.Combat.fight(f.World.ents.get(30)); assert.match(f.Combat.fallbackNote(), /no skills in the rotation/);
+  f = combatFixture(); f.Settings.profile.macro.minMpPct = 101; f.Combat.fight(f.World.ents.get(30)); assert.match(f.Combat.fallbackNote(), /MP below the minimum/);
+  f = combatFixture({ skillCooldowns: [{ skill: 500, group: 0, startedAtMs: 99900, durationMs: 5000 }] }); f.Hunt.state = 'fight'; f.Hunt.running = true;
+  f.Combat.fight(f.World.ents.get(30)); assert.match(f.Diagnostics.main(), /Combat: normal attack \(1 cooling down\)/);
+  f.advance(9000); assert.equal(f.Combat.fallbackNote(), '', 'the reason expires once skills are used again');
+  assert.ok(f.Combat.fallbackNote(true), 'but the log wording stays available');
+});
+test('a skill is not blamed for a slow game snapshot, only for a real rejection', () => {
+  const f = combatFixture(), target = f.World.ents.get(30);
+  assert.equal(f.Combat.cast(500, 30), true);
+  f.advance(400); f.World.applyGameplay({ ...f.World.gp }); assert.equal(f.Combat.cast(500, 30), true);
+  assert.ok(!f.Combat.stuck.get(500)?.miss, 'under 700 ms after a send is never a rejection');
+  f.advance(1000); assert.equal(f.Combat.cast(500, 30), true);
+  assert.ok(!f.Combat.stuck.get(500)?.miss, 'without a newer snapshot nothing can be concluded');
+  f.advance(800); f.World.applyGameplay({ ...f.World.gp }); assert.equal(f.Combat.cast(500, 30), true);
+  assert.equal(f.Combat.stuck.get(500)?.miss, 1);
+  f.advance(800); f.World.applyGameplay({ ...f.World.gp }); assert.equal(f.Combat.cast(500, 30), false);
+  assert.equal(f.Combat.blocked(500), true, 'two real rejections still pause the skill');
+});
 test('auto mastery is off by default, ignores dead characters and pending training, and backs off after a refusal', () => {
   assert.equal(fixture().Settings.profile.mastery.enabled, false);
   let f = masteryFixture(); f.Settings.profile.mastery.enabled = false; f.Controller.tick(); assert.deepEqual(trains(f), []);

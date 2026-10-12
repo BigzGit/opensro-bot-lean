@@ -91,6 +91,7 @@ const Diagnostics = {
     if (Hunt.state === 'player') return 'Hunting paused by nearby-player setting.';
     if (Hunt.state === 'loot') return 'Character collecting; waiting for pickup confirmation.';
     if (World.isCasting()) return 'Combat: waiting for the current cast.';
+    if (Hunt.state === 'fight' && Combat.fallbackNote()) return 'Combat: normal attack (' + Combat.fallbackNote() + ').';
     if (Hunt.targetGid) return 'Combat: approaching or attacking the target.';
     return 'Hunting: searching for an eligible target.';
   },

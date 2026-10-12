@@ -47,6 +47,60 @@ potion = section('const Potion =', '// Same rule as the client').replace("Stats.
 combat = section('const Combat =', '// ---- Assist:')
 combat = combat.replace('return Assets.skillMeta.get(id) || null;', 'return World.skill(id) || null;')
 combat = combat.replace('return !m || !m.mp || m.mp <= me.mp;', 'return !m || (m.mp ?? 0) + Math.trunc(me.maxMp * (m.mpPercent ?? 0) / 100) <= me.mp;')
+# A normal attack replaces skills silently in the original loop. Record why each rotation skill was
+# skipped so the panel and bug reports can say so, and stop false "silent rejection" blocks: a skill is only
+# judged rejected after a newer game snapshot arrived and the cooldown still did not start.
+fight_old = """      for (const entry of this.rotation(cls)) {
+        const id = this.resolve(entry);
+        if (!id || this.blocked(id) || !Cmd.canCast(id) || !this.mpOk(id, me)) continue;
+        if (M.imbueBeforeAttack && this.imbue()) return;
+        if (this.cast(id, target.gid)) return;
+      }
+    }"""
+fight_new = """      for (const entry of this.rotation(cls)) {
+        const id = this.resolve(entry);
+        const why = !id ? 'unlearned' : this.blocked(id) ? 'blocked' : !Cmd.canCast(id) ? 'cooldown' : !this.mpOk(id, me) ? 'mp' : '';
+        if (why) { skipped[why] = (skipped[why] || 0) + 1; continue; }
+        if (M.imbueBeforeAttack && this.imbue()) return;
+        if (this.cast(id, target.gid)) return;
+        skipped.refused = (skipped.refused || 0) + 1;
+      }
+    } else skipped.lowMp = 1;"""
+assert fight_old in combat
+combat = combat.replace(fight_old, fight_new)
+combat = combat.replace("    const lowMp = M.minMpPct && me.mpPct < M.minMpPct;\n", "    const lowMp = M.minMpPct && me.mpPct < M.minMpPct;\n    const skipped = {};\n", 1)
+attack_old = "      if (Cmd.attack(target.gid)) this.lastAttackAt = now();"
+assert attack_old in combat
+combat = combat.replace(attack_old, """      if (Cmd.attack(target.gid)) {
+        this.lastAttackAt = now();
+        this.noteFallback(skipped, this.rotation(cls).length);
+      }""")
+silent_old = "    if (id === this.lastCastId && now() - this.lastCastAt < 1500 && World.cooldownLeft(id) <= 0 && !World.isCasting()) {"
+assert silent_old in combat
+combat = combat.replace(silent_old, "    if (id === this.lastCastId && now() - this.lastCastAt < 1500 && now() - this.lastCastAt > 700 && World.gp !== this.lastCastState && World.cooldownLeft(id) <= 0 && !World.isCasting()) {")
+send_old = "    this.lastCastId = id;\n    this.lastCastAt = now();"
+assert send_old in combat
+combat = combat.replace(send_old, "    this.lastCastId = id;\n    this.lastCastAt = now();\n    this.lastCastState = World.gp;")
+helper_old = "  // One step of fighting the given monster."
+assert helper_old in combat
+combat = combat.replace(helper_old, """  // Why the last normal attack replaced a skill (counts only: no names), for the panel and bug reports.
+  fallback: null,
+  noteFallback(skipped, size) {
+    this.fallback = { at: now(), skipped: { ...skipped }, size };
+    if (now() - (this.fallbackLogAt || 0) > 30000) {
+      this.fallbackLogAt = now();
+      Log.warn('Normal attack used instead of skills: ' + this.fallbackNote(true));
+    }
+  },
+  fallbackNote(any = false) {
+    const f = this.fallback;
+    if (!f || !any && now() - f.at > 8000) return '';
+    const names = { unlearned: 'not learned', blocked: 'paused after a server rejection', cooldown: 'cooling down', mp: 'not enough MP', refused: 'not sent', lowMp: 'MP below the minimum' };
+    const parts = Object.entries(f.skipped).map(([k, n]) => (k === 'lowMp' ? '' : n + ' ') + names[k]);
+    return f.size ? parts.join(', ') || 'no usable rotation skill' : 'no skills in the rotation for this monster class';
+  },
+
+""" + helper_old)
 attackable = section('const isAttackableMob =', '// Automatic potion shopping.')
 hunt = section('const Hunt =', '// Independent return command:') if '// Independent return command:' in original else section('const Hunt =', '// Independent return command using')
 hunt = hunt.replace('    Assets.skills(this.knownSkillIds());', '')
@@ -89,7 +143,7 @@ skin += '\nconst LEAN_CSS = ' + __import__('json').dumps((base / 'lean-skin.css'
 header = '''// ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.56
+// @version      1.2.57
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -109,7 +163,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.56';
+const VERSION = '1.2.57';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });

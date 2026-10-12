@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.56
+// @version      1.2.57
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.56';
+const VERSION = '1.2.57';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -1228,7 +1228,7 @@ const Combat = {
   cast(id, gid, label) {
     // Silent rejection: the last send of this skill started neither a cooldown
     // nor a cast (canCast passed again), so count it as a miss.
-    if (id === this.lastCastId && now() - this.lastCastAt < 1500 && World.cooldownLeft(id) <= 0 && !World.isCasting()) {
+    if (id === this.lastCastId && now() - this.lastCastAt < 1500 && now() - this.lastCastAt > 700 && World.gp !== this.lastCastState && World.cooldownLeft(id) <= 0 && !World.isCasting()) {
       const s = this.stuck.get(id) || { n: 0, until: 0, miss: 0 };
       s.miss = (s.miss || 0) + 1;
       if (s.miss >= 2) {
@@ -1242,6 +1242,7 @@ const Combat = {
     if (!Cmd.skill(id, gid)) return false;
     this.lastCastId = id;
     this.lastCastAt = now();
+    this.lastCastState = World.gp;
     Stats.count('casts');
     return true;
   },
@@ -1303,6 +1304,23 @@ const Combat = {
     return list;
   },
 
+  // Why the last normal attack replaced a skill (counts only: no names), for the panel and bug reports.
+  fallback: null,
+  noteFallback(skipped, size) {
+    this.fallback = { at: now(), skipped: { ...skipped }, size };
+    if (now() - (this.fallbackLogAt || 0) > 30000) {
+      this.fallbackLogAt = now();
+      Log.warn('Normal attack used instead of skills: ' + this.fallbackNote(true));
+    }
+  },
+  fallbackNote(any = false) {
+    const f = this.fallback;
+    if (!f || !any && now() - f.at > 8000) return '';
+    const names = { unlearned: 'not learned', blocked: 'paused after a server rejection', cooldown: 'cooling down', mp: 'not enough MP', refused: 'not sent', lowMp: 'MP below the minimum' };
+    const parts = Object.entries(f.skipped).map(([k, n]) => (k === 'lowMp' ? '' : n + ' ') + names[k]);
+    return f.size ? parts.join(', ') || 'no usable rotation skill' : 'no skills in the rotation for this monster class';
+  },
+
   // One step of fighting the given monster.
   fight(target) {
     if (!target || this.busy()) return;
@@ -1312,19 +1330,25 @@ const Combat = {
     const cls = monsterClass(target);
     if (this.berserk(cls)) return;
     const lowMp = M.minMpPct && me.mpPct < M.minMpPct;
+    const skipped = {};
     if (!lowMp) {
       for (const entry of this.rotation(cls)) {
         const id = this.resolve(entry);
-        if (!id || this.blocked(id) || !Cmd.canCast(id) || !this.mpOk(id, me)) continue;
+        const why = !id ? 'unlearned' : this.blocked(id) ? 'blocked' : !Cmd.canCast(id) ? 'cooldown' : !this.mpOk(id, me) ? 'mp' : '';
+        if (why) { skipped[why] = (skipped[why] || 0) + 1; continue; }
         if (M.imbueBeforeAttack && this.imbue()) return;
         if (this.cast(id, target.gid)) return;
+        skipped.refused = (skipped.refused || 0) + 1;
       }
-    }
+    } else skipped.lowMp = 1;
     if (!M.normalAttack) return;
     const sim = World.simNow() ?? 0;
     const lastHit = World.hitByUs.get(target.gid) ?? -Infinity;
     if (sim - lastHit > 2200 && now() - this.lastAttackAt > 1600) {
-      if (Cmd.attack(target.gid)) this.lastAttackAt = now();
+      if (Cmd.attack(target.gid)) {
+        this.lastAttackAt = now();
+        this.noteFallback(skipped, this.rotation(cls).length);
+      }
     }
   },
 };
@@ -5612,6 +5636,7 @@ const Diagnostics = {
     if (Hunt.state === 'player') return 'Hunting paused by nearby-player setting.';
     if (Hunt.state === 'loot') return 'Character collecting; waiting for pickup confirmation.';
     if (World.isCasting()) return 'Combat: waiting for the current cast.';
+    if (Hunt.state === 'fight' && Combat.fallbackNote()) return 'Combat: normal attack (' + Combat.fallbackNote() + ').';
     if (Hunt.targetGid) return 'Combat: approaching or attacking the target.';
     return 'Hunting: searching for an eligible target.';
   },
