@@ -597,7 +597,8 @@ test('resurrection offers are accepted only from party members while dead, never
     return f;
   };
   const answers = f => f.commands.filter(c => c.kind === 'resurrection-consent');
-  let f = setup(); f.Controller.tick(); assert.deepEqual(JSON.parse(JSON.stringify(answers(f))), [{ kind: 'resurrection-consent', accept: true }]);
+  let f = setup(); assert.equal(f.Hunt.running, false); f.Controller.tick();
+  assert.deepEqual(JSON.parse(JSON.stringify(answers(f))), [{ kind: 'resurrection-consent', accept: true }], 'answered with hunting stopped');
   f = setup({ resurrection: { gid: 78 } }); f.Controller.tick(); assert.equal(answers(f).length, 0);
   f = setup({ resurrection: { gid: 77, mutation: true } }); f.Controller.tick(); assert.equal(answers(f).length, 0);
   f = setup({ resurrection: { gid: 999 } }); f.Controller.tick(); assert.equal(answers(f).length, 0);
