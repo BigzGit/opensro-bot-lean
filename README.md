@@ -60,9 +60,13 @@ If something stalls, use **Settings → Send bug report**, which opens a draggab
 
 Under **Settings → Anti-stuck**, the bot watches for progress while hunting: a confirmed kill, XP, gold, a pickup, or damage to your target. If nothing happens for the set time (default 3 minutes), it recovers in steps: first it drops the current target, then it walks back to the saved hunting spot and resumes, and after the set number of failed recoveries (default 3) it stops hunting. Any confirmed gain clears the count. Resting, buffing, looting, shopping, town trips and manual control do not count as stuck.
 
+## SoX alerts
+
+When the bot confirms a pickup of Star, Moon or Sun equipment, it shows the item name and tier and plays a short chime. Turn it off with **Chime and notice when a SoX item is picked up** in **Loot**; **Test SoX chime** previews the sound. The count also appears under Session stats. It needs the item catalogue, which loads automatically when hunting starts, and it only announces bot pickups.
+
 ## Session stats
 
-Open **Settings → Session stats** for hunting time, XP/hour, net gold, confirmed kills, deaths, potion use and pickups. Totals pause when hunting stops and stay across toggles. **Reset session**, reloading or changing character clears them. Stats stay local to the page.
+Open **Settings → Session stats** for hunting time, XP/hour, net gold, confirmed kills, deaths, potion use, pickups and SoX found. Totals pause when hunting stops and stay across toggles. **Reset session**, reloading or changing character clears them. Stats stay local to the page.
 
 ## Controls
 

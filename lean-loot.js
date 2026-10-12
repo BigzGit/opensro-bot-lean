@@ -96,12 +96,13 @@ const Loot = {
   },
   soxLoadAt: 0,
   // Unknown until the item catalogue loads, so unconfirmed items are never taken.
+  ensureCatalogue() {
+    if (Items.data.size || now() < this.soxLoadAt) return;
+    this.soxLoadAt = now() + 30000; Items.ready().catch(() => {});
+  },
   sox(e) {
-    if (!Items.data.size) {
-      if (now() >= this.soxLoadAt) { this.soxLoadAt = now() + 30000; Items.ready().catch(() => {}); }
-      return 0;
-    }
-    return Items.sox(e.refObjId);
+    this.ensureCatalogue();
+    return Items.data.size ? Items.sox(e.refObjId) : 0;
   },
   allowed(e) {
     if (!e || e.kind !== 'ground-item' || !this.owned(e)) return false;

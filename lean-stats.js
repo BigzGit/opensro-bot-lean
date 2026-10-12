@@ -1,7 +1,7 @@
 // Page-local hunting session. No persistence, uploads or gameplay commands.
 const Stats = {
   values: { loot: 0, casts: 0, potions: 0, deaths: 0 },
-  session: { ms: 0, xp: 0n, gold: 0n, kills: 0, deaths: 0, potions: 0, items: 0 },
+  session: { ms: 0, xp: 0n, gold: 0n, kills: 0, deaths: 0, potions: 0, items: 0, sox: 0 },
   active: false, lastAt: null, baseline: null, dead: false, character: null, started: false,
   levels: null, loading: null, retryAt: 0, pendingXP: [], xpPartial: false, xpKnown: false, goldKnown: false,
   killed: new Set(), potions: [], potionTotals: new Map(), fields: {},
@@ -25,13 +25,13 @@ const Stats = {
   },
   reset() {
     this.values = { loot: 0, casts: 0, potions: 0, deaths: 0 };
-    this.session = { ms: 0, xp: 0n, gold: 0n, kills: 0, deaths: 0, potions: 0, items: 0 };
+    this.session = { ms: 0, xp: 0n, gold: 0n, kills: 0, deaths: 0, potions: 0, items: 0, sox: 0 };
     this.lastAt = now(); this.active = false; this.baseline = null;
     this.dead = World.isDead(); this.pendingXP = []; this.xpPartial = this.xpKnown = this.goldKnown = false;
     this.potions = []; this.potionTotals.clear();
     this.sample(); this.render();
   },
-  huntStart() { this.sample(); this.loadLevels(); },
+  huntStart() { this.sample(); this.loadLevels(); if (Hunt.cfg().pickup.soxSound) Loot.ensureCatalogue(); },
   huntStop() { this.sample(); },
   count(kind) {
     if (kind in this.values) this.values[kind]++;
@@ -39,6 +39,16 @@ const Stats = {
   pickup(a) {
     this.count('loot');
     if (Hunt.running && World.inWorld() && !a.gold) this.session.items += Math.max(0, Loot.count(a.ref, a.petGid) - a.before);
+    const tier = a.gold || !Hunt.running || !World.inWorld() ? 0 : Items.sox(a.ref);
+    if (tier) this.soxFound(a, tier);
+  },
+  // A confirmed bot pickup of Star/Moon/Sun gear. Unknown items (catalogue not loaded) are not announced.
+  soxFound(a, tier) {
+    this.session.sox++;
+    const name = a.name || Items.name(a.ref), label = ['Star', 'Moon', 'Sun'][tier - 1];
+    if (!Hunt.cfg().pickup.soxSound) return;
+    UI.toast('SoX found: ' + name + ' (' + label + ')', 'info', 10000);
+    Sound.play('sox');
   },
   potion(item) {
     this.count('potions'); this.sample();
@@ -136,16 +146,16 @@ const Stats = {
     return { state: this.active ? 'Tracking' : 'Paused', time,
       xp: this.xpKnown ? this.number(s.xp) + partial : '—', rate: this.xpKnown ? rate + partial : '—',
       gold: this.goldKnown ? (s.gold > 0n ? '+' : '') + this.number(s.gold) : '—',
-      kills: this.number(s.kills), deaths: this.number(s.deaths), potions: this.number(s.potions), items: this.number(s.items) };
+      kills: this.number(s.kills), deaths: this.number(s.deaths), potions: this.number(s.potions), items: this.number(s.items), sox: this.number(s.sox) };
   },
   draw(parent) {
     const box = UI.group('Session stats'); this.fields = {};
-    for (const [key, label] of [['state','Session'],['time','Hunting time'],['xp','XP gained'],['rate','XP / hour'],['gold','Net gold'],['kills','Confirmed kills'],['deaths','Deaths'],['potions','Potions used'],['items','Items picked up']]) {
+    for (const [key, label] of [['state','Session'],['time','Hunting time'],['xp','XP gained'],['rate','XP / hour'],['gold','Net gold'],['kills','Confirmed kills'],['deaths','Deaths'],['potions','Potions used'],['items','Items picked up'],['sox','SoX found']]) {
       const value = el('span'); value.setAttribute('aria-label', label); this.fields[key] = value;
       const row = el('div', null, 'field'); row.append(el('span', label), value); box.append(row);
     }
     box.append(UI.button('Reset session', () => this.reset()),
-      el('p', 'Local to this page; pauses while hunting is stopped or disconnected. Reset or reload clears totals. Town trips count while hunting stays enabled. Gold includes purchases and repairs. Kills require your or your pet’s fatal result; item counts use confirmed bot pickups. HP, MP, vigor and cure uses require inventory confirmation. XP/hour appears after 30 seconds; partial means a level transition or missing data is unresolved.', 'muted'));
+      el('p', 'Local to this page; pauses while hunting is stopped or disconnected. Reset or reload clears totals. Town trips count while hunting stays enabled. Gold includes purchases and repairs. Kills require your or your pet’s fatal result; item counts use confirmed bot pickups; SoX found counts confirmed pickups of Star, Moon and Sun gear. HP, MP, vigor and cure uses require inventory confirmation. XP/hour appears after 30 seconds; partial means a level transition or missing data is unresolved.', 'muted'));
     parent.append(box); this.render();
   },
   render() {

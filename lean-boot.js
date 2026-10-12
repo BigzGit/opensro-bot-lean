@@ -7,7 +7,7 @@ function toggleBot() {
 function boot() {
   UI.mount(); Stats.init(); Updates.start(); Diagnostics.start();
   const unlockSound = e => {
-    if (e.isTrusted && Settings.profile.hunt.pickup.petFullSound) Sound.unlock();
+    if (e.isTrusted && (Settings.profile.hunt.pickup.petFullSound || Settings.profile.hunt.pickup.soxSound)) Sound.unlock();
   };
   W.addEventListener('pointerdown', unlockSound, true);
   W.addEventListener('keydown', unlockSound, true);

@@ -963,6 +963,28 @@ test('SoX-only takes nothing until the item catalogue is loaded', () => {
   const e = f.drop(41, 44); e.refObjId = 901; P.soxOnly = true;
   assert.equal(f.Loot.allowed(e), false); assert.equal(f.Loot.allowed(e), false); assert.equal(loads, 1);
 });
+test('SoX pickups are counted and announced once; gold, unknown items and stopped hunting are not', () => {
+  const f = fixture(); let chimes = [];
+  f.Sound.play = kind => { chimes.push(kind); return true; };
+  f.Items.data.set(901, { name: 'Star sword', icon: '', code: 'ITEM_CH_SWORD_01_A_RARE' });
+  f.Items.data.set(902, { name: 'Plain sword', icon: '', code: 'ITEM_CH_SWORD_01_A' });
+  const pick = (ref, gold = false) => f.Stats.pickup({ ref, name: 'Sword', gold, petGid: 0, before: 0 });
+  f.Hunt.start(); f.notices.length = 0; chimes = [];
+  pick(901); assert.equal(f.Stats.session.sox, 1); assert.deepEqual(chimes, ['sox']);
+  assert.ok(f.notices.some(n => /SoX found: Sword \(Star\)/.test(n))); assert.equal(f.Stats.display().sox, '1');
+  pick(902); pick(999); pick(901, true); assert.equal(f.Stats.session.sox, 1); assert.equal(chimes.length, 1);
+  f.Settings.profile.hunt.pickup.soxSound = false; f.notices.length = 0; pick(901);
+  assert.equal(f.Stats.session.sox, 2); assert.equal(chimes.length, 1); assert.equal(f.notices.some(n => /SoX/.test(n)), false);
+  f.Settings.profile.hunt.pickup.soxSound = true; f.Hunt.stop(); pick(901); assert.equal(f.Stats.session.sox, 2);
+  f.Hunt.start(); f.Stats.reset(); assert.equal(f.Stats.session.sox, 0);
+});
+test('SoX chime is a distinct audible alert and unknown sounds stay silent', () => {
+  const f = fixture(), notes = [];
+  f.Sound.ctx = { state: 'running', currentTime: 0, destination: {}, createOscillator: () => ({ frequency: {}, connect() {}, disconnect() {}, start() { notes.push(this.frequency.value); }, stop() {} }),
+    createGain: () => ({ gain: { setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {}, disconnect() {} }) };
+  assert.equal(f.Sound.play('sox'), true); assert.equal(notes.length, 4);
+  assert.equal(f.Sound.play('good'), false); assert.equal(notes.length, 4);
+});
 test('pet picks up during combat and casting even with finish-fight enabled', () => {
   const f = fixture(); petFight(f); f.drop(20, 3436); let fights = 0;
   f.Combat.fight = () => { fights++; }; f.World.isCasting = () => true;

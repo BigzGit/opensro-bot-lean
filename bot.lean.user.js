@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.50
+// @version      1.2.51
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.50';
+const VERSION = '1.2.51';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -211,7 +211,7 @@ const DEFAULT_PROFILE = {
     levelMin: 0, levelMax: 0, include: '', exclude: '', priority: 'attackers', avoidKs: true,
     targetTimeoutS: 25,
     pickup: { enabled: true, soxOnly: false, gold: true, potions: true, equipment: true, elixirs: true, powders: true, alchemy: true, others: true,
-      collector: 'character', petFullSound: true, include: '', exclude: '', radius: 300, afterKillOnly: true, retries: 2 },
+      collector: 'character', petFullSound: true, soxSound: true, include: '', exclude: '', radius: 300, afterKillOnly: true, retries: 2 },
     sit: { enabled: true, hpBelow: 35, mpBelow: 20, resumeAt: 90 },
     antiStuck: { enabled: true, minutes: 3, maxRecoveries: 3 },
     onDeath: 'stop', stopNoHpPotion: false, stopInvFull: false,
@@ -272,7 +272,6 @@ const Settings = {
     } catch (e) { UI.toast('Could not import profile: ' + e.message, 'warn'); }
   },
 };
-// Only the pet-full alert is audible; existing combat/UI calls stay silent.
 const Sound = {
   ctx: null,
   unlock() {
@@ -281,14 +280,17 @@ const Sound = {
       if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
     } catch {}
   },
+  // Only these alerts are audible; existing combat/UI calls stay silent.
+  tones: { 'pet-full': { notes: [659.25, 830.61, 987.77], gap: 0.18 }, sox: { notes: [783.99, 987.77, 1174.66, 1567.98], gap: 0.11 } },
   play(kind) {
-    if (kind !== 'pet-full') return false;
+    const tone = this.tones[kind];
+    if (!tone) return false;
     try {
       const ctx = this.ctx;
       if (!ctx || ctx.state !== 'running') return false;
-      [659.25, 830.61, 987.77].forEach((frequency, i) => {
+      tone.notes.forEach((frequency, i) => {
         const oscillator = ctx.createOscillator(), gain = ctx.createGain();
-        const at = ctx.currentTime + i * 0.18;
+        const at = ctx.currentTime + i * tone.gap;
         oscillator.type = 'sine'; oscillator.frequency.value = frequency;
         gain.gain.setValueAtTime(0, at);
         gain.gain.linearRampToValueAtTime(0.12, at + 0.015);
@@ -300,10 +302,10 @@ const Sound = {
       return true;
     } catch { return false; }
   },
-  async test() {
+  async test(kind = 'pet-full') {
     this.unlock();
     try { if (this.ctx?.state === 'suspended') await this.ctx.resume(); } catch {}
-    if (!this.play('pet-full')) UI.toast('Sound is blocked by the browser. Allow audio for this site and try again.', 'warn');
+    if (!this.play(kind)) UI.toast('Sound is blocked by the browser. Allow audio for this site and try again.', 'warn');
   },
 };
 
@@ -2073,12 +2075,13 @@ const Loot = {
   },
   soxLoadAt: 0,
   // Unknown until the item catalogue loads, so unconfirmed items are never taken.
+  ensureCatalogue() {
+    if (Items.data.size || now() < this.soxLoadAt) return;
+    this.soxLoadAt = now() + 30000; Items.ready().catch(() => {});
+  },
   sox(e) {
-    if (!Items.data.size) {
-      if (now() >= this.soxLoadAt) { this.soxLoadAt = now() + 30000; Items.ready().catch(() => {}); }
-      return 0;
-    }
-    return Items.sox(e.refObjId);
+    this.ensureCatalogue();
+    return Items.data.size ? Items.sox(e.refObjId) : 0;
   },
   allowed(e) {
     if (!e || e.kind !== 'ground-item' || !this.owned(e)) return false;
@@ -2209,7 +2212,7 @@ const Loot = {
 // Page-local hunting session. No persistence, uploads or gameplay commands.
 const Stats = {
   values: { loot: 0, casts: 0, potions: 0, deaths: 0 },
-  session: { ms: 0, xp: 0n, gold: 0n, kills: 0, deaths: 0, potions: 0, items: 0 },
+  session: { ms: 0, xp: 0n, gold: 0n, kills: 0, deaths: 0, potions: 0, items: 0, sox: 0 },
   active: false, lastAt: null, baseline: null, dead: false, character: null, started: false,
   levels: null, loading: null, retryAt: 0, pendingXP: [], xpPartial: false, xpKnown: false, goldKnown: false,
   killed: new Set(), potions: [], potionTotals: new Map(), fields: {},
@@ -2233,13 +2236,13 @@ const Stats = {
   },
   reset() {
     this.values = { loot: 0, casts: 0, potions: 0, deaths: 0 };
-    this.session = { ms: 0, xp: 0n, gold: 0n, kills: 0, deaths: 0, potions: 0, items: 0 };
+    this.session = { ms: 0, xp: 0n, gold: 0n, kills: 0, deaths: 0, potions: 0, items: 0, sox: 0 };
     this.lastAt = now(); this.active = false; this.baseline = null;
     this.dead = World.isDead(); this.pendingXP = []; this.xpPartial = this.xpKnown = this.goldKnown = false;
     this.potions = []; this.potionTotals.clear();
     this.sample(); this.render();
   },
-  huntStart() { this.sample(); this.loadLevels(); },
+  huntStart() { this.sample(); this.loadLevels(); if (Hunt.cfg().pickup.soxSound) Loot.ensureCatalogue(); },
   huntStop() { this.sample(); },
   count(kind) {
     if (kind in this.values) this.values[kind]++;
@@ -2247,6 +2250,16 @@ const Stats = {
   pickup(a) {
     this.count('loot');
     if (Hunt.running && World.inWorld() && !a.gold) this.session.items += Math.max(0, Loot.count(a.ref, a.petGid) - a.before);
+    const tier = a.gold || !Hunt.running || !World.inWorld() ? 0 : Items.sox(a.ref);
+    if (tier) this.soxFound(a, tier);
+  },
+  // A confirmed bot pickup of Star/Moon/Sun gear. Unknown items (catalogue not loaded) are not announced.
+  soxFound(a, tier) {
+    this.session.sox++;
+    const name = a.name || Items.name(a.ref), label = ['Star', 'Moon', 'Sun'][tier - 1];
+    if (!Hunt.cfg().pickup.soxSound) return;
+    UI.toast('SoX found: ' + name + ' (' + label + ')', 'info', 10000);
+    Sound.play('sox');
   },
   potion(item) {
     this.count('potions'); this.sample();
@@ -2344,16 +2357,16 @@ const Stats = {
     return { state: this.active ? 'Tracking' : 'Paused', time,
       xp: this.xpKnown ? this.number(s.xp) + partial : '—', rate: this.xpKnown ? rate + partial : '—',
       gold: this.goldKnown ? (s.gold > 0n ? '+' : '') + this.number(s.gold) : '—',
-      kills: this.number(s.kills), deaths: this.number(s.deaths), potions: this.number(s.potions), items: this.number(s.items) };
+      kills: this.number(s.kills), deaths: this.number(s.deaths), potions: this.number(s.potions), items: this.number(s.items), sox: this.number(s.sox) };
   },
   draw(parent) {
     const box = UI.group('Session stats'); this.fields = {};
-    for (const [key, label] of [['state','Session'],['time','Hunting time'],['xp','XP gained'],['rate','XP / hour'],['gold','Net gold'],['kills','Confirmed kills'],['deaths','Deaths'],['potions','Potions used'],['items','Items picked up']]) {
+    for (const [key, label] of [['state','Session'],['time','Hunting time'],['xp','XP gained'],['rate','XP / hour'],['gold','Net gold'],['kills','Confirmed kills'],['deaths','Deaths'],['potions','Potions used'],['items','Items picked up'],['sox','SoX found']]) {
       const value = el('span'); value.setAttribute('aria-label', label); this.fields[key] = value;
       const row = el('div', null, 'field'); row.append(el('span', label), value); box.append(row);
     }
     box.append(UI.button('Reset session', () => this.reset()),
-      el('p', 'Local to this page; pauses while hunting is stopped or disconnected. Reset or reload clears totals. Town trips count while hunting stays enabled. Gold includes purchases and repairs. Kills require your or your pet’s fatal result; item counts use confirmed bot pickups. HP, MP, vigor and cure uses require inventory confirmation. XP/hour appears after 30 seconds; partial means a level transition or missing data is unresolved.', 'muted'));
+      el('p', 'Local to this page; pauses while hunting is stopped or disconnected. Reset or reload clears totals. Town trips count while hunting stays enabled. Gold includes purchases and repairs. Kills require your or your pet’s fatal result; item counts use confirmed bot pickups; SoX found counts confirmed pickups of Star, Moon and Sun gear. HP, MP, vigor and cure uses require inventory confirmation. XP/hour appears after 30 seconds; partial means a level transition or missing data is unresolved.', 'muted'));
     parent.append(box); this.render();
   },
   render() {
@@ -5973,7 +5986,8 @@ const UI = {
       const options = this.group('Collection');
       options.append(this.select('Collector', [['character', 'Character'], ['pet', 'Pickup pet']], () => L().collector, v => { L().collector = v; Loot.reset(); }),
 );
-      options.append(this.check('Chime when pet bag is full', () => L().petFullSound, v => { L().petFullSound = v; Loot.fullAlert = null; }), this.button('Test pet chime', () => Sound.test()));
+      options.append(this.check('Chime when pet bag is full', () => L().petFullSound, v => { L().petFullSound = v; Loot.fullAlert = null; }), this.button('Test pet chime', () => Sound.test()),
+        this.check('Chime and notice when a SoX item is picked up', () => L().soxSound, v => L().soxSound = v), this.button('Test SoX chime', () => Sound.test('sox')));
       this.petNote = el('p', '', 'muted'); options.append(this.petNote);
       options.append(this.row(...[['Elixirs only','elixirs'],['Elixirs + gold','elixirs-gold'],['All items','all']].map(([label,mode]) => this.button(label, () => { Loot.preset(mode); this.draw(); }))));
       for (const [key, label] of [['enabled', 'Collect drops'], ['soxOnly', 'Equipment: only SoX (Star / Moon / Sun)'], ['gold', 'Gold'], ['potions', 'Potions and cure pills'], ['equipment', 'Equipment'], ['elixirs', 'Elixirs'], ['powders', 'Lucky powders'], ['alchemy', 'Other alchemy items / stones'], ['others', 'Other items'], ['afterKillOnly', 'Finish current fight before character pickup']]) options.append(this.check(label, () => L()[key], v => L()[key] = v));
@@ -6121,7 +6135,7 @@ function toggleBot() {
 function boot() {
   UI.mount(); Stats.init(); Updates.start(); Diagnostics.start();
   const unlockSound = e => {
-    if (e.isTrusted && Settings.profile.hunt.pickup.petFullSound) Sound.unlock();
+    if (e.isTrusted && (Settings.profile.hunt.pickup.petFullSound || Settings.profile.hunt.pickup.soxSound)) Sound.unlock();
   };
   W.addEventListener('pointerdown', unlockSound, true);
   W.addEventListener('keydown', unlockSound, true);
