@@ -108,6 +108,7 @@ const Controller = {
       if (Alchemy.run || Alchemy.pending) { if (World.inWorld()) Party.tick(); this.mode = 'alchemy'; return; }
       if (World.inWorld() && World.isDead() && Hunt.running) {
         Town.cancel(); Resurrect.cancelTrip(); Resurrect.holdUntil = 0;
+        Party.acceptResurrection();
         Hunt.tick(); this.mode = Hunt.state; return;
       }
       if (World.inWorld() && !World.isDead() && (this.resumeAfterRevive || Hunt.running && Hunt.deathAt)) {

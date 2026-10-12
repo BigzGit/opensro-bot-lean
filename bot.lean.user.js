@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.52
+// @version      1.2.53
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.52';
+const VERSION = '1.2.53';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -184,7 +184,7 @@ const Store = {
 const CLASS_KEYS = ['normal', 'champion', 'giant', 'party', 'elite', 'unique'];
 const DEFAULT_PROFILE = {
   alchemy: { target: 3, limit: 20, elixir: 0, powder: false },
-  party: { autoAcceptMatching: false, autoRecruit: false, autoRes: false, resRadius: 300, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true },
+  party: { autoAcceptMatching: false, autoRecruit: false, autoRes: false, acceptRes: false, resRadius: 300, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true },
   wardrobe: { on: true, phantom: true, realAnim: true, hideAvatars: false,
     eq: {}, av: {}, pet: { atk: 0, pick: 0, mount: 0 }, presets: {}, undo: null },
   macro: {
@@ -2431,7 +2431,20 @@ const Party = {
       this.message = 'Waiting for registration confirmation.';
     }
   },
+  // A dead character gets a Yes/No resurrection question from a caster's Rebirth skill. Only party members
+  // are answered, and only while dead; other questions (including mutation proposals) are left to the player.
+  acceptResurrection() {
+    const c = Settings.profile.party, social = World.gp?.social, question = social?.resurrection;
+    if (!c.acceptRes || !question || question.mutation || !World.inWorld() || !World.isDead() || !Array.isArray(social.members)) return;
+    const caster = World.ents.get(question.gid);
+    if (!caster?.name || !social.members.some(m => m?.name === caster.name && m.name !== social.localName)) return;
+    if (!Cmd.spaced('resurrection-consent')) return;
+    if (Cmd.raw({ kind: 'resurrection-consent', accept: true }, 'Accept resurrection from ' + caster.name)) {
+      UI.toast('Accepted resurrection from ' + caster.name, 'info', 3000);
+    }
+  },
   tick() {
+    this.acceptResurrection();
     const c = Settings.profile.party;
     if (!World.inWorld() || (!c.autoAcceptMatching && !c.autoRecruit)) return;
     const gp = World.gp, matching = gp?.partyMatching, request = matching?.request, social = gp?.social;
@@ -3444,6 +3457,7 @@ const Controller = {
       if (Alchemy.run || Alchemy.pending) { if (World.inWorld()) Party.tick(); this.mode = 'alchemy'; return; }
       if (World.inWorld() && World.isDead() && Hunt.running) {
         Town.cancel(); Resurrect.cancelTrip(); Resurrect.holdUntil = 0;
+        Party.acceptResurrection();
         Hunt.tick(); this.mode = Hunt.state; return;
       }
       if (World.inWorld() && !World.isDead() && (this.resumeAfterRevive || Hunt.running && Hunt.deathAt)) {
@@ -6082,6 +6096,8 @@ const UI = {
         el('p', 'Auto-recruit registers your saved listing and accepts applicants whenever enabled, even with hunting stopped. Restores missing listings when space opens and retries unconfirmed registrations after fresh idle state, at most once every 30 seconds. Existing listings and party sharing settings are preserved; edits apply to the next new listing. Turning this off leaves the current listing in place.', 'muted'),
         this.check('Auto-accept party-matching joins', () => Settings.profile.party.autoAcceptMatching, v => Settings.profile.party.autoAcceptMatching = v),
         el('p', 'Accepts applications to your own listing while you are the leader or forming a new party. Works while hunting is stopped; turn this switch off to stop accepting. Ordinary invitations are left to you.', 'muted'),
+        this.check('Accept resurrection from party members', () => party().acceptRes, v => party().acceptRes = v),
+        el('p', 'When you are dead and a party member casts Rebirth on you, the bot answers Yes. Works during hunting and while stopped; resurrection offers from other players are left to you.', 'muted'),
         this.check('Auto-resurrect party members', () => party().autoRes, v => { party().autoRes = v; Resurrect.reset(); }),
         this.number('Maximum res distance from hunt spot (m)', () => party().resRadius / 10, v => party().resRadius = v * 10, 1, 100),
         el('p', 'Works during hunting and while stopped. Walks into skill range for visible dead members within the maximum radius, casts Rebirth, then returns. During hunting the radius is measured from the saved hunt spot; while stopped it uses your starting position. Collision data is required for walking. Travel stops after 30 seconds or 12 seconds without progress per leg. The member must accept the revival. Travel, shopping and manual control take priority.', 'muted')));

@@ -52,7 +52,20 @@ const Party = {
       this.message = 'Waiting for registration confirmation.';
     }
   },
+  // A dead character gets a Yes/No resurrection question from a caster's Rebirth skill. Only party members
+  // are answered, and only while dead; other questions (including mutation proposals) are left to the player.
+  acceptResurrection() {
+    const c = Settings.profile.party, social = World.gp?.social, question = social?.resurrection;
+    if (!c.acceptRes || !question || question.mutation || !World.inWorld() || !World.isDead() || !Array.isArray(social.members)) return;
+    const caster = World.ents.get(question.gid);
+    if (!caster?.name || !social.members.some(m => m?.name === caster.name && m.name !== social.localName)) return;
+    if (!Cmd.spaced('resurrection-consent')) return;
+    if (Cmd.raw({ kind: 'resurrection-consent', accept: true }, 'Accept resurrection from ' + caster.name)) {
+      UI.toast('Accepted resurrection from ' + caster.name, 'info', 3000);
+    }
+  },
   tick() {
+    this.acceptResurrection();
     const c = Settings.profile.party;
     if (!World.inWorld() || (!c.autoAcceptMatching && !c.autoRecruit)) return;
     const gp = World.gp, matching = gp?.partyMatching, request = matching?.request, social = gp?.social;

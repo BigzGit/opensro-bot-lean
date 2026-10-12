@@ -589,6 +589,22 @@ test('a live application is accepted even when the local listing record is missi
     g.Controller.tick(); assert.equal(g.commands.length, 0);
   }
 });
+test('resurrection offers are accepted only from party members while dead, never mutation offers', () => {
+  const setup = (change = {}) => {
+    const f = fixture(); f.Settings.profile.party.acceptRes = true; f.World.isDead = () => true;
+    f.World.ents.set(77, { gid: 77, kind: 'player', name: 'Healer' }); f.World.ents.set(78, { gid: 78, kind: 'player', name: 'Stranger' });
+    f.World.gp.social = { localName: 'Me', self: 10, leader: 10, options: 1, members: [{ id: 10, name: 'Me' }, { id: 11, name: 'Healer' }], resurrection: { gid: 77 }, ...change };
+    return f;
+  };
+  const answers = f => f.commands.filter(c => c.kind === 'resurrection-consent');
+  let f = setup(); f.Controller.tick(); assert.deepEqual(JSON.parse(JSON.stringify(answers(f))), [{ kind: 'resurrection-consent', accept: true }]);
+  f = setup({ resurrection: { gid: 78 } }); f.Controller.tick(); assert.equal(answers(f).length, 0);
+  f = setup({ resurrection: { gid: 77, mutation: true } }); f.Controller.tick(); assert.equal(answers(f).length, 0);
+  f = setup({ resurrection: { gid: 999 } }); f.Controller.tick(); assert.equal(answers(f).length, 0);
+  f = setup(); f.World.isDead = () => false; f.Controller.tick(); assert.equal(answers(f).length, 0);
+  f = setup(); f.Settings.profile.party.acceptRes = false; f.Controller.tick(); assert.equal(answers(f).length, 0);
+  f = setup(); f.Hunt.start(); f.Controller.tick(); assert.equal(answers(f).length, 1, 'also answered while hunting is stopped by death handling');
+});
 test('gameplay mirror exposes party matching requests and clears answered requests', () => {
   const f = fixture(), m = partyApplication(f);
   f.World.applyGameplay({ ...f.World.gp, partyMatching: m }); f.Controller.tick(); assert.equal(f.commands.length, 1);
