@@ -30,13 +30,15 @@ const Items = {
         const code = v.codename, generic = code.replace(/^ITEM_(CH|EU)_[MW]_/, 'ITEM_$1_');
         let name = names['SN_' + code] || names['SN_' + generic], shortened = generic;
         while (!name && shortened.includes('_')) { shortened = shortened.slice(0, shortened.lastIndexOf('_')); name = names['SN_' + shortened]; }
-        this.data.set(Number(id), { name: name || code, icon: v.iconDdjPath || '' });
+        this.data.set(Number(id), { name: name || code, icon: v.iconDdjPath || '', code });
       }
     }).catch(e => { this.pending = null; throw e; });
     return this.pending;
   },
   name(id) { return this.data.get(id)?.name || WdData.byId.get(id)?.code || '#' + id; },
   iconDdj(id) { return this.data.get(id)?.icon || ''; },
+  // 0 none | 1 Star | 2 Moon | 3 Sun, from the codename rule _[ABC]_RARE (also MAGIC/LEGEND/MYTH, HONOR).
+  sox(id) { const m = /_([ABC])_(RARE|MAGIC|LEGEND|MYTH)(?:_HONOR)?$/.exec(this.data.get(id)?.code || ''); return m ? 'ABC'.indexOf(m[1]) + 1 : 0; },
 };
 const LeanWardrobe = {
   slot: 'e6', query: '', degree: 0, rarity: '', page: 0, loading: null, preset: '',

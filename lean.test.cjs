@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, AntiStuck, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, AntiStuck, Items, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -939,6 +939,28 @@ test('anti-stuck can be switched off and does not run while hunting is stopped',
   const f = fixture(); f.Settings.profile.hunt.antiStuck.enabled = false; f.Hunt.start(); idleFor(f, 400000);
   assert.equal(f.AntiStuck.recoveries, 0); f.Settings.profile.hunt.antiStuck.enabled = true; f.Hunt.stop(); idleFor(f, 400000);
   assert.equal(f.AntiStuck.recoveries, 0);
+});
+test('SoX-only collects Star, Moon and Sun gear and leaves gold, potions and plain gear', () => {
+  const f = fixture(), P = f.Settings.profile.hunt.pickup;
+  const gear = (gid, ref) => { const e = f.drop(gid, 44); e.refObjId = ref; e.name = 'Sword'; return e; };
+  const plain = gear(40, 900), star = gear(41, 901), moon = gear(42, 902), sun = gear(43, 903), potion = f.drop(44, 2284);
+  const gold = f.drop(45, 0x2d0); gold.groundItem.goldAmount = 50;
+  f.Items.data.set(900, { name: 'Plain', icon: '', code: 'ITEM_CH_SWORD_01_A' });
+  f.Items.data.set(901, { name: 'Star', icon: '', code: 'ITEM_CH_SWORD_01_A_RARE' });
+  f.Items.data.set(902, { name: 'Moon', icon: '', code: 'ITEM_CH_SWORD_01_B_RARE_HONOR' });
+  f.Items.data.set(903, { name: 'Sun', icon: '', code: 'ITEM_CH_SWORD_01_C_LEGEND' });
+  assert.equal(f.Loot.allowed(plain), true); assert.equal(f.Loot.allowed(potion), true); assert.equal(f.Loot.allowed(gold), true);
+  P.soxOnly = true;
+  assert.deepEqual([plain, star, moon, sun, potion, gold].map(e => f.Loot.allowed(e)), [false, true, true, true, false, false]);
+  assert.deepEqual([star, moon, sun].map(e => f.Items.sox(e.refObjId)), [1, 2, 3]);
+  P.include = 'potion'; assert.equal(f.Loot.allowed(potion), false);
+  P.soxOnly = false; assert.equal(f.Loot.allowed(plain), true);
+});
+test('SoX-only takes nothing until the item catalogue is loaded', () => {
+  const f = fixture(), P = f.Settings.profile.hunt.pickup; let loads = 0;
+  f.Items.ready = () => { loads++; return Promise.resolve(); };
+  const e = f.drop(41, 44); e.refObjId = 901; P.soxOnly = true;
+  assert.equal(f.Loot.allowed(e), false); assert.equal(f.Loot.allowed(e), false); assert.equal(loads, 1);
 });
 test('pet picks up during combat and casting even with finish-fight enabled', () => {
   const f = fixture(); petFight(f); f.drop(20, 3436); let fights = 0;

@@ -94,6 +94,15 @@ const Loot = {
     const party = World.gp?.social?.members || [];
     return gi.ownerJid === undefined || gi.ownerJid === local || party.some(m => m.id === gi.ownerJid);
   },
+  soxLoadAt: 0,
+  // Unknown until the item catalogue loads, so unconfirmed items are never taken.
+  sox(e) {
+    if (!Items.data.size) {
+      if (now() >= this.soxLoadAt) { this.soxLoadAt = now() + 30000; Items.ready().catch(() => {}); }
+      return 0;
+    }
+    return Items.sox(e.refObjId);
+  },
   allowed(e) {
     if (!e || e.kind !== 'ground-item' || !this.owned(e)) return false;
     const P = Hunt.cfg().pickup, tf = e.groundItem.typeFlags ?? e.tidWord ?? 0;
@@ -101,7 +110,9 @@ const Loot = {
     if (splitList(P.exclude).some(s => name.includes(s))) return false;
     const included = splitList(P.include).some(s => name.includes(s));
     const gold = ItemType.isGold(tf);
-    if (!included && !P[this.category(tf)]) return false;
+    // SoX-only overrides the category switches and name inclusions: anything else, gold included, is left on the ground.
+    if (P.soxOnly) { if (!ItemType.isEquipment(tf) || !this.sox(e)) return false; }
+    else if (!included && !P[this.category(tf)]) return false;
     const pet = this.petMode() ? this.pet() : null;
     if (this.petMode() && (!pet || !Number.isInteger(pet.rec.commandMode) || (pet.rec.commandMode & 128) || dist2D(pet.ent, e) > 500)) return false;
     if (gold || (pet ? pet.rec.status > pet.rec.inventory.length : World.freeBagSlots() > 0)) return true;
