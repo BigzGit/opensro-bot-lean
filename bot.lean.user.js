@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.59
+// @version      1.2.60
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.59';
+const VERSION = '1.2.60';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -2914,6 +2914,8 @@ const Town = {
     t.travel = null; t.lastPose = null; t.progressAt = now(); t.movedAt = -Infinity; t.retryAt = 0;
     this.message = 'Town cycle: ' + phase;
   },
+  // Plain wording for the service being approached (never an NPC name), for messages and bug reports.
+  role(phase) { return { storage: 'warehouse', vendor: 'potion merchant', smith: 'repair merchant', gate: 'world statue' }[String(phase).replace(/^(walk|open|close)-/, '')] || 'service point'; },
   walk(dest) {
     const t = this.trip, pose = World.pose();
     // Permit a reachable nearby approach, but always stay in service range.
@@ -2924,16 +2926,16 @@ const Town = {
     if (now() < t.retryAt) return false;
     if (now() - t.progressAt > 20000) {
       t.travel = null; t.retryAt = now() + 5000; t.progressAt = now();
-      this.message = 'Town movement: waiting to retry a blocked route.';
+      this.message = 'Town movement to the ' + this.role(t.phase) + ': blocked route (no progress for 20 s); retrying.';
       return false;
     }
     const step = Navigation.next(t, dest, false, radius);
     if (step.waiting || step.error) {
       t.travel = null; t.retryAt = now() + 5000; t.progressAt = now();
-      this.message = 'Town movement to ' + (dest.name || t.phase.slice(5)) + ': waiting; retrying collision route. ' + (step.error || 'Waiting for collision coverage.');
+      this.message = 'Town movement to the ' + this.role(t.phase) + ': waiting; retrying collision route. ' + (step.error || 'Waiting for collision coverage.');
       return false;
     }
-    this.message = 'Town cycle: walking to ' + (dest.name || 'service point');
+    this.message = 'Town cycle: walking to the ' + this.role(t.phase);
     if (!step.point || now() - t.movedAt < 1000 || World.gp.inventoryPending) return false;
     if (World.isSitting()) { if (Cmd.action(1000)) t.movedAt = now(); }
     else if (Cmd.move(step.point)) t.movedAt = now();
@@ -5657,6 +5659,8 @@ const Diagnostics = {
     if (Town.validate()) return 'Town return blocked: check refill targets, low-stock thresholds and gold.';
     return Town.reason() ? 'Town return: preparing departure.' : '';
   },
+  // What the town trip is doing right now, in plain words (no names): the phase text it shows on the panel.
+  townDetail() { return Town.trip ? String(Town.message || '').slice(0, 200) : ''; },
   main() {
     if (BuffGear.run) return BuffGear.run.restoring ? 'Buff gear: restoring combat equipment.' : 'Buff gear: swapping or casting.';
     if (BuffGear.recovery) return 'Buff gear: manual equipment review needed.';
@@ -5668,6 +5672,7 @@ const Diagnostics = {
       if (Town.trip.phase === 'buy') return Town.trip.supplies.map(s => `Refilling ${s.kind === 'hp' ? 'HP' : s.kind === 'mp' ? 'MP' : 'abnormal pills'}: ${Restock.count(s.refObjId)} / ${s.target}`).join(' · ');
       if (World.gp?.inventoryPending) return 'Town services: waiting for inventory transaction.';
       const phases = { recall: 'stopping combat for recall', 'recall-wait': 'waiting for recall arrival', 'reverse-wait': 'waiting for reverse arrival', 'revive-arrival': 'waiting for town revival', store: 'depositing loot', sell: 'selling pet loot', repair: 'repairing equipment', reverse: 'opening reverse return' };
+      if (/^(walk|open)-/.test(Town.trip.phase) && Town.message) return Town.message;
       return 'Town services: ' + (phases[Town.trip.phase] || 'travelling between or opening services') + '.';
     }
     if (WalkBack.active || Restock.trip || Resurrect.trip) return 'Travelling; waiting to reach the destination.';
@@ -5685,7 +5690,8 @@ const Diagnostics = {
   snapshot() {
     const gp = World.gp, c = Settings.profile, pet = Loot.pet(), social = gp?.social, matching = gp?.partyMatching;
     return {
-      action: this.main(), partyStatus: this.party(), petStatus: this.pet(), townStatus: this.town(),
+      action: this.main(), partyStatus: this.party(), petStatus: this.pet(), townStatus: this.town(), townDetail: this.townDetail(),
+      navigationReady: !!Navigation.scene, navigationError: String(Navigation.error || '').slice(0, 80),
       buffGearActive: !!BuffGear.run, buffGearRestoring: !!BuffGear.run?.restoring, buffGearMovePending: !!BuffGear.run?.pending, buffGearRecovery: !!BuffGear.recovery,
       alchemyActive: !!Alchemy.run, alchemyPending: !!Alchemy.pending, alchemyAttempts: this.number(Alchemy.result?.attempts),
       alchemyTarget: this.number(Alchemy.run?.cfg.target), alchemySuccesses: this.number(Alchemy.result?.successes),

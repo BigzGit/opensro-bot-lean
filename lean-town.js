@@ -219,6 +219,8 @@ const Town = {
     t.travel = null; t.lastPose = null; t.progressAt = now(); t.movedAt = -Infinity; t.retryAt = 0;
     this.message = 'Town cycle: ' + phase;
   },
+  // Plain wording for the service being approached (never an NPC name), for messages and bug reports.
+  role(phase) { return { storage: 'warehouse', vendor: 'potion merchant', smith: 'repair merchant', gate: 'world statue' }[String(phase).replace(/^(walk|open|close)-/, '')] || 'service point'; },
   walk(dest) {
     const t = this.trip, pose = World.pose();
     // Permit a reachable nearby approach, but always stay in service range.
@@ -229,16 +231,16 @@ const Town = {
     if (now() < t.retryAt) return false;
     if (now() - t.progressAt > 20000) {
       t.travel = null; t.retryAt = now() + 5000; t.progressAt = now();
-      this.message = 'Town movement: waiting to retry a blocked route.';
+      this.message = 'Town movement to the ' + this.role(t.phase) + ': blocked route (no progress for 20 s); retrying.';
       return false;
     }
     const step = Navigation.next(t, dest, false, radius);
     if (step.waiting || step.error) {
       t.travel = null; t.retryAt = now() + 5000; t.progressAt = now();
-      this.message = 'Town movement to ' + (dest.name || t.phase.slice(5)) + ': waiting; retrying collision route. ' + (step.error || 'Waiting for collision coverage.');
+      this.message = 'Town movement to the ' + this.role(t.phase) + ': waiting; retrying collision route. ' + (step.error || 'Waiting for collision coverage.');
       return false;
     }
-    this.message = 'Town cycle: walking to ' + (dest.name || 'service point');
+    this.message = 'Town cycle: walking to the ' + this.role(t.phase);
     if (!step.point || now() - t.movedAt < 1000 || World.gp.inventoryPending) return false;
     if (World.isSitting()) { if (Cmd.action(1000)) t.movedAt = now(); }
     else if (Cmd.move(step.point)) t.movedAt = now();

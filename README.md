@@ -98,6 +98,14 @@ Open **Settings → Session stats** for hunting time, XP/hour, net gold, confirm
 | **Return & hunt** | Walk to the saved hunting spot, then start hunting |
 | **Stop all** | Cancel hunting and automated trips; potion use has its own switch |
 
+## If a town trip stalls on the way to a merchant
+
+The main panel's status line and Send bug report now name what the walk is waiting for, for example "Town movement to the potion merchant: waiting; retrying collision route. No walkable route found through the loaded collision map." The bot never walks blindly through obstacles, so it keeps retrying until the route works or you press F8.
+
+- **"Waiting for game collision data" / "Waiting for collision coverage":** the game has not given the bot a collision map for the town you arrived in. Reload the game and try again.
+- **"No walkable route found":** save that service point again from open ground a few steps in front of the NPC (stop hunting, stand there, select the NPC and click its Save button).
+- **"Blocked route (no progress for 20 s)":** something is physically in the way; check the character is not stuck behind another player or object.
+
 ## If something gets stuck
 
 Read the return status on the main panel. Use **Settings → Send bug report**; the diagnostics it previews include recent return states, even after toggling the bot. Reloading clears that history.

@@ -1475,6 +1475,16 @@ test('town movement waits for collision coverage without timing out or blindly c
   f.Navigation.install(navProduct()); f.advance(6000); f.Town.tick();
   assert.ok(f.commands.filter(c => c.kind === 'move').length > moves);
 });
+test('a stalled walk to a town service says why, in plain words and without NPC names, on the panel and in reports', () => {
+  const f = townFixture(); f.Town.begin(); f.Town.enter('walk-vendor'); f.Navigation.scene = null; f.Navigation.error = 'Unsupported collision data';
+  f.World.gp.pose.x = 5000; f.Town.tick();
+  assert.match(f.Town.message, /to the potion merchant: waiting; retrying collision route\. Unsupported collision data/);
+  assert.equal(f.Town.message.includes('vendor'), false); assert.equal(f.Town.message.includes('Merchant'), false);
+  assert.equal(f.Diagnostics.main(), f.Town.message, 'the panel shows the walking detail instead of a generic line');
+  const snap = f.Diagnostics.snapshot();
+  assert.equal(snap.townDetail, f.Town.message); assert.equal(snap.navigationReady, false); assert.equal(snap.navigationError, 'Unsupported collision data');
+  f.Town.cancel(); assert.equal(f.Diagnostics.snapshot().townDetail, '');
+});
 test('town movement retries blocked routes at intervals and remains cancellable', () => {
   const f = townFixture(); f.Town.begin(); f.Town.enter('walk-storage');
   let plans = 0;
