@@ -384,6 +384,14 @@ const server = http.createServer((req, res) => {
     await page.getByRole('button', { name:'Use imbue Thunderdragon force',exact:true }).click();
     assert.equal(await page.evaluate(() => SROLean.settings.profile.macro.imbue.id),3404);
     assert.match(await page.locator('fieldset').filter({has:page.locator('legend', {hasText:'Weapon imbue'})}).innerText(),/Lv 13/);
+    // Redrawing the same view keeps the scroll position; switching view starts at the top.
+    await page.evaluate(() => { const pane = document.querySelector('#sro-bot-lean').shadowRoot.querySelector('.pane'); pane.style.maxHeight = '150px'; pane.scrollTop = 90; });
+    const paneTop = () => page.evaluate(() => document.querySelector('#sro-bot-lean').shadowRoot.querySelector('.pane').scrollTop);
+    assert.ok(await paneTop() > 0);
+    await page.getByRole('button', { name:'No imbue',exact:true }).click();
+    assert.ok(await paneTop() > 0);
+    await page.getByRole('button', { name:'Skills',exact:true }).click();
+    assert.equal(await paneTop(), 0);
     await page.getByRole('button', {name:'Wardrobe',exact:true}).click();
     await page.getByRole('button', {name:'Wear Honor Sword',exact:true}).waitFor();
     assert.equal(await page.getByRole('button',{name:'Wear Test Sword',exact:true}).count(),1);

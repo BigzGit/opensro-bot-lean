@@ -237,6 +237,9 @@ const UI = {
     if (!this.pane) return;
     if (this.tip) this.tip.hidden = true;
     this.lastSkillKey = this.skillKey();
+    // Rebuilding the pane resets scrolling; keep the position when redrawing the same view.
+    const view = [this.current, this.combatTab, this.rotationClass].join('|'), scroll = view === this.drawnView ? this.pane.scrollTop : 0;
+    this.drawnView = view;
     this.refreshers = []; this.pane.replaceChildren();
     [...this.nav.children].forEach(b => b.setAttribute('aria-selected', String(b.textContent === this.current)));
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
@@ -383,6 +386,7 @@ const UI = {
       this.logs = el('pre'); this.pane.append(this.group('Recent activity', this.logs));
     }
     this.update();
+    this.pane.scrollTop = scroll;
   },
   skillKey() {
     return (World.gp?.skills || []).map(id => { const s = World.skill(id); return `${id}:${s?.name}:${s?.icon}:${s?.level}`; }).join('|');

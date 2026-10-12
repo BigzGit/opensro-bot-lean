@@ -20,6 +20,8 @@ function boot() {
     }
   };
   for (const type of ['keydown', 'keypress', 'keyup']) W.addEventListener(type, protectEditing, true);
+  // Scrolling the panel must not also zoom or move the game camera underneath it.
+  W.addEventListener('wheel', e => { if (e.composedPath().includes(UI.root?.host)) e.stopImmediatePropagation(); }, { capture: true, passive: true });
   Combat.init(); Loot.init(); Alchemy.init(); BuffGear.init();
   bus.on('character', name => {
     const key = name ? 'profile:' + name : 'profile:default';

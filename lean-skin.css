@@ -28,7 +28,7 @@ nav button[aria-selected=true],.subtabs button[aria-selected=true]{color:#fff;bo
 .subtabs button{font-size:11px;min-width:48px;border-image-source:var(--s-stab_off)}
 .subtabs button[aria-selected=true]{border-image-source:var(--s-stab_on)}
 .class-tabs{display:flex;gap:3px;flex-wrap:wrap;margin-bottom:7px}.class-tabs button{font-size:11px;gap:4px;text-transform:capitalize;flex:1;min-width:80px}.class-tabs button[aria-selected=true]{color:#ffe08a}.class-tabs i{display:inline-block;width:16px;height:16px;flex:0 0 16px;background-size:16px 16px}
-.pane{padding-top:9px;max-height:min(64vh,660px);overflow:auto;overflow-x:hidden;scrollbar-color:#796a48 #171711}
+.pane{padding-top:9px;max-height:clamp(220px,calc(100vh - 300px),720px);overflow:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-gutter:stable;scrollbar-color:#796a48 #171711}
 .pane::-webkit-scrollbar{width:16px}.pane::-webkit-scrollbar-track{background-image:var(--s-scr_bar)}.pane::-webkit-scrollbar-thumb{background:var(--s-scr_btn) center/16px 100% no-repeat;min-height:16px}.pane::-webkit-scrollbar-thumb:hover{background-image:var(--s-scr_btn_f)}
 fieldset{position:relative;min-width:0;border:0;margin:0 0 9px;padding:25px 10px 9px;background-color:#282728;background-image:var(--s-ib_lu),var(--s-ib_ru),var(--s-ib_ld),var(--s-ib_rd),var(--s-ib_mu),var(--s-ib_md),var(--s-ib_ls),var(--s-ib_rs);background-position:left top,right top,left bottom,right bottom,left top,left bottom,left top,right top;background-repeat:no-repeat,no-repeat,no-repeat,no-repeat,repeat-x,repeat-x,repeat-y,repeat-y}
 legend{position:absolute;left:9px;right:9px;top:3px;padding:0;height:13px;line-height:13px;color:#ffd65a;font-weight:bold}
@@ -54,14 +54,14 @@ button.slot:hover{border-image:none;border-color:#d9b765}.slot.on{border-color:#
 .picker-title{display:flex;align-items:center;gap:6px;justify-content:space-between;margin-top:8px}.picker-title input{max-width:170px;width:50%;font-size:11px}
 .skill-tip{position:fixed;z-index:2147483647;max-width:270px;pointer-events:none;padding:9px;background:rgba(8,9,6,.97);border:1px solid #b79b5c;box-shadow:inset 0 0 0 2px #30291c,0 3px 10px #000;font-size:12px;color:#efdaa4;white-space:pre-line;text-shadow:1px 1px #000}
 .skill-tip strong{display:block;color:#fff;margin-bottom:5px}.empty{padding:10px 4px;color:#a09b8c;text-align:center}
-pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;max-height:130px;overflow:auto;margin:5px 0}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;max-height:130px;overflow:auto;overscroll-behavior:contain;margin:5px 0}
 .wardrobe-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin-bottom:8px}
 .wardrobe-item{min-width:0;height:48px;padding:4px;justify-content:flex-start;gap:6px;text-align:left;font-size:10px;white-space:normal;line-height:12px}
 .wardrobe-item>.slot{flex:0 0 34px}.wardrobe-item>span:last-child{overflow:hidden;max-height:36px;overflow-wrap:anywhere}
 .wardrobe-item[aria-pressed=true]{color:#ffe08a;outline:1px solid #ffe08a;outline-offset:-2px}
-@media(max-width:500px){:host{right:4px;top:70px;width:calc(100vw - 8px)}.body{margin:0 13px}.pane{max-height:62vh}.field input[type=text]{width:150px}.skill-row{gap:4px}.controls{gap:2px}}
+@media(max-width:500px){:host{right:4px;top:70px;width:calc(100vw - 8px)}.body{margin:0 13px}.pane{max-height:clamp(200px,calc(100vh - 280px),720px)}.field input[type=text]{width:150px}.skill-row{gap:4px}.controls{gap:2px}}
 
 .waiting{white-space:pre-line;color:#c8d9ae;margin:4px 0}
 textarea{width:100%;color:inherit;background:#151916;font:11px monospace}
 
-.report-preview{max-height:55vh;overflow:auto}.report-preview .field{display:block}.report-preview .field>span{display:block;margin-bottom:4px}.report-image{display:block;width:100%;height:auto;margin:6px 0;border:1px solid #5d5034}
+.report-preview{max-height:55vh;overflow:auto;overscroll-behavior:contain}.report-preview .field{display:block}.report-preview .field>span{display:block;margin-bottom:4px}.report-image{display:block;width:100%;height:auto;margin:6px 0;border:1px solid #5d5034}
