@@ -189,6 +189,11 @@ const server = http.createServer((req, res) => {
     const townToggle = page.getByLabel('Use return scroll → town services → reverse return', { exact: true });
     assert.equal(await townToggle.isChecked(), false);
     await townToggle.check(); assert.equal(await page.evaluate(() => SROLean.town.cfg().enabled), true);
+    assert.equal(await page.getByRole('button', { name: 'Record from merchant', exact: true }).count(), 0);
+    assert.equal(await page.getByLabel('Auto buy while hunting', { exact: true }).count(), 0);
+    await townToggle.uncheck();
+    assert.equal(await page.getByRole('button', { name: 'Record from merchant', exact: true }).count(), 1);
+    await townToggle.check();
 
     await townToggle.uncheck();
     const reviveToggle = page.getByLabel('Revive in town and reverse to last scroll point', { exact: true });
@@ -298,7 +303,7 @@ const server = http.createServer((req, res) => {
     try { await page.waitForFunction(() => testCommands.some(c => c.kind === 'move'), { timeout: 3000 }); }
     catch (e) { console.error(await page.evaluate(() => ({ commands: testCommands, log: SROLean.log.lines.slice(-8), pose: SROLean.world.pose(), time: performance.now() }))); throw e; }
     await page.evaluate(() => { SROLean.world.gp.pose.x = 400; });
-    await page.getByRole('button', { name: 'Walk back', exact: true }).click();
+    await page.getByRole('button', { name: 'Return & hunt', exact: true }).click();
     await page.waitForFunction(() => window.SROLean.walkBack.active !== null);
     await page.getByRole('button', { name: 'Stop all', exact: true }).click();
     assert.equal(await page.evaluate(() => SROLean.walkBack.active), null);
@@ -438,7 +443,7 @@ const server = http.createServer((req, res) => {
         objects:[{x:0,y:0,z:0,yaw:0,mesh:{vertices:[200,0,0,200,0,300],edges:[0,1,0,65535,3,0]}}]}}}});
       testCommands.length=0;
     });
-    await page.getByRole('button',{name:'Walk back',exact:true}).click();
+    await page.getByRole('button',{name:'Return & hunt',exact:true}).click();
     await page.waitForFunction(() => testCommands.some(c => c.kind==='move' && c.destination.z>100));
     await page.getByRole('button',{name:'Stop all',exact:true}).click();
     await page.evaluate(() => {

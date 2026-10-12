@@ -17,6 +17,8 @@ Settings are saved separately for each character. The bot checks for updates on 
 
 ## Automatic town trips
 
+With the town cycle on, the walking-route restock controls are hidden because every trip buys potions in town. The **On death** setting is replaced by the town revive option, and the rest thresholds only show while **Rest when low** is ticked.
+
 Set this up once in **Supplies → Hotan scroll town cycle**:
 
 1. Bind your recall to **Hotan** in the game. Use a return scroll, stop the bot, then click **Save arrival point** where you land.
@@ -68,8 +70,7 @@ Open **Settings → Session stats** for hunting time, XP/hour, net gold, confirm
 | **F8** | Start or stop the bot |
 | **F7** | Fold or unfold the panel |
 | **Shift+F7** | Hide or show the panel; the bot keeps running |
-| **Walk back** | Walk to the saved hunting spot |
-| **Return & hunt** | Walk back, then start hunting |
+| **Return & hunt** | Walk to the saved hunting spot, then start hunting |
 | **Stop all** | Cancel hunting and automated trips; potion use has its own switch |
 
 ## If something gets stuck
