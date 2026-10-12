@@ -2,6 +2,9 @@
 from pathlib import Path
 import re
 import runpy
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from english_only import english_only, leftovers
 
 base = Path(__file__).resolve().parent
 runpy.run_path(str(base / 'build-wardrobe.py'))
@@ -143,7 +146,7 @@ skin += '\nconst LEAN_CSS = ' + __import__('json').dumps((base / 'lean-skin.css'
 header = '''// ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.62
+// @version      1.2.63
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -163,7 +166,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.62';
+const VERSION = '1.2.63';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -194,6 +197,9 @@ parts = [header, utils, (base / 'lean-settings.js').read_text(encoding='utf-8'),
          (base / 'lean-ui.js').read_text(encoding='utf-8'),
          (base / 'lean-boot.js').read_text(encoding='utf-8'), '})();\n']
 output = '\n\n'.join(parts).replace('[SRO Asistan]', '[nixxane bot]')
+output = english_only(output)
+left = leftovers(output)
+assert not left, 'Turkish text left in the bot: ' + repr(left[:5])
 (base / 'bot.lean.user.js').write_text(output, encoding='utf-8', newline='\n')
 (base / 'bot.lean.meta.js').write_text(header[:header.index('// ==/UserScript==') + len('// ==/UserScript==')] + '\n', encoding='utf-8', newline='\n')
 print(f'Built bot.lean.user.js: {len(output.encode("utf-8")):,} bytes, {len(output.splitlines()):,} lines')

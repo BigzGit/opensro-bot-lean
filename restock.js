@@ -29,13 +29,13 @@ const Restock = {
     const shop = this.activeShop();
     const npc = World.ents.get(shop?.npc);
     const p = this.pose();
-    if (Hunt.running || this.trip) return this.tell(T('Önce avı durdurun.', 'Stop hunting first.'));
+    if (Hunt.running || this.trip) return this.tell('Stop hunting first.');
     if (!World.inWorld() || !npc || npc.kind !== 'npc' || !p || !shop.offers.some(o => this.offerKind(o))) {
-      return this.tell(T('İksir satıcısının mağazasını önce açın.', 'Open a potion merchant shop first.'));
+      return this.tell('Open a potion merchant shop first.');
     }
     this.draft = { vendor: { refObjId: npc.refObjId, name: npc.name, ...p }, route: [p], offers: shop.offers.filter(o => this.offerKind(o)).map(o => ({ refObjId: o.refObjId, name: o.name, kind: this.offerKind(o) })) };
     this.recording = true;
-    this.tell(T('Mağazayı kapatıp av yerine yürüyün, sonra Kaydı bitir düğmesine basın. Işınlanmayın.', 'Close the shop, walk to your hunting spot, then click Finish route. Do not teleport.'));
+    this.tell('Close the shop, walk to your hunting spot, then click Finish route. Do not teleport.');
   },
   sample(force = false) {
     if (!this.recording) return;
@@ -45,7 +45,7 @@ const Restock = {
     const d = dist2D(route[route.length - 1], p);
     if (!Number.isFinite(d) || d > 300 || route.length >= 10000) {
       this.cancelRecording();
-      return this.tell(T('Rota kesildi; ışınlanmadan yürüyerek tekrar kaydedin.', 'Route interrupted; record again by walking without teleporting.'));
+      return this.tell('Route interrupted; record again by walking without teleporting.');
     }
     if (d >= 40 || force && d > 0) route.push(p);
   },
@@ -54,7 +54,7 @@ const Restock = {
     this.sample(true);
     if (!this.recording) return;
     const d = this.draft;
-    if (d.route.length < 2 || dist2D(d.route[0], d.route[d.route.length - 1]) < 100) return this.tell(T('Önce av yerine yürüyün.', 'Walk to your hunting spot first.'));
+    if (d.route.length < 2 || dist2D(d.route[0], d.route[d.route.length - 1]) < 100) return this.tell('Walk to your hunting spot first.');
     const c = this.cfg();
     c.vendor = d.vendor; c.route = d.route; c.offers = d.offers;
     for (const kind of ['hp', 'mp']) {
@@ -63,7 +63,7 @@ const Restock = {
     Hunt.setCenter();
     this.cancelRecording();
     Settings.saveProfile();
-    this.tell(T('Rota ve av merkezi kaydedildi. İksirleri ve miktarları seçip otomatik alımı açın.', 'Route and hunt centre saved. Choose potions and quantities, then enable auto buying.'));
+    this.tell('Route and hunt centre saved. Choose potions and quantities, then enable auto buying.');
   },
   // Fixed retail Special Universal Pill (small): strongest universal cure, ref 58.
   supplies() { return ['hp', 'mp', 'vigor', 'cure'].filter(k => this.cfg()[k].on).map(k => ({ kind: k, ...this.cfg()[k], ...(k === 'cure' ? { refObjId: 58 } : {}) })); },
@@ -77,7 +77,7 @@ const Restock = {
     this.trip = null;
     this.message = reason;
     Log.warn('Auto buy: ' + reason);
-    Hunt.stop(T('İksir alımı: ', 'Potion restock: ') + reason);
+    Hunt.stop('Potion restock: ' + reason);
   },
   begin() {
     const error = this.validate();
@@ -90,7 +90,7 @@ const Restock = {
     route.push(p);
     this.trip = { phase: 'vendor', route, index: route.length - 2, at: now(), movedAt: 0, best: Infinity, progressAt: now(), manualAt: Manual.lastAt, vendor: { ...c.vendor }, supplies: this.supplies(), pending: null };
     Hunt.targetGid = 0; Hunt.lootGid = 0;
-    this.message = T('İksir satıcısına gidiliyor', 'Walking to potion merchant');
+    this.message = 'Walking to potion merchant';
     Log.info(this.message);
   },
   walk() {
@@ -130,7 +130,7 @@ const Restock = {
       if (!this.trip || !done) return true;
       if (t.phase === 'return') {
         this.trip = null; Hunt.targetGid = 0; Hunt.lootGid = 0;
-        Hunt.state = 'search'; this.message = T('İksirler alındı; av devam ediyor.', 'Restocked; hunting resumed.');
+        Hunt.state = 'search'; this.message = 'Restocked; hunting resumed.';
         Log.info(this.message); return true;
       }
       t.phase = 'open'; t.at = now(); t.openSent = false;
@@ -160,7 +160,7 @@ const Restock = {
       if (!s) {
         if (Cmd.raw({ kind: 'npc-close' }, 'Auto buy: close merchant')) {
           t.phase = 'return'; t.index = 1; t.best = Infinity; t.progressAt = now(); t.movedAt = 0;
-          this.message = T('Av yerine dönülüyor', 'Returning to hunting spot');
+          this.message = 'Returning to hunting spot';
         }
         return true;
       }
@@ -182,18 +182,18 @@ const Restock = {
     const status = h('div', { class: 'dim small-text' });
     const rows = ['hp', 'mp'].map(kind => h('div', { class: 'row wrap' },
       check(kind.toUpperCase(), () => c()[kind].on, v => c()[kind].on = v),
-      selectBox(() => [[0, T('İksir seçin', 'Choose potion')], ...c().offers.filter(o => o.kind === kind).map(o => [o.refObjId, o.name])], () => c()[kind].refObjId, v => c()[kind].refObjId = v),
-      h('span', { text: T('Az ≤', 'Low ≤') }), numInput(() => c()[kind].low, v => c()[kind].low = v, { min: 0, max: 9999, width: 50 }),
-      h('span', { text: T('Tamamla', 'Refill to') }), numInput(() => c()[kind].target, v => c()[kind].target = v, { min: 1, max: 10000, width: 55 })
+      selectBox(() => [[0, 'Choose potion'], ...c().offers.filter(o => o.kind === kind).map(o => [o.refObjId, o.name])], () => c()[kind].refObjId, v => c()[kind].refObjId = v),
+      h('span', { text: 'Low ≤' }), numInput(() => c()[kind].low, v => c()[kind].low = v, { min: 0, max: 9999, width: 50 }),
+      h('span', { text: 'Refill to' }), numInput(() => c()[kind].target, v => c()[kind].target = v, { min: 1, max: 10000, width: 55 })
     ));
-    status.refresh = () => { status.textContent = this.recording ? T('Rota kaydediliyor: ', 'Recording route: ') + this.draft.route.length : `${c().vendor?.name || T('Satıcı ayarlanmadı', 'No merchant saved')} · ${c().route.length} ${T('nokta', 'waypoints')} · ${this.message}`; };
+    status.refresh = () => { status.textContent = this.recording ? 'Recording route: ' + this.draft.route.length : `${c().vendor?.name || 'No merchant saved'} · ${c().route.length} ${'waypoints'} · ${this.message}`; };
     Bind.all.add(status);
     status.refresh();
-    return box(T('Otomatik iksir alımı ve ava dönüş', 'Auto buy potions and return to hunting'),
-      check(T('Av sırasında otomatik satın al', 'Auto buy while hunting'), () => c().enabled, v => c().enabled = v),
-      h('div', { class: 'row wrap' }, button(T('Satıcıdan rota kaydet', 'Record route from merchant'), () => this.beginRecording()), button(T('Kaydı bitir (av yeri)', 'Finish route (hunting spot)'), () => this.finishRecording()), button(T('Kaydı iptal et', 'Cancel recording'), () => this.cancelRecording())),
+    return box('Auto buy potions and return to hunting',
+      check('Auto buy while hunting', () => c().enabled, v => c().enabled = v),
+      h('div', { class: 'row wrap' }, button('Record route from merchant', () => this.beginRecording()), button('Finish route (hunting spot)', () => this.finishRecording()), button('Cancel recording', () => this.cancelRecording())),
       ...rows, status,
-      h('div', { class: 'dim small-text', text: T('Mağazayı açın → rota kaydını başlatın → mağazayı kapatın → av yerine yürüyün → kaydı bitirin. Aynı iksirin çantadaki adedi azaldığında alım yapılır. Dönüşte av sürer. Rota ışınlanma içeremez.', 'Open the potion shop → record route → close shop → walk to the hunting spot → finish route. Buys when the selected potion count runs low, then returns and resumes hunting. Walking routes only; no teleports.') })
+      h('div', { class: 'dim small-text', text: 'Open the potion shop → record route → close shop → walk to the hunting spot → finish route. Buys when the selected potion count runs low, then returns and resumes hunting. Walking routes only; no teleports.' })
     );
   },
 };

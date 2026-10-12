@@ -1,3 +1,4 @@
+import sys
 """Retain the original wardrobe's validated appearance core, without its window framework."""
 from pathlib import Path
 base = Path(__file__).resolve().parent
@@ -32,4 +33,6 @@ adapters = '''  isOpen() { return false; },
 Display.addGameplay('wardrobe', st => Wardrobe.onGameplay(st));
 Display.add('wardrobe', e => Wardrobe.onEntity(e));
 '''
-(base / 'lean-wardrobe-core.js').write_text(constants + config + helpers + data + core + utilities + adapters, encoding='utf-8', newline='\n')
+sys.path.insert(0, str(base))
+from english_only import english_only
+(base / 'lean-wardrobe-core.js').write_text(english_only(constants + config + helpers + data + core + utilities + adapters), encoding='utf-8', newline='\n')

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.62
+// @version      1.2.63
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.62';
+const VERSION = '1.2.63';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -160,7 +160,7 @@ const Store = {
       W.localStorage.setItem(this.prefix + key, JSON.stringify(value));
       return true;
     } catch (e) {
-      Log.warn('Ayar kaydedilemedi: ' + e);
+      Log.warn('Could not save settings: ' + e);
       return false;
     }
   },
@@ -446,9 +446,9 @@ function attachSimulation(worker, late) {
       return own.apply(this, arguments);
     };
   } catch (e) {
-    Log.warn('Komut gözlemcisi kurulamadı: ' + e);
+    Log.warn('Command observer could not be installed: ' + e);
   }
-  Log.info(late ? 'Oyun zaten çalışıyordu: geç bağlanıldı (bazı veriler ilk değişiklikte gelir).' : 'Oyun worker\'ına bağlanıldı.');
+  Log.info(late ? 'The game was already running: attached late (some data arrives on the first change).' : 'Attached to the game worker.');
   bus.emit('attached', { late });
 }
 
@@ -502,11 +502,11 @@ function onSimulationMessage(e) {
       World.applySession(d.state);
     } else if (d.kind === 'failure') {
       World.failure = String(d.message || 'failure');
-      Log.error('Oyun simülasyonu durdu: ' + World.failure);
+      Log.error('The game simulation stopped: ' + World.failure);
       bus.emit('failure', World.failure);
     }
   } catch (err) {
-    Log.error('Veri işlenemedi: ' + (err && err.message ? err.message : err));
+    Log.error('Could not process data: ' + (err && err.message ? err.message : err));
   }
 }
 
@@ -539,7 +539,7 @@ const Display = {
         const next = r.fn(out, value);
         if (next && typeof next === 'object') out = next;
       } catch (e) {
-        Log.warn('Görünüm yeniden yazıcı hatası (' + r.name + '): ' + ((e && e.message) || e));
+        Log.warn('Display rewriter error (' + r.name + '): ' + ((e && e.message) || e));
       }
     }
     return out;
@@ -948,7 +948,7 @@ const Cmd = {
     try {
       Hook.post({ kind: 'session', command: { kind: 'gameplay', command } });
     } catch (e) {
-      Log.error('Komut gönderilemedi: ' + e);
+      Log.error('Command could not be sent: ' + e);
       return false;
     }
     this.last[command.kind] = now();
@@ -971,7 +971,7 @@ const Cmd = {
     if (!gp || !e || e.kind === 'ground-item' || gid === gp.localGid) return false;
     if (gp.target === gid) return true;
     if (gp.targetPending || !this.spaced('select')) return false;
-    return this.raw({ kind: 'select', gid }, T(`Hedef seç: ${e.name || gid}`, `Select: ${e.name || gid}`));
+    return this.raw({ kind: 'select', gid }, `Select: ${e.name || gid}`);
   },
 
   attack(gid) {
@@ -979,7 +979,7 @@ const Cmd = {
     if (!e || e.kind !== 'monster' || !World.isAlive(e) || World.isDead()) return false;
     const kind = World.local()?.mountedOn ? 'cos-attack' : 'attack';
     if (!this.spaced(kind)) return false;
-    return this.raw({ kind, gid }, T(`Saldırı: ${e.name || gid}`, `Attack: ${e.name || gid}`));
+    return this.raw({ kind, gid }, `Attack: ${e.name || gid}`);
   },
 
   // A skill can be cast when it is learned, not cooling down and (for targeted
@@ -1010,7 +1010,7 @@ const Cmd = {
   pickup(gid) {
     const e = this.entity(gid);
     if (!e || e.kind !== 'ground-item' || World.isDead() || !this.spaced('pickup')) return false;
-    return this.raw({ kind: 'pickup', gid }, T(`Topla: ${e.name || gid}`, `Pick up: ${e.name || gid}`));
+    return this.raw({ kind: 'pickup', gid }, `Pick up: ${e.name || gid}`);
   },
 
   move(dest) {
@@ -1025,7 +1025,7 @@ const Cmd = {
     if (!(regionId & DUNGEON) && (x < 0 || x >= SECTOR || z < 0 || z >= SECTOR)) return false;
     if (Math.abs(y) > 32767 || Math.abs(x) > 32767 || Math.abs(z) > 32767) return false;
     const angle = clamp((dest.angle ?? World.pose()?.angle ?? 0) | 0, 0, 65535);
-    return this.raw({ kind: 'move', destination: { regionId, x, y, z, angle } }, T('Yürü', 'Move'));
+    return this.raw({ kind: 'move', destination: { regionId, x, y, z, angle } }, 'Move');
   },
 
   itemUse(slot) {
@@ -1037,7 +1037,7 @@ const Cmd = {
 
   action(id) {
     if (!this.spaced('action-command') || World.isDead()) return false;
-    return this.raw({ kind: 'action-command', id }, T(`Eylem ${id}`, `Action ${id}`));
+    return this.raw({ kind: 'action-command', id }, `Action ${id}`);
   },
 
   berserk() {
@@ -1047,13 +1047,13 @@ const Cmd = {
 
   release() {
     if (!World.gp?.target || World.gp.targetPending || !this.spaced('release-target')) return false;
-    return this.raw({ kind: 'release-target' }, T('Hedefi bırak', 'Release target'));
+    return this.raw({ kind: 'release-target' }, 'Release target');
   },
 
   rebirth(choice) {
     const local = World.local();
     if (!local || local.appearanceState?.[0] !== 2 || !this.spaced('rebirth')) return false;
-    return this.raw({ kind: 'rebirth', choice }, choice === 1 ? T('Diril (dönüş noktası)', 'Revive (return point)') : T('Diril', 'Revive'));
+    return this.raw({ kind: 'rebirth', choice }, choice === 1 ? 'Revive (return point)' : 'Revive');
   },
 };
 
@@ -1084,7 +1084,7 @@ const Ticker = {
       } catch {}
       this.worker = null;
       this.timer = setInterval(fn, ms);
-      Log.warn('Zamanlayıcı worker kullanılamadı (' + why + '); sayfa zamanlayıcısına geçildi.');
+      Log.warn('Timer worker unavailable (' + why + '); switched to the page timer.');
     };
     try {
       const src = 'let t=0;onmessage=e=>{clearInterval(t);t=setInterval(()=>postMessage(0),e.data)}';
@@ -1093,9 +1093,9 @@ const Ticker = {
         ticked = true;
         fn(e);
       };
-      this.worker.onerror = (e) => fallback((e && e.message) || 'hata');
+      this.worker.onerror = (e) => fallback((e && e.message) || 'error');
       this.worker.postMessage(ms);
-      setTimeout(() => ticked || fallback('yanıt yok'), Math.max(4000, ms * 8));
+      setTimeout(() => ticked || fallback('no response'), Math.max(4000, ms * 8));
     } catch (e) {
       fallback(String((e && e.message) || e));
     }
@@ -1204,7 +1204,7 @@ const Combat = {
     s.n = Math.min(s.n + 1, 4);
     s.until = now() + 5000 * 2 ** (s.n - 1);
     this.stuck.set(id, s);
-    Log.warn('Skill reddedildi, ' + (s.until - now()) / 1000 + ' sn atlanıyor: ' + World.skillName(id));
+    Log.warn('Skill refused, skipping for ' + (s.until - now()) / 1000 + ' s: ' + World.skillName(id));
   },
 
   resolve(entry) {
@@ -1385,13 +1385,13 @@ const Restock = {
     const shop = this.activeShop();
     const npc = World.ents.get(shop?.npc);
     const p = this.pose();
-    if (Hunt.running || this.trip) return this.tell(T('Önce avı durdurun.', 'Stop hunting first.'));
+    if (Hunt.running || this.trip) return this.tell('Stop hunting first.');
     if (!World.inWorld() || !npc || npc.kind !== 'npc' || !p || !shop.offers.some(o => this.offerKind(o))) {
-      return this.tell(T('İksir satıcısının mağazasını önce açın.', 'Open a potion merchant shop first.'));
+      return this.tell('Open a potion merchant shop first.');
     }
     this.draft = { vendor: { refObjId: npc.refObjId, name: npc.name, ...p }, route: [p], offers: shop.offers.filter(o => this.offerKind(o)).map(o => ({ refObjId: o.refObjId, name: o.name, kind: this.offerKind(o) })) };
     this.recording = true;
-    this.tell(T('Mağazayı kapatıp av yerine yürüyün, sonra Kaydı bitir düğmesine basın. Işınlanmayın.', 'Close the shop, walk to your hunting spot, then click Finish route. Do not teleport.'));
+    this.tell('Close the shop, walk to your hunting spot, then click Finish route. Do not teleport.');
   },
   sample(force = false) {
     if (!this.recording) return;
@@ -1401,7 +1401,7 @@ const Restock = {
     const d = dist2D(route[route.length - 1], p);
     if (!Number.isFinite(d) || d > 300 || route.length >= 10000) {
       this.cancelRecording();
-      return this.tell(T('Rota kesildi; ışınlanmadan yürüyerek tekrar kaydedin.', 'Route interrupted; record again by walking without teleporting.'));
+      return this.tell('Route interrupted; record again by walking without teleporting.');
     }
     if (d >= 40 || force && d > 0) route.push(p);
   },
@@ -1410,7 +1410,7 @@ const Restock = {
     this.sample(true);
     if (!this.recording) return;
     const d = this.draft;
-    if (d.route.length < 2 || dist2D(d.route[0], d.route[d.route.length - 1]) < 100) return this.tell(T('Önce av yerine yürüyün.', 'Walk to your hunting spot first.'));
+    if (d.route.length < 2 || dist2D(d.route[0], d.route[d.route.length - 1]) < 100) return this.tell('Walk to your hunting spot first.');
     const c = this.cfg();
     c.vendor = d.vendor; c.route = d.route; c.offers = d.offers;
     for (const kind of ['hp', 'mp']) {
@@ -1419,7 +1419,7 @@ const Restock = {
     Hunt.setCenter();
     this.cancelRecording();
     Settings.saveProfile();
-    this.tell(T('Rota ve av merkezi kaydedildi. İksirleri ve miktarları seçip otomatik alımı açın.', 'Route and hunt centre saved. Choose potions and quantities, then enable auto buying.'));
+    this.tell('Route and hunt centre saved. Choose potions and quantities, then enable auto buying.');
   },
   // Fixed retail Special Universal Pill (small): strongest universal cure, ref 58.
   supplies() { return ['hp', 'mp', 'vigor', 'cure'].filter(k => this.cfg()[k].on).map(k => ({ kind: k, ...this.cfg()[k], ...(k === 'cure' ? { refObjId: 58 } : {}) })); },
@@ -1433,7 +1433,7 @@ const Restock = {
     this.trip = null;
     this.message = reason;
     Log.warn('Auto buy: ' + reason);
-    Hunt.stop(T('İksir alımı: ', 'Potion restock: ') + reason);
+    Hunt.stop('Potion restock: ' + reason);
   },
   begin() {
     const error = this.validate();
@@ -1446,7 +1446,7 @@ const Restock = {
     route.push(p);
     this.trip = { phase: 'vendor', route, index: route.length - 2, at: now(), movedAt: 0, best: Infinity, progressAt: now(), manualAt: Manual.lastAt, vendor: { ...c.vendor }, supplies: this.supplies(), pending: null };
     Hunt.targetGid = 0; Hunt.lootGid = 0;
-    this.message = T('İksir satıcısına gidiliyor', 'Walking to potion merchant');
+    this.message = 'Walking to potion merchant';
     Log.info(this.message);
   },
   walk() {
@@ -1489,7 +1489,7 @@ const Restock = {
       if (!this.trip || !done) return true;
       if (t.phase === 'return') {
         this.trip = null; Hunt.targetGid = 0; Hunt.lootGid = 0;
-        Hunt.state = 'search'; this.message = T('İksirler alındı; av devam ediyor.', 'Restocked; hunting resumed.');
+        Hunt.state = 'search'; this.message = 'Restocked; hunting resumed.';
         Log.info(this.message); return true;
       }
       t.phase = 'open'; t.at = now(); t.openSent = false;
@@ -1519,7 +1519,7 @@ const Restock = {
       if (!s) {
         if (Cmd.raw({ kind: 'npc-close' }, 'Auto buy: close merchant')) {
           t.phase = 'return'; t.index = 1; t.best = Infinity; t.progressAt = now(); t.movedAt = 0;
-          this.message = T('Av yerine dönülüyor', 'Returning to hunting spot');
+          this.message = 'Returning to hunting spot';
         }
         return true;
       }
@@ -1564,7 +1564,7 @@ const Hunt = {
 
   start() {
     WalkBack.cancel();
-    if (!World.inWorld()) return UI.toast(T('Önce oyuna girin.', 'Enter the game world first.'), 'warn');
+    if (!World.inWorld()) return UI.toast('Enter the game world first.', 'warn');
     const H = this.cfg();
     if (!H.center) this.setCenter();
     this.running = true;
@@ -1579,9 +1579,9 @@ const Hunt = {
     this.lootBan.clear();
     Stats.huntStart();
 
-    UI.toast(T('Av başladı', 'Hunting started'), 'info', 2500);
+    UI.toast('Hunting started', 'info', 2500);
     Sound.play('good');
-    Log.info('Av başladı.');
+    Log.info('Hunting started.');
     bus.emit('hunt', true);
   },
 
@@ -1593,8 +1593,8 @@ const Hunt = {
     this.running = false;
     this.state = 'idle';
     Stats.huntStop();
-    UI.toast(reason ? T('Av durdu: ', 'Hunting stopped: ') + reason : T('Av durdu', 'Hunting stopped'), reason ? 'warn' : 'info', 3500);
-    Log.info('Av durdu' + (reason ? ': ' + reason : '.'));
+    UI.toast(reason ? 'Hunting stopped: ' + reason : 'Hunting stopped', reason ? 'warn' : 'info', 3500);
+    Log.info('Hunting stopped' + (reason ? ': ' + reason : '.'));
     bus.emit('hunt', false);
   },
 
@@ -1716,7 +1716,7 @@ const Hunt = {
       this.targetSince = now();
     } else if (now() - this.targetSince > H.targetTimeoutS * 1000) {
       this.ban.set(e.gid, now() + 60000);
-      Log.warn('Hedef bırakıldı (hasar alınamadı): ' + (e.name || e.gid));
+      Log.warn('Target dropped (no damage dealt): ' + (e.name || e.gid));
       this.targetGid = 0;
       return null;
     }
@@ -1736,7 +1736,7 @@ const Hunt = {
       if (this.selTries >= 3) {
         // 3 unconfirmed selects: the server refuses this gid.
         this.ban.set(target.gid, now() + 60000);
-        Log.warn('Hedef seçilemedi, bırakıldı: ' + (target.name || target.gid));
+        Log.warn('Target could not be selected, dropped: ' + (target.name || target.gid));
         this.targetGid = 0;
         this.selTries = 0;
         return;
@@ -1751,21 +1751,21 @@ const Hunt = {
 
   stateText() {
     const S = {
-      restock: T('İksir alımı / ava dönüş', 'Restocking / returning to hunt'),
-      idle: T('Beklemede', 'Idle'),
-      start: T('Başlıyor', 'Starting'),
-      waiting: T('Oyun bekleniyor', 'Waiting for game'),
-      dead: T('Öldü', 'Dead'),
-      manual: T('Elle kontrol', 'Manual control'),
-      player: T('Oyuncu yakında (duraklatıldı)', 'Player nearby (paused)'),
-      resting: T('Dinleniyor', 'Resting'),
-      standing: T('Kalkıyor', 'Standing up'),
-      buff: T('Buff', 'Buffing'),
-      loot: T('Topluyor', 'Looting'),
-      search: T('Hedef arıyor', 'Searching'),
-      return: T('Merkeze dönüyor', 'Returning'),
-      select: T('Hedef seçiyor', 'Selecting'),
-      fight: T('Savaşıyor', 'Fighting'),
+      restock: 'Restocking / returning to hunt',
+      idle: 'Idle',
+      start: 'Starting',
+      waiting: 'Waiting for game',
+      dead: 'Dead',
+      manual: 'Manual control',
+      player: 'Player nearby (paused)',
+      resting: 'Resting',
+      standing: 'Standing up',
+      buff: 'Buffing',
+      loot: 'Looting',
+      search: 'Searching',
+      return: 'Returning',
+      select: 'Selecting',
+      fight: 'Fighting',
     };
     return S[this.state] || this.state;
   },
@@ -1945,11 +1945,11 @@ const WalkBack = {
     if (BuffGear.run || BuffGear.recovery) return UI.toast('Restore or review combat gear before travelling.', 'warn');
     if (Alchemy.run || Alchemy.pending) return UI.toast('Stop alchemy and wait for its result before travelling.', 'warn');
     if (Town.trip) return UI.toast('Stop the town cycle before starting walk-back.', 'warn');
-    if (!World.inWorld() || World.isDead()) return UI.toast(T('Önce canlı olarak oyuna girin.', 'Enter the world with a living character first.'), 'warn');
+    if (!World.inWorld() || World.isDead()) return UI.toast('Enter the world with a living character first.', 'warn');
     const dest = Settings.profile.hunt.center, pose = World.pose();
-    if (!dest || !pose) return UI.toast(T('Önce av merkezini kaydedin.', 'Save a hunting spot first using Set here in Hunt → Area.'), 'warn');
-    if (!Number.isFinite(dist2D(pose, dest))) return UI.toast(T('Önce aynı bölgeye dönün.', 'Return to the same world or dungeon before walking back.'), 'warn');
-    if (World.gp?.inventoryPending) return UI.toast(T('Envanter işlemini bekleyin.', 'Wait for the inventory transaction to finish.'), 'warn');
+    if (!dest || !pose) return UI.toast('Save a hunting spot first using Set here in Hunt → Area.', 'warn');
+    if (!Number.isFinite(dist2D(pose, dest))) return UI.toast('Return to the same world or dungeon before walking back.', 'warn');
+    if (World.gp?.inventoryPending) return UI.toast('Wait for the inventory transaction to finish.', 'warn');
     Resurrect.cancelTrip('', true); Resurrect.holdUntil = 0;
     const shouldResume = resume || Hunt.running || !!this.active?.resume;
     this.cancel();
@@ -1964,7 +1964,7 @@ const WalkBack = {
     }
     route.push({ ...dest });
     this.active = { route, recorded: route.length > 1, index: 0, resume: shouldResume, manualAt: Manual.lastAt, at: now(), progressAt: now(), lastPose: { ...pose }, best: Infinity, sentAt: -Infinity, replans: 0 };
-    UI.toast(T('Av yerine yürünüyor.', 'Walking back to the hunting spot.'), 'info', 2500);
+    UI.toast('Walking back to the hunting spot.', 'info', 2500);
   },
   cancel(reason = '', halt = true) {
     if (!this.active) return;
@@ -1975,20 +1975,20 @@ const WalkBack = {
   tick() {
     const a = this.active;
     if (!a) return;
-    if (!World.inWorld() || World.isDead()) return this.cancel(T('Dönüş kesildi.', 'Walk back interrupted.'), false);
-    if (Manual.lastAt !== a.manualAt) return this.cancel(T('Elle kontrol: yürüyüş durdu.', 'Manual control: walk back cancelled.'), false);
+    if (!World.inWorld() || World.isDead()) return this.cancel('Walk back interrupted.', false);
+    if (Manual.lastAt !== a.manualAt) return this.cancel('Manual control: walk back cancelled.', false);
     const dest = a.route[a.index], distance = dist2D(World.pose(), dest);
-    if (!Number.isFinite(distance)) return this.cancel(T('Av yerine ulaşılamıyor.', 'Cannot walk to the saved hunting spot.'));
+    if (!Number.isFinite(distance)) return this.cancel('Cannot walk to the saved hunting spot.');
     if (distance <= 12) {
       a.index++; a.best = Infinity; a.progressAt = now();
       if (a.index < a.route.length) return;
       this.active = null;
-      UI.toast(T('Av yerine dönüldü.', 'Back at the hunting spot.'), 'info', 2500);
+      UI.toast('Back at the hunting spot.', 'info', 2500);
       if (a.resume) Hunt.start();
       return;
     }
     if (dist2D(a.lastPose, World.pose()) > 3) { a.lastPose = { ...World.pose() }; a.progressAt = now(); a.replans = 0; }
-    if (now() - a.progressAt > 20000 || now() - a.at > 600000) return this.cancel(T('Yol engellendi; yürüyüş durdu.', 'Walk back stopped: path blocked or travel timed out.'));
+    if (now() - a.progressAt > 20000 || now() - a.at > 600000) return this.cancel('Walk back stopped: path blocked or travel timed out.');
     if (now() - a.progressAt > 6000 && a.travel && a.replans < 2) { a.travel = null; a.replans++; a.sentAt = -Infinity; }
     const move = Navigation.next(a, dest, a.recorded);
     if (move.error && !move.waiting) return this.cancel(move.error);
@@ -3930,26 +3930,26 @@ function assetLoaderMain(self) {
       let bytes = new Uint8Array(await res.arrayBuffer());
       if (opt.range) {
         if (res.status !== 206) bytes = bytes.subarray(opt.range[0], opt.range[1] + 1);
-        if (bytes.length !== opt.range[1] - opt.range[0] + 1) throw fail('format', url + ': kısa yanıt (' + bytes.length + ' bayt)');
+        if (bytes.length !== opt.range[1] - opt.range[0] + 1) throw fail('format', url + ': short response (' + bytes.length + ' bytes)');
       }
       stats.bytes += bytes.length;
       return bytes;
     } catch (e) {
       if (e && e.code) throw e;
-      if (ctl.signal.aborted) throw fail('timeout', 'zaman aşımı: ' + url);
-      throw fail('network', 'ağ hatası: ' + url + ' (' + ((e && e.message) || e) + ')');
+      if (ctl.signal.aborted) throw fail('timeout', 'timeout: ' + url);
+      throw fail('network', 'network error: ' + url + ' (' + ((e && e.message) || e) + ')');
     } finally {
       clearTimeout(timer);
     }
   }
 
   async function gunzip(bytes) {
-    if (typeof DecompressionStream !== 'function') throw fail('format', 'tarayıcı gzip açamıyor (DecompressionStream yok)');
+    if (typeof DecompressionStream !== 'function') throw fail('format', 'the browser cannot decompress gzip (DecompressionStream missing)');
     try {
       const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
       return new Uint8Array(await new Response(stream).arrayBuffer());
     } catch (e) {
-      throw fail('format', 'gzip açılamadı: ' + ((e && e.message) || e));
+      throw fail('format', 'gzip could not be decompressed: ' + ((e && e.message) || e));
     }
   }
 
@@ -4016,9 +4016,9 @@ function assetLoaderMain(self) {
             try {
               data = JSON.parse(new TextDecoder().decode(bytes));
             } catch {
-              throw fail('format', 'manifest JSON okunamadı');
+              throw fail('format', 'manifest JSON could not be read');
             }
-            if (!data || !Array.isArray(data.assets)) throw fail('format', 'manifest biçimi tanınmadı (' + ((data && data.format) || '?') + ')');
+            if (!data || !Array.isArray(data.assets)) throw fail('format', 'manifest format not recognised (' + ((data && data.format) || '?') + ')');
             const assets = new Map();
             for (const a of data.assets) if (a && a.path && a.packPath) assets.set(String(a.path).toLowerCase(), a);
             const packs = new Map();
@@ -4070,9 +4070,9 @@ function assetLoaderMain(self) {
       const p = fetchBytes(packPath, { range: [0, 11], timeout: 30000 }).then((h) => {
         let magic = '';
         for (let i = 0; i < 8; i++) magic += String.fromCharCode(h[i]);
-        if (magic !== 'SROPACK1') throw fail('format', 'paket kimliği hatalı: ' + packPath);
+        if (magic !== 'SROPACK1') throw fail('format', 'bad pack identifier: ' + packPath);
         const len = new DataView(h.buffer, h.byteOffset, h.byteLength).getUint32(8, true);
-        if (len > 16 << 20) throw fail('format', 'paket başlığı hatalı: ' + packPath);
+        if (len > 16 << 20) throw fail('format', 'bad pack header: ' + packPath);
         return 12 + len;
       });
       p.catch(() => heads.delete(packPath));
@@ -4116,7 +4116,7 @@ function assetLoaderMain(self) {
     if (asset.transport && asset.transport.path) {
       try {
         const gz = await fetchBytes(asset.transport.path, { timeout: 60000, cache: 'default' });
-        if (asset.transport.sha256 && (await sha256(gz)) !== asset.transport.sha256) throw fail('checksum', 'taşıma dosyası SHA-256 tutmuyor: ' + asset.path);
+        if (asset.transport.sha256 && (await sha256(gz)) !== asset.transport.sha256) throw fail('checksum', 'transport file SHA-256 mismatch: ' + asset.path);
         const raw = await gunzip(gz);
         stats.transport++;
         return raw;
@@ -4162,7 +4162,7 @@ function assetLoaderMain(self) {
       }
       // Possibly a file added by a later deploy: re-read an older manifest once.
       if (!t.refreshed && Date.now() - manifestAt > 120000) retry = 'manifest';
-      else throw fail('missing', 'oyun paketlerinde yok: ' + path);
+      else throw fail('missing', 'not found in the game packs: ' + path);
     } catch (e) {
       error = e;
       const code = e && e.code;
@@ -4364,14 +4364,14 @@ const wdAnimFam = (tf) => WD_ANIM_FAM[wdTid4(tf)] || '';
 // Job mode the game derives from inventory slot 8 (ac(), index L4334): 1..3 trader /
 // thief / hunter, anything else normal; party matching and its commands follow it.
 const wdJobMode = (tf) => ((Number(tf) >>> 0) & 2046) === 940 && wdTid4(tf) >= 1 && wdTid4(tf) <= 3;
-// Case folding for search: Turkish İ/I and English i/I all compare equal.
-const wdFold = (s) => String(s || '').toLocaleLowerCase('tr').replace(/ı/g, 'i');
+// Case folding for search.
+const wdFold = (s) => String(s || '').toLowerCase();
 
 function wdSafe(what, fn) {
   try {
     return fn();
   } catch (e) {
-    Log.warn('Görünüm Stüdyosu (' + what + '): ' + ((e && e.message) || e));
+    Log.warn('Wardrobe (' + what + '): ' + ((e && e.message) || e));
     return undefined;
   }
 }
@@ -4401,66 +4401,66 @@ function wdGameIcon(ref) {
 
 function wdSlotName(s) {
   const n = typeof Items !== 'undefined' && Items.slotName ? Items.slotName(s) : '';
-  return n || [T('Baş', 'Head'), T('Gövde', 'Chest'), T('Omuz', 'Shoulder'), T('Eller', 'Hands'), T('Bacaklar', 'Legs'), T('Ayaklar', 'Feet'), T('Silah', 'Weapon'), T('Kalkan', 'Shield'), T('Meslek kıyafeti', 'Job suit')][s] || '';
+  return n || ['Head', 'Chest', 'Shoulder', 'Hands', 'Legs', 'Feet', 'Weapon', 'Shield', 'Job suit'][s] || '';
 }
 
 function wdAvatarName(s) {
-  return [T('Şapka', 'Hat'), T('Elbise', 'Dress'), T('Aksesuar', 'Attachment'), T('Bayrak', 'Flag')][s] || '';
+  return ['Hat', 'Dress', 'Attachment', 'Flag'][s] || '';
 }
 
 function wdKindName(kind) {
   const k = {
-    SWORD: () => T('Kılıç', 'Sword'),
-    BLADE: () => T('Pala', 'Blade'),
-    SPEAR: () => T('Mızrak', 'Spear'),
-    TBLADE: () => T('Teber', 'Glaive'),
-    BOW: () => T('Yay', 'Bow'),
-    EUSWORD: () => T('Tek elli kılıç', 'One-handed sword'),
-    TSWORD: () => T('İki elli kılıç', 'Two-handed sword'),
-    AXE: () => T('Çift balta', 'Dual axe'),
-    DARKSTAFF: () => T('Kara asa', 'Dark staff'),
-    TSTAFF: () => T('İki elli asa', 'Two-handed staff'),
-    CROSSBOW: () => T('Arbalet', 'Crossbow'),
-    DAGGER: () => T('Hançer', 'Dagger'),
-    HARP: () => T('Arp', 'Harp'),
-    STAFF: () => T('Asa', 'Staff'),
-    FORT: () => T('Kale silahı', 'Fortress weapon'),
-    SHIELD: () => T('Kalkan', 'Shield'),
+    SWORD: () => 'Sword',
+    BLADE: () => 'Blade',
+    SPEAR: () => 'Spear',
+    TBLADE: () => 'Glaive',
+    BOW: () => 'Bow',
+    EUSWORD: () => 'One-handed sword',
+    TSWORD: () => 'Two-handed sword',
+    AXE: () => 'Dual axe',
+    DARKSTAFF: () => 'Dark staff',
+    TSTAFF: () => 'Two-handed staff',
+    CROSSBOW: () => 'Crossbow',
+    DAGGER: () => 'Dagger',
+    HARP: () => 'Harp',
+    STAFF: () => 'Staff',
+    FORT: () => 'Fortress weapon',
+    SHIELD: () => 'Shield',
   }[kind];
   return k ? k() : kind || '';
 }
 
 function wdClassName(cls, race) {
   const eu = race === 'EU';
-  if (cls === 'CLOTHES') return eu ? T('Cüppe', 'Robe') : T('Giysi', 'Garment');
-  if (cls === 'LIGHT') return eu ? T('Hafif zırh', 'Light armour') : T('Koruyucu', 'Protector');
-  if (cls === 'HEAVY') return eu ? T('Ağır zırh', 'Heavy armour') : T('Zırh', 'Armour');
+  if (cls === 'CLOTHES') return eu ? 'Robe' : 'Garment';
+  if (cls === 'LIGHT') return eu ? 'Light armour' : 'Protector';
+  if (cls === 'HEAVY') return eu ? 'Heavy armour' : 'Armour';
   return '';
 }
 
 function wdBodyName(body) {
   return (
     {
-      CH_M: () => T('Çinli erkek', 'Chinese male'),
-      CH_W: () => T('Çinli kadın', 'Chinese female'),
-      EU_M: () => T('Avrupalı erkek', 'European male'),
-      EU_W: () => T('Avrupalı kadın', 'European female'),
+      CH_M: () => 'Chinese male',
+      CH_W: () => 'Chinese female',
+      EU_M: () => 'European male',
+      EU_W: () => 'European female',
     }[body] || (() => '—')
   )();
 }
 
 function wdSoxName(n) {
-  return n ? wdText(['PARAM_RARE_FIRST', 'PARAM_RARE_SECOND', 'PARAM_RARE_THIRD'][n - 1], [T('Yıldız Mührü (Star)', 'Seal of Star'), T('Ay Mührü (Moon)', 'Seal of Moon'), T('Güneş Mührü (Sun)', 'Seal of Sun')][n - 1]) : '';
+  return n ? wdText(['PARAM_RARE_FIRST', 'PARAM_RARE_SECOND', 'PARAM_RARE_THIRD'][n - 1], ['Seal of Star', 'Seal of Moon', 'Seal of Sun'][n - 1]) : '';
 }
 
 // +plus glow band (thresholds from the equipment GLB rows, R7 glow_pets).
 function wdGlow(plus) {
   const p = Number(plus) || 0;
-  if (p >= 9) return { name: T('Mavi-yeşil', 'Blue-green'), color: '#6ff0d4' };
-  if (p >= 7) return { name: T('Altın', 'Gold'), color: '#ffc84a' };
-  if (p >= 5) return { name: T('Pembe', 'Pink'), color: '#ff8ad8' };
-  if (p >= 3) return { name: T('Beyaz', 'White'), color: '#ffffff' };
-  return { name: T('Parlama yok', 'No glow'), color: '#8f8a7a' };
+  if (p >= 9) return { name: 'Blue-green', color: '#6ff0d4' };
+  if (p >= 7) return { name: 'Gold', color: '#ffc84a' };
+  if (p >= 5) return { name: 'Pink', color: '#ff8ad8' };
+  if (p >= 3) return { name: 'White', color: '#ffffff' };
+  return { name: 'No glow', color: '#8f8a7a' };
 }
 
 // Parsed codename: weapons {race, kind, deg, grade, sox, honor}, armour {race, sex,
@@ -4518,14 +4518,14 @@ const WdData = {
         Assets.texts(),
         Items.ready(),
       ]);
-      if (!wd || !Array.isArray(wd.items)) throw new Error(T('kıyafet kataloğu okunamadı', 'wardrobe catalogue unavailable'));
+      if (!wd || !Array.isArray(wd.items)) throw new Error('wardrobe catalogue unavailable');
       this.build(wd, Array.isArray(models) ? models : [], texts || {});
       return true;
     })()
       .catch((e) => {
         this.failedAt = now();
         this.error = String((e && e.message) || e);
-        Log.warn('Görünüm Stüdyosu kataloğu yüklenemedi: ' + this.error);
+        Log.warn('Wardrobe catalogue could not be loaded: ' + this.error);
         return false;
       })
       .finally(() => {
@@ -4770,7 +4770,7 @@ const Wardrobe = {
       const f = WdData.formulaTf(row);
       if (f && f !== real && !this.warned.has(key)) {
         this.warned.add(key);
-        Log.warn(`Görünüm Stüdyosu: ${row.code} typeFlags ${real}, formül ${f} (gerçek değer kullanılıyor)`);
+        Log.warn(`Wardrobe: ${row.code} typeFlags ${real}, formula ${f} (using the real value)`);
       }
     };
     const gp = World.gp;
@@ -5007,7 +5007,7 @@ const Wardrobe = {
     Settings.saveProfile();
     this.applySoon();
     const out = this.myCos();
-    if (pet && (out.p3 || out.p4 || out.pm)) UI.toast(T('Pet ve binek görünümü, hayvanın bir sonraki güncellemesinde (hareket) değişir.', 'The pet and mount look changes with the animal’s next update (movement).'), 'info', 3500);
+    if (pet && (out.p3 || out.p4 || out.pm)) UI.toast('The pet and mount look changes with the animal’s next update (movement).', 'info', 3500);
     if (this.isOpen()) {
       this.renderLeft();
       this.renderHead();
@@ -5077,10 +5077,10 @@ const Wardrobe = {
       const real = this.realEq(s);
       if (o.hide) delete o.hide;
       else if (s === 8 && real && wdJobMode(real.typeFlags)) {
-        UI.toast(T('Giyili meslek kıyafeti gizlenemez: oyun meslek modunu bu yuvadan okur.', 'A worn job suit cannot be hidden: the game reads the job mode from this slot.'), 'warn', 4000);
+        UI.toast('A worn job suit cannot be hidden: the game reads the job mode from this slot.', 'warn', 4000);
       } else {
         o.hide = true;
-        if (s === 6 && real) UI.toast(T('Silah gizliyken skill animasyonları ve vuruş efektleri oynamayabilir.', 'With the weapon hidden, skill animations and hit effects may not play.'), 'warn', 4000);
+        if (s === 6 && real) UI.toast('With the weapon hidden, skill animations and hit effects may not play.', 'warn', 4000);
       }
       this.tidyEq(s);
     } else if (id[0] === 'a') {
@@ -5097,7 +5097,7 @@ const Wardrobe = {
     const pets = this.petKey();
     this.useOutfit({ eq: {}, av: {}, pet: { atk: 0, pick: 0, mount: 0 }, hideAvatars: false });
     this.changed(this.petKey() !== pets);
-    UI.toast(T('Gerçek görünüme dönüldü ("Geri al" ile eski kombine dönebilirsiniz).', 'Back to the real look ("Undo" restores the previous outfit).'), 'info', 3000);
+    UI.toast('Back to the real look ("Undo" restores the previous outfit).', 'info', 3000);
     if (this.isOpen()) this.renderPane();
   },
 
@@ -5219,7 +5219,7 @@ const Wardrobe = {
     if (!key || /^(__proto__|constructor|prototype)$/.test(key)) return false;
     const c = this.cfg();
     if (!Object.prototype.hasOwnProperty.call(c.presets, key) && Object.keys(c.presets).length >= 40) {
-      UI.toast(T('En çok 40 kombin saklanabilir.', 'Up to 40 outfits can be stored.'), 'warn', 2500);
+      UI.toast('Up to 40 outfits can be stored.', 'warn', 2500);
       return false;
     }
     c.presets[key] = this.outfit();

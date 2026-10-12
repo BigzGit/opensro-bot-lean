@@ -38,14 +38,14 @@ const wdAnimFam = (tf) => WD_ANIM_FAM[wdTid4(tf)] || '';
 // Job mode the game derives from inventory slot 8 (ac(), index L4334): 1..3 trader /
 // thief / hunter, anything else normal; party matching and its commands follow it.
 const wdJobMode = (tf) => ((Number(tf) >>> 0) & 2046) === 940 && wdTid4(tf) >= 1 && wdTid4(tf) <= 3;
-// Case folding for search: Turkish İ/I and English i/I all compare equal.
-const wdFold = (s) => String(s || '').toLocaleLowerCase('tr').replace(/ı/g, 'i');
+// Case folding for search.
+const wdFold = (s) => String(s || '').toLowerCase();
 
 function wdSafe(what, fn) {
   try {
     return fn();
   } catch (e) {
-    Log.warn('Görünüm Stüdyosu (' + what + '): ' + ((e && e.message) || e));
+    Log.warn('Wardrobe (' + what + '): ' + ((e && e.message) || e));
     return undefined;
   }
 }
@@ -75,66 +75,66 @@ function wdGameIcon(ref) {
 
 function wdSlotName(s) {
   const n = typeof Items !== 'undefined' && Items.slotName ? Items.slotName(s) : '';
-  return n || [T('Baş', 'Head'), T('Gövde', 'Chest'), T('Omuz', 'Shoulder'), T('Eller', 'Hands'), T('Bacaklar', 'Legs'), T('Ayaklar', 'Feet'), T('Silah', 'Weapon'), T('Kalkan', 'Shield'), T('Meslek kıyafeti', 'Job suit')][s] || '';
+  return n || ['Head', 'Chest', 'Shoulder', 'Hands', 'Legs', 'Feet', 'Weapon', 'Shield', 'Job suit'][s] || '';
 }
 
 function wdAvatarName(s) {
-  return [T('Şapka', 'Hat'), T('Elbise', 'Dress'), T('Aksesuar', 'Attachment'), T('Bayrak', 'Flag')][s] || '';
+  return ['Hat', 'Dress', 'Attachment', 'Flag'][s] || '';
 }
 
 function wdKindName(kind) {
   const k = {
-    SWORD: () => T('Kılıç', 'Sword'),
-    BLADE: () => T('Pala', 'Blade'),
-    SPEAR: () => T('Mızrak', 'Spear'),
-    TBLADE: () => T('Teber', 'Glaive'),
-    BOW: () => T('Yay', 'Bow'),
-    EUSWORD: () => T('Tek elli kılıç', 'One-handed sword'),
-    TSWORD: () => T('İki elli kılıç', 'Two-handed sword'),
-    AXE: () => T('Çift balta', 'Dual axe'),
-    DARKSTAFF: () => T('Kara asa', 'Dark staff'),
-    TSTAFF: () => T('İki elli asa', 'Two-handed staff'),
-    CROSSBOW: () => T('Arbalet', 'Crossbow'),
-    DAGGER: () => T('Hançer', 'Dagger'),
-    HARP: () => T('Arp', 'Harp'),
-    STAFF: () => T('Asa', 'Staff'),
-    FORT: () => T('Kale silahı', 'Fortress weapon'),
-    SHIELD: () => T('Kalkan', 'Shield'),
+    SWORD: () => 'Sword',
+    BLADE: () => 'Blade',
+    SPEAR: () => 'Spear',
+    TBLADE: () => 'Glaive',
+    BOW: () => 'Bow',
+    EUSWORD: () => 'One-handed sword',
+    TSWORD: () => 'Two-handed sword',
+    AXE: () => 'Dual axe',
+    DARKSTAFF: () => 'Dark staff',
+    TSTAFF: () => 'Two-handed staff',
+    CROSSBOW: () => 'Crossbow',
+    DAGGER: () => 'Dagger',
+    HARP: () => 'Harp',
+    STAFF: () => 'Staff',
+    FORT: () => 'Fortress weapon',
+    SHIELD: () => 'Shield',
   }[kind];
   return k ? k() : kind || '';
 }
 
 function wdClassName(cls, race) {
   const eu = race === 'EU';
-  if (cls === 'CLOTHES') return eu ? T('Cüppe', 'Robe') : T('Giysi', 'Garment');
-  if (cls === 'LIGHT') return eu ? T('Hafif zırh', 'Light armour') : T('Koruyucu', 'Protector');
-  if (cls === 'HEAVY') return eu ? T('Ağır zırh', 'Heavy armour') : T('Zırh', 'Armour');
+  if (cls === 'CLOTHES') return eu ? 'Robe' : 'Garment';
+  if (cls === 'LIGHT') return eu ? 'Light armour' : 'Protector';
+  if (cls === 'HEAVY') return eu ? 'Heavy armour' : 'Armour';
   return '';
 }
 
 function wdBodyName(body) {
   return (
     {
-      CH_M: () => T('Çinli erkek', 'Chinese male'),
-      CH_W: () => T('Çinli kadın', 'Chinese female'),
-      EU_M: () => T('Avrupalı erkek', 'European male'),
-      EU_W: () => T('Avrupalı kadın', 'European female'),
+      CH_M: () => 'Chinese male',
+      CH_W: () => 'Chinese female',
+      EU_M: () => 'European male',
+      EU_W: () => 'European female',
     }[body] || (() => '—')
   )();
 }
 
 function wdSoxName(n) {
-  return n ? wdText(['PARAM_RARE_FIRST', 'PARAM_RARE_SECOND', 'PARAM_RARE_THIRD'][n - 1], [T('Yıldız Mührü (Star)', 'Seal of Star'), T('Ay Mührü (Moon)', 'Seal of Moon'), T('Güneş Mührü (Sun)', 'Seal of Sun')][n - 1]) : '';
+  return n ? wdText(['PARAM_RARE_FIRST', 'PARAM_RARE_SECOND', 'PARAM_RARE_THIRD'][n - 1], ['Seal of Star', 'Seal of Moon', 'Seal of Sun'][n - 1]) : '';
 }
 
 // +plus glow band (thresholds from the equipment GLB rows, R7 glow_pets).
 function wdGlow(plus) {
   const p = Number(plus) || 0;
-  if (p >= 9) return { name: T('Mavi-yeşil', 'Blue-green'), color: '#6ff0d4' };
-  if (p >= 7) return { name: T('Altın', 'Gold'), color: '#ffc84a' };
-  if (p >= 5) return { name: T('Pembe', 'Pink'), color: '#ff8ad8' };
-  if (p >= 3) return { name: T('Beyaz', 'White'), color: '#ffffff' };
-  return { name: T('Parlama yok', 'No glow'), color: '#8f8a7a' };
+  if (p >= 9) return { name: 'Blue-green', color: '#6ff0d4' };
+  if (p >= 7) return { name: 'Gold', color: '#ffc84a' };
+  if (p >= 5) return { name: 'Pink', color: '#ff8ad8' };
+  if (p >= 3) return { name: 'White', color: '#ffffff' };
+  return { name: 'No glow', color: '#8f8a7a' };
 }
 
 // Parsed codename: weapons {race, kind, deg, grade, sox, honor}, armour {race, sex,
@@ -192,14 +192,14 @@ const WdData = {
         Assets.texts(),
         Items.ready(),
       ]);
-      if (!wd || !Array.isArray(wd.items)) throw new Error(T('kıyafet kataloğu okunamadı', 'wardrobe catalogue unavailable'));
+      if (!wd || !Array.isArray(wd.items)) throw new Error('wardrobe catalogue unavailable');
       this.build(wd, Array.isArray(models) ? models : [], texts || {});
       return true;
     })()
       .catch((e) => {
         this.failedAt = now();
         this.error = String((e && e.message) || e);
-        Log.warn('Görünüm Stüdyosu kataloğu yüklenemedi: ' + this.error);
+        Log.warn('Wardrobe catalogue could not be loaded: ' + this.error);
         return false;
       })
       .finally(() => {
@@ -444,7 +444,7 @@ const Wardrobe = {
       const f = WdData.formulaTf(row);
       if (f && f !== real && !this.warned.has(key)) {
         this.warned.add(key);
-        Log.warn(`Görünüm Stüdyosu: ${row.code} typeFlags ${real}, formül ${f} (gerçek değer kullanılıyor)`);
+        Log.warn(`Wardrobe: ${row.code} typeFlags ${real}, formula ${f} (using the real value)`);
       }
     };
     const gp = World.gp;
@@ -681,7 +681,7 @@ const Wardrobe = {
     Settings.saveProfile();
     this.applySoon();
     const out = this.myCos();
-    if (pet && (out.p3 || out.p4 || out.pm)) UI.toast(T('Pet ve binek görünümü, hayvanın bir sonraki güncellemesinde (hareket) değişir.', 'The pet and mount look changes with the animal’s next update (movement).'), 'info', 3500);
+    if (pet && (out.p3 || out.p4 || out.pm)) UI.toast('The pet and mount look changes with the animal’s next update (movement).', 'info', 3500);
     if (this.isOpen()) {
       this.renderLeft();
       this.renderHead();
@@ -751,10 +751,10 @@ const Wardrobe = {
       const real = this.realEq(s);
       if (o.hide) delete o.hide;
       else if (s === 8 && real && wdJobMode(real.typeFlags)) {
-        UI.toast(T('Giyili meslek kıyafeti gizlenemez: oyun meslek modunu bu yuvadan okur.', 'A worn job suit cannot be hidden: the game reads the job mode from this slot.'), 'warn', 4000);
+        UI.toast('A worn job suit cannot be hidden: the game reads the job mode from this slot.', 'warn', 4000);
       } else {
         o.hide = true;
-        if (s === 6 && real) UI.toast(T('Silah gizliyken skill animasyonları ve vuruş efektleri oynamayabilir.', 'With the weapon hidden, skill animations and hit effects may not play.'), 'warn', 4000);
+        if (s === 6 && real) UI.toast('With the weapon hidden, skill animations and hit effects may not play.', 'warn', 4000);
       }
       this.tidyEq(s);
     } else if (id[0] === 'a') {
@@ -771,7 +771,7 @@ const Wardrobe = {
     const pets = this.petKey();
     this.useOutfit({ eq: {}, av: {}, pet: { atk: 0, pick: 0, mount: 0 }, hideAvatars: false });
     this.changed(this.petKey() !== pets);
-    UI.toast(T('Gerçek görünüme dönüldü ("Geri al" ile eski kombine dönebilirsiniz).', 'Back to the real look ("Undo" restores the previous outfit).'), 'info', 3000);
+    UI.toast('Back to the real look ("Undo" restores the previous outfit).', 'info', 3000);
     if (this.isOpen()) this.renderPane();
   },
 
@@ -893,7 +893,7 @@ const Wardrobe = {
     if (!key || /^(__proto__|constructor|prototype)$/.test(key)) return false;
     const c = this.cfg();
     if (!Object.prototype.hasOwnProperty.call(c.presets, key) && Object.keys(c.presets).length >= 40) {
-      UI.toast(T('En çok 40 kombin saklanabilir.', 'Up to 40 outfits can be stored.'), 'warn', 2500);
+      UI.toast('Up to 40 outfits can be stored.', 'warn', 2500);
       return false;
     }
     c.presets[key] = this.outfit();
