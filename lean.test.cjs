@@ -940,7 +940,7 @@ test('anti-stuck can be switched off and does not run while hunting is stopped',
   assert.equal(f.AntiStuck.recoveries, 0); f.Settings.profile.hunt.antiStuck.enabled = true; f.Hunt.stop(); idleFor(f, 400000);
   assert.equal(f.AntiStuck.recoveries, 0);
 });
-test('SoX-only collects Star, Moon and Sun gear and leaves gold, potions and plain gear', () => {
+test('SoX-only filters equipment to Star, Moon and Sun gear and leaves other categories alone', () => {
   const f = fixture(), P = f.Settings.profile.hunt.pickup;
   const gear = (gid, ref) => { const e = f.drop(gid, 44); e.refObjId = ref; e.name = 'Sword'; return e; };
   const plain = gear(40, 900), star = gear(41, 901), moon = gear(42, 902), sun = gear(43, 903), potion = f.drop(44, 2284);
@@ -951,9 +951,10 @@ test('SoX-only collects Star, Moon and Sun gear and leaves gold, potions and pla
   f.Items.data.set(903, { name: 'Sun', icon: '', code: 'ITEM_CH_SWORD_01_C_LEGEND' });
   assert.equal(f.Loot.allowed(plain), true); assert.equal(f.Loot.allowed(potion), true); assert.equal(f.Loot.allowed(gold), true);
   P.soxOnly = true;
-  assert.deepEqual([plain, star, moon, sun, potion, gold].map(e => f.Loot.allowed(e)), [false, true, true, true, false, false]);
+  assert.deepEqual([plain, star, moon, sun, potion, gold].map(e => f.Loot.allowed(e)), [false, true, true, true, true, true]);
   assert.deepEqual([star, moon, sun].map(e => f.Items.sox(e.refObjId)), [1, 2, 3]);
-  P.include = 'potion'; assert.equal(f.Loot.allowed(potion), false);
+  P.include = 'sword'; assert.equal(f.Loot.allowed(plain), false); P.include = '';
+  P.potions = false; P.others = false; P.gold = false; assert.equal(f.Loot.allowed(potion), false); assert.equal(f.Loot.allowed(gold), false);
   P.soxOnly = false; assert.equal(f.Loot.allowed(plain), true);
 });
 test('SoX-only takes nothing until the item catalogue is loaded', () => {

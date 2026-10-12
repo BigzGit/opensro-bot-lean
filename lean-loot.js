@@ -110,8 +110,8 @@ const Loot = {
     if (splitList(P.exclude).some(s => name.includes(s))) return false;
     const included = splitList(P.include).some(s => name.includes(s));
     const gold = ItemType.isGold(tf);
-    // SoX-only overrides the category switches and name inclusions: anything else, gold included, is left on the ground.
-    if (P.soxOnly) { if (!ItemType.isEquipment(tf) || !this.sox(e)) return false; }
+    // SoX-only narrows equipment to Star/Moon/Sun gear; every other category keeps its own switch.
+    if (P.soxOnly && ItemType.isEquipment(tf)) { if (!this.sox(e)) return false; }
     else if (!included && !P[this.category(tf)]) return false;
     const pet = this.petMode() ? this.pet() : null;
     if (this.petMode() && (!pet || !Number.isInteger(pet.rec.commandMode) || (pet.rec.commandMode & 128) || dist2D(pet.ent, e) > 500)) return false;
