@@ -1049,6 +1049,27 @@ test('auto mastery follows the game rules: level cap, skill points, free level 0
   f = masteryFixture(); f.Stats.levels = { 1: { masteryTrainSpCost: 1 } }; f.Settings.profile.mastery.ids = [257]; f.Controller.tick();
   assert.deepEqual(trains(f), []); assert.match(f.AutoMastery.status(), /price unknown/);
 });
+test('auto mastery can leave a gap below the character level', () => {
+  assert.equal(fixture().Settings.profile.mastery.gap, 0);
+  // Level 30 character, mastery 257 at 28: gap 0 allows 29 and 30; gap 2 stops at 28.
+  let f = masteryFixture({ masteries: [{ id: 257, level: 28 }, { id: 273, level: 0 }] }); f.Stats.levels = { 28: { masteryTrainSpCost: 5 }, 27: { masteryTrainSpCost: 5 }, 1: { masteryTrainSpCost: 1 } };
+  f.Settings.profile.mastery.ids = [257]; f.Controller.tick(); assert.deepEqual(trains(f), [257]);
+  f = masteryFixture({ masteries: [{ id: 257, level: 28 }, { id: 273, level: 0 }] }); f.Stats.levels = { 28: { masteryTrainSpCost: 5 } };
+  f.Settings.profile.mastery.ids = [257]; f.Settings.profile.mastery.gap = 2; f.Controller.tick();
+  assert.deepEqual(trains(f), []); assert.match(f.AutoMastery.status(), /at your limit \(28, 2 below your level\)/);
+  f = masteryFixture({ masteries: [{ id: 257, level: 27 }, { id: 273, level: 0 }] }); f.Stats.levels = { 27: { masteryTrainSpCost: 5 } };
+  f.Settings.profile.mastery.ids = [257]; f.Settings.profile.mastery.gap = 2; f.Controller.tick(); assert.deepEqual(trains(f), [257], 'one level of room remains');
+  // The gap moves with the character level and the next selected mastery is used when one is held back.
+  f = masteryFixture({ masteries: [{ id: 257, level: 28 }, { id: 273, level: 0 }] }); f.Stats.levels = { 28: { masteryTrainSpCost: 5 } };
+  f.Settings.profile.mastery.gap = 2; f.Controller.tick(); assert.deepEqual(trains(f), [273]);
+  f = masteryFixture({ level: 100, masteries: [{ id: 257, level: 119 }] }); f.Stats.levels = { 119: { masteryTrainSpCost: 5 } };
+  f.Settings.profile.mastery.ids = [257]; f.Controller.tick(); assert.deepEqual(trains(f), [], 'never past 120 or the character level');
+  // Bad saved values cannot widen the limit.
+  f = masteryFixture({ masteries: [{ id: 257, level: 29 }] }); f.Stats.levels = { 29: { masteryTrainSpCost: 5 } };
+  f.Settings.profile.mastery.ids = [257]; f.Settings.profile.mastery.gap = -5; f.Controller.tick(); assert.deepEqual(trains(f), [257]);
+  f = masteryFixture({ masteries: [{ id: 257, level: 29 }] }); f.Stats.levels = { 29: { masteryTrainSpCost: 5 } };
+  f.Settings.profile.mastery.ids = [257]; f.Settings.profile.mastery.gap = 'x'; f.Controller.tick(); assert.deepEqual(trains(f), [257]);
+});
 test('auto mastery is off by default, ignores dead characters and pending training, and backs off after a refusal', () => {
   assert.equal(fixture().Settings.profile.mastery.enabled, false);
   let f = masteryFixture(); f.Settings.profile.mastery.enabled = false; f.Controller.tick(); assert.deepEqual(trains(f), []);

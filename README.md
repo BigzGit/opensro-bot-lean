@@ -62,7 +62,7 @@ If something stalls, use **Settings → Send bug report**, which opens a draggab
 
 ## Auto mastery
 
-Under **Settings → Auto mastery**, tick **Raise selected masteries automatically** and tick the masteries you want, in the order you want them raised. The bot spends skill points one level at a time and waits for each level to be confirmed. It follows the game's rules: a mastery cannot pass your character level or 120, level 0 is free, and otherwise the price is the table cost of the mastery's current level. It works while hunting is stopped and does nothing while you are dead. If the server refuses a level (for example its mastery total limit), the bot waits a minute before trying that mastery again. It is off by default and saved per character; it never touches skills.
+Under **Settings → Auto mastery**, tick **Raise selected masteries automatically** and tick the masteries you want, in the order you want them raised. The bot spends skill points one level at a time and waits for each level to be confirmed. Set **Keep this many levels below my level** to leave a gap: with a gap of 2 on a level 30 character, no mastery goes past 28. It follows the game's rules: a mastery cannot pass your character level or 120, level 0 is free, and otherwise the price is the table cost of the mastery's current level. It works while hunting is stopped and does nothing while you are dead. If the server refuses a level (for example its mastery total limit), the bot waits a minute before trying that mastery again. It is off by default and saved per character; it never touches skills.
 
 ## Anti-stuck
 

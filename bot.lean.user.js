@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.54
+// @version      1.2.55
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.54';
+const VERSION = '1.2.55';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -184,7 +184,7 @@ const Store = {
 const CLASS_KEYS = ['normal', 'champion', 'giant', 'party', 'elite', 'unique'];
 const DEFAULT_PROFILE = {
   alchemy: { target: 3, limit: 20, elixir: 0, powder: false },
-  mastery: { enabled: false, ids: [] },
+  mastery: { enabled: false, ids: [], gap: 0 },
   party: { autoAcceptMatching: false, autoRecruit: false, autoRes: false, acceptRes: false, resRadius: 300, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true },
   wardrobe: { on: true, phantom: true, realAnim: true, hideAvatars: false,
     eq: {}, av: {}, pet: { atk: 0, pick: 0, mount: 0 }, presets: {}, undo: null },
@@ -3584,12 +3584,16 @@ const MASTERY_NAMES = { 257: 'Bicheon', 258: 'Heuksal', 259: 'Pacheon', 273: 'Co
 const AutoMastery = {
   pending: null, blocked: new Map(), message: 'Auto mastery off.', lastAt: -Infinity, note: null,
   cfg() { return Settings.profile.mastery; },
+  gap() { const g = Number(this.cfg().gap); return Number.isInteger(g) ? Math.max(0, Math.min(50, g)) : 0; },
   name(id) { return MASTERY_NAMES[id] || 'Mastery #' + id; },
   reset() { this.pending = null; this.blocked.clear(); this.message = this.cfg().enabled ? 'Waiting for character data.' : 'Auto mastery off.'; },
   rows() { return (World.gp?.progression?.masteries || []).filter(m => m && Number.isInteger(m.id) && Number.isInteger(m.level)); },
   // Why a mastery cannot be raised right now, or '' when it can.
   reason(row, progression) {
-    if (row.level >= 120 || !Number.isInteger(progression.level) || row.level >= progression.level) return 'at the character level limit';
+    if (!Number.isInteger(progression.level)) return 'character level unknown';
+    // The game stops a mastery at the character level (or 120); the gap keeps it that many levels below.
+    const limit = Math.min(120, progression.level - this.gap());
+    if (row.level >= limit) return this.gap() ? 'at your limit (' + limit + ', ' + this.gap() + ' below your level)' : 'at the character level limit';
     if (row.level === 0) return '';
     const cost = Stats.levels?.[row.level]?.masteryTrainSpCost;
     if (!Number.isInteger(cost)) return 'price unknown';
@@ -3646,7 +3650,8 @@ const AutoMastery = {
       }));
     }
     this.note = el('p', this.message, 'muted');
-    box.append(this.note, el('p', 'Raises one level at a time using skill points, in the order you tick them, and moves on when a mastery reaches your character level (or 120). Level 0 masteries are free; otherwise the price is the table cost of its current level. It works while hunting is stopped and does nothing while you are dead. If the server refuses a level (for example its mastery total limit) the bot waits a minute before trying that mastery again.', 'muted'));
+    box.append(UI.number('Keep this many levels below my level', () => this.cfg().gap, v => this.cfg().gap = v, 0, 50),
+      this.note, el('p', 'Raises one level at a time using skill points, in the order you tick them, and moves on when a mastery reaches your character level (or 120), minus the gap if you set one. Level 0 masteries are free; otherwise the price is the table cost of its current level. It works while hunting is stopped and does nothing while you are dead. If the server refuses a level (for example its mastery total limit) the bot waits a minute before trying that mastery again.', 'muted'));
     parent.append(box);
   },
 };
