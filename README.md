@@ -51,7 +51,7 @@ Stops at the target, attempt limit or missing materials. Failures can reduce +, 
 
 Leave **Revive in town and reverse to last scroll point** enabled under the town-cycle settings. With the town cycle enabled, the bot revives, completes town services and reverses back to hunt. Hunting resumes within 30 metres of the last scroll point, or within your saved hunting area after death. Carry reverse scrolls.
 
-If something stalls, use **Settings → Send bug report**. Preview the diagnostics, optionally add an explanation and screenshot, then click **Send to developer**. Check screenshots for private details. Nothing sends automatically. **Copy diagnostics** remains available.
+If something stalls, use **Settings → Send bug report**. Preview the diagnostics, optionally add an explanation and screenshot, then click **Send to developer**. Check screenshots for private details. Nothing sends automatically.
 
 ## Anti-stuck
 
@@ -74,6 +74,6 @@ Open **Settings → Session stats** for hunting time, XP/hour, net gold, confirm
 
 ## If something gets stuck
 
-Read the return status on the main panel. Use **Supplies → Save return diagnostics** and share the downloaded file when reporting a problem. It keeps recent states even after toggling the bot, but reloading clears that history.
+Read the return status on the main panel. Use **Settings → Send bug report**; the diagnostics it previews include recent return states, even after toggling the bot. Reloading clears that history.
 
 After an update, reload the game and check the version shown in the panel.

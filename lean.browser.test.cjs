@@ -85,11 +85,11 @@ const server = http.createServer((req, res) => {
     await page.evaluate(() => {
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => { window.copiedDiagnostics = text; } } });
     });
-    await page.getByRole('button', { name: 'Copy diagnostics', exact: true }).click();
+    await page.evaluate(() => SROLean.diagnostics.copy());
     const reportCopy = JSON.parse(await page.evaluate(() => window.copiedDiagnostics));
     assert.equal(reportCopy.app, 'nixxane bot');
     await page.evaluate(() => { navigator.clipboard.writeText = async () => { throw Error('blocked'); }; });
-    await page.getByRole('button', { name: 'Copy diagnostics', exact: true }).click();
+    await page.evaluate(() => SROLean.diagnostics.copy());
     const reportField = page.getByRole('textbox', { name: 'Bug report diagnostics', exact: true });
     await reportField.waitFor();
     assert.equal(JSON.parse(await reportField.inputValue()).app, 'nixxane bot');
@@ -190,14 +190,6 @@ const server = http.createServer((req, res) => {
     assert.equal(await townToggle.isChecked(), false);
     await townToggle.check(); assert.equal(await page.evaluate(() => SROLean.town.cfg().enabled), true);
 
-    const reportDownload = page.waitForEvent('download');
-    await page.getByRole('button', { name: 'Save return diagnostics', exact: true }).click();
-    const downloaded = await reportDownload;
-    assert.equal(downloaded.suggestedFilename(), 'nixxane-bot-return-diagnostics.json');
-    const report = JSON.parse(fs.readFileSync(await downloaded.path(), 'utf8'));
-    assert.equal(report.version, await page.evaluate(() => SROLean.version));
-    assert.ok(report.history.some(row => row.event === 'export'));
-    assert.equal(report.history.some(row => 'character' in row || 'inventory' in row), false);
     await townToggle.uncheck();
     const reviveToggle = page.getByLabel('Revive in town and reverse to last scroll point', { exact: true });
     assert.equal(await reviveToggle.isChecked(), true);
@@ -354,7 +346,8 @@ const server = http.createServer((req, res) => {
     await page.getByLabel('Chime when pet bag is full', { exact: true }).uncheck();
     assert.equal(await page.evaluate(() => SROLean.settings.profile.hunt.pickup.petFullSound), false);
     await page.getByLabel('Chime when pet bag is full', { exact: true }).check();
-    await page.getByRole('button', { name: 'Pet: elixirs only', exact: true }).click();
+    await page.getByLabel('Collector', { exact:true }).selectOption('pet');
+    await page.getByRole('button', { name: 'Elixirs only', exact: true }).click();
     assert.equal(await page.getByLabel('Collector', { exact:true }).inputValue(), 'pet');
     assert.equal(await page.getByLabel('Elixirs', { exact:true }).isChecked(), true);
     assert.equal(await page.getByLabel('Gold', { exact:true }).isChecked(), false);
@@ -376,7 +369,7 @@ const server = http.createServer((req, res) => {
       return r.left >= 0 && r.right <= innerWidth;
     }), true);
     await page.screenshot({ path: __dirname + '/lean-mobile.png', fullPage: true });
-    await page.getByRole('button', { name: 'Copy diagnostics', exact: true }).click();
+    await page.evaluate(() => SROLean.diagnostics.copy());
     await page.getByRole('textbox', { name: 'Bug report diagnostics', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Close report', exact: true }).click();
     assert.deepEqual(errors, []);
@@ -387,7 +380,7 @@ const server = http.createServer((req, res) => {
     await page.setViewportSize({ width:1200,height:1000 });
     await page.evaluate(() => { SROLean.world.gp.skills.push(3404); });
     await page.getByRole('button', { name:'Combat',exact:true }).click();
-    await page.getByRole('button', { name:'Skills',exact:true }).click();
+    await page.getByRole('button', { name:'Buffs & imbue',exact:true }).click();
     await page.getByRole('button', { name:'Use imbue Thunderdragon force',exact:true }).click();
     assert.equal(await page.evaluate(() => SROLean.settings.profile.macro.imbue.id),3404);
     assert.match(await page.locator('fieldset').filter({has:page.locator('legend', {hasText:'Weapon imbue'})}).innerText(),/Lv 13/);

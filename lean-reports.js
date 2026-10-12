@@ -102,7 +102,7 @@ const Reports = {
   async send() {
     if (!this.draft || this.sending || this.capturing || this.draft.sent || now() < this.cooldownUntil) return;
     const text = this.text();
-    if (new Blob([text]).size > 128 * 1024) { this.notice('Report is too large. Use Copy diagnostics instead.'); return; }
+    if (new Blob([text]).size > 128 * 1024) { this.notice('Report is too large. Remove the screenshot or shorten the explanation.'); return; }
     const body = new FormData(); body.append('report', text);
     if (this.draft.image) body.append('screenshot', this.draft.image, this.draft.image.type === 'image/png' ? 'screenshot.png' : 'screenshot.jpg');
     this.sending = true; this.render(); this.notice('Sending report…');
@@ -119,9 +119,9 @@ const Reports = {
         this.draft.image = null; this.draft.url = '';
         this.notice('Report sent to the developer’s Discord. Thank you.');
       } else if (response.status === 400 || response.status === 413) {
-        this.notice('Report rejected. Remove the screenshot or use Copy diagnostics.');
+        this.notice('Report rejected. Remove the screenshot and try again.');
       } else if (response.status === 403 || response.status === 503) {
-        this.notice('Reporting is unavailable. Use Copy diagnostics for now.');
+        this.notice('Reporting is unavailable right now. Try again later.');
       } else {
         this.notice('Delivery could not be confirmed. Check with the developer before sending again.');
       }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.43
+// @version      1.2.44
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.43';
+const VERSION = '1.2.44';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -5592,7 +5592,7 @@ const Reports = {
   async send() {
     if (!this.draft || this.sending || this.capturing || this.draft.sent || now() < this.cooldownUntil) return;
     const text = this.text();
-    if (new Blob([text]).size > 128 * 1024) { this.notice('Report is too large. Use Copy diagnostics instead.'); return; }
+    if (new Blob([text]).size > 128 * 1024) { this.notice('Report is too large. Remove the screenshot or shorten the explanation.'); return; }
     const body = new FormData(); body.append('report', text);
     if (this.draft.image) body.append('screenshot', this.draft.image, this.draft.image.type === 'image/png' ? 'screenshot.png' : 'screenshot.jpg');
     this.sending = true; this.render(); this.notice('Sending report…');
@@ -5609,9 +5609,9 @@ const Reports = {
         this.draft.image = null; this.draft.url = '';
         this.notice('Report sent to the developer’s Discord. Thank you.');
       } else if (response.status === 400 || response.status === 413) {
-        this.notice('Report rejected. Remove the screenshot or use Copy diagnostics.');
+        this.notice('Report rejected. Remove the screenshot and try again.');
       } else if (response.status === 403 || response.status === 503) {
-        this.notice('Reporting is unavailable. Use Copy diagnostics for now.');
+        this.notice('Reporting is unavailable right now. Try again later.');
       } else {
         this.notice('Delivery could not be confirmed. Check with the developer before sending again.');
       }
@@ -5677,12 +5677,6 @@ const UI = {
     this.reportBox.hidden = false;
     this.reportDescription.value = Reports.draft.description;
     this.reportStatus.textContent = Reports.draft.sent ? 'Report already sent. Close this preview to prepare another.' : 'Review the report before sending. Screenshot is optional.';
-  },
-  exportDiagnostics() {
-    Town.record('export');
-    const url = URL.createObjectURL(new Blob([JSON.stringify({ version: VERSION, history: Town.history }, null, 2)], { type: 'application/json' }));
-    const link = el('a'); link.href = url; link.download = 'nixxane-bot-return-diagnostics.json'; link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
   },
   button(text, action) {
     const b = el('button', text);
@@ -5755,7 +5749,7 @@ const UI = {
     for (const name of ['Combat', 'Loot', 'Supplies', 'Alchemy', 'Wardrobe', 'Settings']) this.nav.append(this.button(name, () => { this.current = name; this.draw(); }));
     this.pane = el('div', null, 'pane'); this.feedback = el('div', null, 'feedback'); this.feedback.setAttribute('role', 'status');
     this.waitNote = el('div', '', 'waiting'); this.waitNote.setAttribute('role', 'status');
-    this.body.append(this.status, this.waitNote, this.row(this.button('Copy diagnostics', () => { void Diagnostics.copy(); })), controls, this.nav, this.pane, this.feedback);
+    this.body.append(this.status, this.waitNote, controls, this.nav, this.pane, this.feedback);
     for (const corner of ['lu', 'mu', 'ru', 'ls', 'rs', 'ld', 'md', 'rd']) panel.append(el('div', null, 'frame ' + corner));
     panel.append(header, this.body); this.root.append(style, panel);
     this.tip = el('div', null, 'skill-tip'); this.tip.hidden = true; this.root.append(this.tip);
@@ -5908,7 +5902,6 @@ const UI = {
         this.check('Empty classes use Normal rotation', () => M().fallbackToNormal, v => M().fallbackToNormal = v),
         this.check('Use normal attacks', () => M().normalAttack, v => M().normalAttack = v));
       this.skillList(rotation, M().rotations[this.rotationClass]); this.pane.append(rotation);
-      const imbue = this.group('Weapon imbue'); this.imbuePicker(imbue); this.pane.append(imbue);
       this.pane.append(this.group('Combat options',
         this.select('Berserk', [['off', 'Off'], ['strong', 'Champion and above'], ['always', 'Whenever full']], () => M().berserk, v => M().berserk = v),
         this.number('Skill gap (ms)', () => M().castGapMs, v => M().castGapMs = v, 150, 2000, 50)));
@@ -5923,7 +5916,7 @@ const UI = {
       const L = () => H().pickup;
       const options = this.group('Collection');
       options.append(this.select('Collector', [['character', 'Character'], ['pet', 'Pickup pet']], () => L().collector, v => { L().collector = v; Loot.reset(); }),
-        this.button('Pet: elixirs only', () => { L().collector = 'pet'; Loot.reset(); Loot.preset('elixirs'); this.draw(); }));
+);
       options.append(this.check('Chime when pet bag is full', () => L().petFullSound, v => { L().petFullSound = v; Loot.fullAlert = null; }), this.button('Test pet chime', () => Sound.test()));
       this.petNote = el('p', '', 'muted'); options.append(this.petNote);
       options.append(this.row(...[['Elixirs only','elixirs'],['Elixirs + gold','elixirs-gold'],['All items','all']].map(([label,mode]) => this.button(label, () => { Loot.preset(mode); this.draw(); }))));
@@ -5967,7 +5960,7 @@ const UI = {
       services.append(el('p', 'Pet loot: store elixirs only. Sell other unprotected pet items at the saved weapon / repair merchant before repairing. Keep seal/rare equipment and equipment with unknown rarity in the pet. Ordinary equipment is sold regardless of + or blue options. Existing character bag items are never sold.', 'muted'));
       services.append(this.text('Keep in pet (names)', () => town().keep, v => town().keep = v),
         el('p', 'Town buys X-Large potions using the Buy HP/MP switches, low-stock thresholds and refill counts above. Keep each low-stock threshold below its refill target. Potion selections apply to walking-route restock. Returns when the character bag has at most one free slot. Free at least two slots before hunting again; existing character items stay protected. Revival uses the saved town services and a reverse scroll, without using a return scroll in town. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. F8 cancels.', 'muted'));
-      this.townNote = el('p', Town.status(), 'muted'); services.append(this.townNote, this.button('Save return diagnostics', () => this.exportDiagnostics())); this.pane.append(services);
+      this.townNote = el('p', Town.status(), 'muted'); services.append(this.townNote); this.pane.append(services);
     } else if (this.current === 'Alchemy') {
       Alchemy.draw();
     } else if (this.current === 'Wardrobe') {
@@ -6007,8 +6000,7 @@ const UI = {
         this.check('Auto-resurrect party members', () => party().autoRes, v => { party().autoRes = v; Resurrect.reset(); }),
         this.number('Maximum res distance from hunt spot (m)', () => party().resRadius / 10, v => party().resRadius = v * 10, 1, 100),
         el('p', 'Works during hunting and while stopped. Walks into skill range for visible dead members within the maximum radius, casts Rebirth, then returns. During hunting the radius is measured from the saved hunt spot; while stopped it uses your starting position. Collision data is required for walking. Travel stops after 30 seconds or 12 seconds without progress per leg. The member must accept the revival. Travel, shopping and manual control take priority.', 'muted')));
-      this.pane.append(this.group('Profiles', el('p', 'Settings are saved separately for each character. Import copies only bot settings from the original assistant.', 'muted'),
-        this.button('Import original bot settings', () => Settings.importOriginal()),
+      this.pane.append(this.group('Profiles', el('p', 'Settings are saved separately for each character.', 'muted'),
         this.button('Export nixxane bot settings', () => {
           const url = URL.createObjectURL(new Blob([JSON.stringify({ app: 'sro-bot-lean', version: VERSION, profile: Settings.profile }, null, 2)], { type: 'application/json' }));
           const link = el('a'); link.href = url; link.download = 'nixxane-bot-settings.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
