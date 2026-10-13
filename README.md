@@ -75,9 +75,19 @@ Under **Magic stones for the weapon** choose how many **Luck**, **Steady** and *
 
 Stops at the target, attempt limit or missing materials. Failures can reduce +, damage or destroy the weapon. **Stop alchemy**, **Stop all** or **F8** prevents further attempts; a sent attempt can still finish. Unconfirmed results pause without retrying.
 
+## Healing and buffing the party
+
+On the **Party** page tick **Buff and heal party members** (off by default). The bot then supports the party with your own skills, one cast at a time, in this order:
+
+1. **Group heal skill** (a skill without a target), when **Group heal when this many are low** members are below **Group heal below (%)**.
+2. **Heal skill** on the member with the lowest HP below **Heal below (%)**; tick **Heal myself too** to include yourself.
+3. **Party buffs**: pick them from your learned skills that can target a party member. Each goes to every member who does not show it, or only to the names you list under **Only these members**.
+
+It casts only on members you can see within **Support range (m)** (30 by default) and never walks to them. HP is exact for members in view and in tenths otherwise, as the game's party window shows it. A buff that does not appear on the member after two tries waits a minute before the next. It runs while hunting; tick **Also while hunting is stopped** to support a party while you stand still. The top of the page lists the party with HP and MP bars, distance and which assigned buffs each member has. The party matching, resurrection and recruit options are on the same page.
+
 ## Accepting resurrection
 
-Tick **Accept resurrection from party members** under **Settings → Party**. When you are dead and a party member casts Rebirth on you, the bot answers Yes, whether or not hunting is running. Offers from players outside your party, and mutation offers, are left to you. The switch is off by default and saved per character.
+Tick **Accept resurrection from party members** on the **Party** page. When you are dead and a party member casts Rebirth on you, the bot answers Yes, whether or not hunting is running. Offers from players outside your party, and mutation offers, are left to you. The switch is off by default and saved per character.
 
 If hunting was running when the character died, it resumes after a resurrection you accepted, whatever **On death** is set to: at the hunting spot it simply starts, up to 600 m away it walks back first, and anywhere else it stays stopped and tells you to use **Return & hunt**. The memory lasts 15 minutes; a revive you or the bot does yourselves resumes nothing. While this switch is on and an online party member is in view, a bot set to revive (or the town cycle's revive) waits up to 20 seconds instead of 5 before reviving itself, and never revives while a resurrection offer is open.
 

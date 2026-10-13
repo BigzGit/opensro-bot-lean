@@ -18,7 +18,7 @@ const images = ['ic_attack', 'ic_recovery', 'ic_autoget', 'ic_sit'].map((key, i)
 });
 const media = process.argv[4];
 if (media) for (const name of ['action/icon_cha_auto_attack', 'action/icon_cha_autoget', 'action/icon_cha_recovery', 'action/icon_cha_alchemy', 'action/icon_cha_shop',
-  'action/icon_cha_helper', 'item/etc/mall_return_scroll', 'item/etc/mall_warehouse_ticket', 'item/etc/all_potion_03', 'item/etc/mall_repair_hammer',
+  'action/icon_cha_helper', 'action/icon_cha_party', 'item/etc/mall_return_scroll', 'item/etc/mall_warehouse_ticket', 'item/etc/all_potion_03', 'item/etc/mall_repair_hammer',
   'item/etc/mall_reverse_return_scroll', '../interface/minimap/mm_map_button']) {
   const raw = fs.readFileSync(path.join(media, 'icon', name + '.png'));
   images.push({ raw, compressed: zlib.gzipSync(raw), path: path.posix.normalize(`/assets/images/Media_extracted/icon/${name}.png`), transport: `/assets/test-icons/real-${images.length}.png.gz` });
@@ -116,10 +116,10 @@ const gameplay = { localGid: 1, target: 0, targetPending: false, inventoryPendin
     await tab('Town'); await snap('08-town-triggers');
     await jump('Scroll town cycle'); await snap('08-town-cycle');
     await tab('Alchemy'); await snap('09-alchemy'); await jump('Magic stones for the weapon'); await snap('09b-alchemy-stones');
+    await tab('Party'); await snap('13-party');
     await tab('Settings'); await snap('10-settings');
     await jump('Anti-stuck'); await snap('11-anti-stuck');
     await jump('Auto mastery and skills'); await snap('12-mastery');
-    await jump('Party'); await snap('13-party');
     await page.getByRole('button', { name: 'Send bug report', exact: true }).click();
     await page.getByRole('textbox', { name: 'Report preview', exact: true }).waitFor();
     await page.setViewportSize({ width: 1000, height: 1010 });

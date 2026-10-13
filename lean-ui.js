@@ -195,9 +195,9 @@ const UI = {
     controls.classList.add('controls');
     this.nav = el('nav'); this.nav.setAttribute('aria-label', 'Bot settings');
     // Page icons are the game's own action-bar icons; they show only in the wide window's page list.
-    const navIcons = { Combat: 'action\\icon_cha_auto_attack', Loot: 'action\\icon_cha_autoget', Supplies: 'action\\icon_cha_recovery', Town: 'item\\etc\\mall_return_scroll',
+    const navIcons = { Party: 'action\\icon_cha_party', Combat: 'action\\icon_cha_auto_attack', Loot: 'action\\icon_cha_autoget', Supplies: 'action\\icon_cha_recovery', Town: 'item\\etc\\mall_return_scroll',
       Alchemy: 'action\\icon_cha_alchemy', Wardrobe: 'action\\icon_cha_shop', Settings: 'action\\icon_cha_helper' };
-    for (const name of ['Map', 'Combat', 'Loot', 'Supplies', 'Town', 'Alchemy', 'Wardrobe', 'Settings']) {
+    for (const name of ['Map', 'Combat', 'Party', 'Loot', 'Supplies', 'Town', 'Alchemy', 'Wardrobe', 'Settings']) {
       const tab = this.button(name, () => { this.current = name; this.draw(); });
       if (name === 'Map') this.paintPath(tab, MAP_ART + 'interface/minimap/mm_map_button.png');
       else Icons.paint(tab, navIcons[name] + '.ddj');
@@ -670,6 +670,87 @@ const UI = {
         this.number('Bolts: go to town at or below', () => ammo().bolt.low, v => ammo().bolt.low = v, 0, 9999),
         this.number('Bolts: refill to', () => ammo().bolt.target, v => ammo().bolt.target = v, 1, 10000),
         el('p', 'Bought at the repair merchant after selling pet loot and before repairing. The count includes the stack in your ammunition slot and any spare stacks in the bag. A trip also starts when the count falls to the low-stock number. If the merchant does not sell it, there is no bag space or not enough gold, that item is skipped and the rest of the trip goes on. Equipping the bought ammunition is up to you.', 'muted')));
+    } else if (this.current === 'Party') {
+      const S = () => Settings.profile.party.support;
+      // Live party: HP and MP bars, distance, and which of the assigned buffs each member shows right now.
+      const list = el('div', null, 'members'), rows = el('p', '', 'muted');
+      const renderMembers = () => {
+        const members = Support.members().filter(m => !m.self);
+        if (!members.length) { list.replaceChildren(el('div', 'Not in a party.', 'empty')); return; }
+        list.replaceChildren(...members.map(m => {
+          const row = el('div', null, 'member' + (m.alive ? '' : ' dead'));
+          const bars = el('div', null, 'member-bars');
+          for (const [key, pct] of [['hp', m.hpPct], ['mp', m.mpPct]]) { const bar = el('div', null, 'pbar ' + key), fill = el('i'); fill.style.width = clamp(pct, 0, 100) + '%'; bar.append(fill); bars.append(bar); }
+          const name = el('div', null, 'member-name');
+          name.append(el('strong', m.name), el('span', `Lv ${m.level ?? '?'} · ${!m.alive ? 'dead' : !m.entity ? 'out of view' : Math.round(m.distance / 10) + ' m' + (m.inRange ? '' : ' (out of range)')}`, 'muted'));
+          const buffs = el('div', null, 'member-buffs');
+          for (const b of S().buffs) {
+            const id = Support.skillOf(b), only = splitList(b.only || '');
+            if (!id || only.length && !only.includes(m.name.toLowerCase())) continue;
+            const slot = el('span', null, 'skill-icon' + (m.gid && Support.has(m.gid, id) ? ' on' : ' off')); slot.title = World.skillName(id);
+            slot.append(el('span', '·', 'fallback')); Icons.paint(slot, World.skill(id)?.icon); buffs.append(slot);
+          }
+          row.append(name, bars, buffs); return row;
+        }));
+        rows.textContent = Support.message;
+      };
+      renderMembers(); this.refreshers.push(renderMembers);
+      this.pane.append(this.group('Party members', list, rows));
+      const skillOptions = skills => () => [[0, 'None'], ...skills().map(s => [s.id, s.name || '#' + s.id])];
+      const pick = entry => v => { const id = Number(v); entry().id = id; entry().group = id ? World.skill(id)?.group ?? id : 0; };
+      this.pane.append(this.group('Heal and buff the party',
+        this.check('Buff and heal party members', () => S().enabled, v => { S().enabled = v; Support.reset(); }),
+        this.check('Also while hunting is stopped', () => S().whileStopped, v => S().whileStopped = v),
+        this.number('Support range (m)', () => S().range, v => S().range = v, 5, 60),
+        this.select('Heal skill', skillOptions(() => Support.friendlySkills()), () => Support.skillOf(S().heal) || 0, pick(() => S().heal)),
+        this.number('Heal below (%)', () => S().heal.pct, v => S().heal.pct = v, 10, 95),
+        this.check('Heal myself too', () => S().heal.self, v => S().heal.self = v),
+        this.select('Group heal skill', skillOptions(() => Support.areaSkills()), () => Support.skillOf(S().group) || 0, pick(() => S().group)),
+        this.number('Group heal below (%)', () => S().group.pct, v => S().group.pct = v, 10, 95),
+        this.number('Group heal when this many are low', () => S().group.count, v => S().group.count = v, 2, 8),
+        el('p', 'Casts only on members you can see within the support range; it never walks to them. Order: group heal, then a heal on the lowest member, then missing buffs, one cast at a time. HP is exact for members in view. Your own potions still come first.', 'muted')));
+      // Party buffs: skills that can be cast on another member, each with an optional list of who gets it.
+      const buffs = this.group('Party buffs'), chosen = () => S().buffs;
+      if (!chosen().length) buffs.append(el('div', 'No party buffs chosen. Pick from the icons below.', 'empty'));
+      chosen().forEach((b, i) => {
+        const id = Support.skillOf(b), info = el('div', null, 'skill-info');
+        info.append(el('span', World.skillName(id), 'skill-name'), el('span', this.skillDetails(id), 'skill-detail'));
+        const remove = this.button('×', () => { chosen().splice(i, 1); Settings.saveProfile(); this.draw(); });
+        remove.className = 'mini'; remove.setAttribute('aria-label', 'Delete party buff ' + World.skillName(id));
+        const row = el('div', null, 'skill-row'); row.append(this.skillSlot(id, () => {}, World.skillName(id)), info, remove);
+        buffs.append(row, this.text('Only these members: ' + World.skillName(id), () => b.only || '', v => b.only = v, 'everyone (or names, comma-separated)'));
+      });
+      const grid = el('div', null, 'grid'); grid.setAttribute('aria-label', 'Party buff skill icons');
+      for (const s of Support.friendlySkills()) {
+        const group = s.group ?? s.id, selected = chosen().some(b => b.group === group);
+        grid.append(this.skillSlot(s.id, () => {
+          const index = chosen().findIndex(b => b.group === group);
+          if (index >= 0) chosen().splice(index, 1); else chosen().push({ id: s.id, group, only: '' });
+          Settings.saveProfile(); this.draw();
+        }, (selected ? 'Unselect ' : 'Add ') + World.skillName(s.id), selected));
+      }
+      buffs.append(el('div', 'Learned skills you can cast on a party member', 'muted'), grid);
+      if (!grid.children.length) buffs.append(el('div', 'No learned skill can target a party member.', 'empty'));
+      this.pane.append(buffs);
+      const party = () => Settings.profile.party;
+      this.partyNote = el('p', '', 'muted');
+      this.pane.append(this.group('Party',
+        this.check('Auto-recruit', () => party().autoRecruit, v => { party().autoRecruit = v; Party.reset(); }),
+        this.text('Party listing title', () => party().title, v => party().title = v),
+        this.number('Party minimum level', () => party().min, v => party().min = v, 1, 90),
+        this.number('Party maximum level', () => party().max, v => party().max = v, 1, 90),
+        this.select('Party purpose', [[0, 'Hunting'], [1, 'Quest'], [2, 'Trade'], [3, 'Thief']], () => party().purpose, v => party().purpose = Number(v)),
+        this.check('Share EXP in new parties', () => party().expShare, v => party().expShare = v),
+        this.check('Share items in new parties', () => party().itemShare, v => party().itemShare = v),
+        this.partyNote,
+        el('p', 'Auto-recruit registers your saved listing and accepts applicants whenever enabled, even with hunting stopped. Restores missing listings when space opens and retries unconfirmed registrations after fresh idle state, at most once every 30 seconds. Existing listings and party sharing settings are preserved; edits apply to the next new listing. Turning this off leaves the current listing in place.', 'muted'),
+        this.check('Auto-accept party-matching joins', () => Settings.profile.party.autoAcceptMatching, v => Settings.profile.party.autoAcceptMatching = v),
+        el('p', 'Accepts applications to your own listing while you are the leader or forming a new party. Works while hunting is stopped; turn this switch off to stop accepting. Ordinary invitations are left to you.', 'muted'),
+        this.check('Accept resurrection from party members', () => party().acceptRes, v => party().acceptRes = v),
+        el('p', 'When you are dead and a party member casts Rebirth on you, the bot answers Yes. Works during hunting and while stopped; resurrection offers from other players are left to you.', 'muted'),
+        this.check('Auto-resurrect party members', () => party().autoRes, v => { party().autoRes = v; Resurrect.reset(); }),
+        this.number('Maximum res distance from hunt spot (m)', () => party().resRadius / 10, v => party().resRadius = v * 10, 1, 100),
+        el('p', 'Works during hunting and while stopped. Walks into skill range for visible dead members within the maximum radius, casts Rebirth, then returns. During hunting the radius is measured from the saved hunt spot; while stopped it uses your starting position. Collision data is required for walking. Travel stops after 30 seconds or 12 seconds without progress per leg. The member must accept the revival. Travel, shopping and manual control take priority.', 'muted')));
     } else if (this.current === 'Map') {
       LeanMap.draw(this.pane);
     } else if (this.current === 'Alchemy') {
@@ -696,25 +777,6 @@ const UI = {
         this.number('Stop after failed recoveries', () => H().antiStuck.maxRecoveries, v => H().antiStuck.maxRecoveries = v, 1, 10),
         this.stuckNote,
         el('p', 'Progress means a confirmed kill, XP, gold, a pickup, or damage to your target. Resting, buffing, looting, shopping and town trips do not count against you. First recovery drops the current target; the next ones walk back to the saved hunting spot; after the last one hunting stops.', 'muted')));
-      const party = () => Settings.profile.party;
-      this.partyNote = el('p', '', 'muted');
-      this.pane.append(this.group('Party',
-        this.check('Auto-recruit', () => party().autoRecruit, v => { party().autoRecruit = v; Party.reset(); }),
-        this.text('Party listing title', () => party().title, v => party().title = v),
-        this.number('Party minimum level', () => party().min, v => party().min = v, 1, 90),
-        this.number('Party maximum level', () => party().max, v => party().max = v, 1, 90),
-        this.select('Party purpose', [[0, 'Hunting'], [1, 'Quest'], [2, 'Trade'], [3, 'Thief']], () => party().purpose, v => party().purpose = Number(v)),
-        this.check('Share EXP in new parties', () => party().expShare, v => party().expShare = v),
-        this.check('Share items in new parties', () => party().itemShare, v => party().itemShare = v),
-        this.partyNote,
-        el('p', 'Auto-recruit registers your saved listing and accepts applicants whenever enabled, even with hunting stopped. Restores missing listings when space opens and retries unconfirmed registrations after fresh idle state, at most once every 30 seconds. Existing listings and party sharing settings are preserved; edits apply to the next new listing. Turning this off leaves the current listing in place.', 'muted'),
-        this.check('Auto-accept party-matching joins', () => Settings.profile.party.autoAcceptMatching, v => Settings.profile.party.autoAcceptMatching = v),
-        el('p', 'Accepts applications to your own listing while you are the leader or forming a new party. Works while hunting is stopped; turn this switch off to stop accepting. Ordinary invitations are left to you.', 'muted'),
-        this.check('Accept resurrection from party members', () => party().acceptRes, v => party().acceptRes = v),
-        el('p', 'When you are dead and a party member casts Rebirth on you, the bot answers Yes. Works during hunting and while stopped; resurrection offers from other players are left to you.', 'muted'),
-        this.check('Auto-resurrect party members', () => party().autoRes, v => { party().autoRes = v; Resurrect.reset(); }),
-        this.number('Maximum res distance from hunt spot (m)', () => party().resRadius / 10, v => party().resRadius = v * 10, 1, 100),
-        el('p', 'Works during hunting and while stopped. Walks into skill range for visible dead members within the maximum radius, casts Rebirth, then returns. During hunting the radius is measured from the saved hunt spot; while stopped it uses your starting position. Collision data is required for walking. Travel stops after 30 seconds or 12 seconds without progress per leg. The member must accept the revival. Travel, shopping and manual control take priority.', 'muted')));
       AutoMastery.draw(this.pane);
       this.pane.append(this.group('Profiles', el('p', 'Settings are saved separately for each character.', 'muted'),
         this.button('Export nixxane bot settings', () => {
@@ -741,7 +803,7 @@ const UI = {
     if (this.townNote) this.townNote.textContent = Town.status();
     if (this.current === 'Settings' && AutoMastery.note) AutoMastery.note.textContent = AutoMastery.status();
     if (this.current === 'Settings' && this.stuckNote) this.stuckNote.textContent = AntiStuck.status();
-    if (this.current === 'Settings' && this.partyNote) {
+    if (this.current === 'Party' && this.partyNote) {
       const notes = [Settings.profile.party.autoRecruit ? Party.message : 'Auto-recruit off.'];
       if (Settings.profile.party.autoRes) notes.push(Resurrect.message);
       this.partyNote.textContent = notes.join(' ');

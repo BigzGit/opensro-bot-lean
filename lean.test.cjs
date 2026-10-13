@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, SpeedScroll, AntiStuck, Items, AutoMastery, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, SpeedScroll, AntiStuck, Items, AutoMastery, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -727,6 +727,63 @@ function resurrectionTravel() {
   Object.assign(f.World.skill(10067), { range: 100, actionMs: 1000 });
   f.World.ents.get(50).x = 350; return f;
 }
+// Party support: Tank at 40% HP and Mage at 90% (party status low nibble = HP tenths), both in view within 30 m.
+function support(f) {
+  f.World.gp.social = { localName: 'Me', self: 10, leader: 10, options: 1, members: [{ id: 10, name: 'Me' }, { id: 11, name: 'Tank', status: 0x54 }, { id: 12, name: 'Mage', status: 0x99 }] };
+  f.World.gp.skills = [2001, 2002, 2003];
+  f.World.rebuildCatalog([
+    { id: 2001, group: 900, level: 1, name: 'Heal', targetRequired: true, targets: 1 | 16 | 32 },
+    { id: 2002, group: 901, level: 1, name: 'Guard', targetRequired: true, targets: 1 | 16 | 32 },
+    { id: 2003, group: 902, level: 1, name: 'Healing circle', targetRequired: false, targets: 1 },
+  ]);
+  f.World.ents.set(60, { gid: 60, kind: 'player', name: 'Tank', regionId: 1, x: 150, y: 0, z: 100, appearanceState: [0, 0, 0] });
+  f.World.ents.set(61, { gid: 61, kind: 'player', name: 'Mage', regionId: 1, x: 160, y: 0, z: 100, appearanceState: [0, 0, 0] });
+  const c = f.Settings.profile.party.support;
+  f.Hunt.start(); f.commands.length = 0;
+  return c;
+}
+const casts = f => f.commands.filter(c => c.kind === 'select' || c.kind === 'skill').map(c => c.kind === 'select' ? 'select ' + c.gid : 'skill ' + c.skillId + ' ' + (c.gid ?? 'none'));
+test('party support is off by default, then heals the lowest member in range before anything else', () => {
+  const f = fixture(), c = support(f);
+  assert.equal(c.enabled, false); c.heal = { id: 2001, group: 900, pct: 60, self: false }; c.buffs = [{ id: 2002, group: 901 }];
+  f.Controller.tick(); assert.deepEqual(casts(f), [], 'off by default');
+  c.enabled = true; f.advance(1000); f.Controller.tick();
+  assert.deepEqual(casts(f), ['select 60', 'skill 2001 60'], 'Tank at 40% is healed before any buff');
+  assert.equal(f.Controller.mode, 'party support');
+  f.World.gp.social.members[1].status = 0x5a; f.commands.length = 0;
+  f.advance(2000); f.Controller.tick(); assert.deepEqual(casts(f), ['select 60', 'skill 2002 60'], 'healed: now the buff, Tank first');
+  f.World.gp.attachedEffects = [{ gid: 60, skill: 2002, token: 1 }]; f.commands.length = 0;
+  f.advance(2000); f.Controller.tick(); assert.deepEqual(casts(f), ['select 61', 'skill 2002 61'], 'Tank has it, Mage is next');
+  f.World.gp.attachedEffects.push({ gid: 61, skill: 2002, token: 2 }); f.commands.length = 0;
+  f.advance(2000); f.Controller.tick(); assert.deepEqual(casts(f), [], 'everyone is buffed');
+  assert.match(f.Support.message, /healed and buffed/);
+});
+test('party buffs honour the member list, back off after two misses and never walk to members', () => {
+  const f = fixture(), c = support(f);
+  c.enabled = true; f.World.gp.social.members[1].status = 0x5a; c.buffs = [{ id: 2002, group: 901, only: 'mage' }];
+  f.advance(1000); f.Controller.tick(); assert.deepEqual(casts(f), ['select 61', 'skill 2002 61'], 'only Mage is on the list');
+  f.commands.length = 0; f.advance(2000); f.Controller.tick(); assert.deepEqual(casts(f), [], 'waits to see the buff on Mage');
+  f.advance(5000); f.Controller.tick(); assert.deepEqual(casts(f), ['select 61', 'skill 2002 61'], 'first miss: tried again');
+  f.commands.length = 0; f.advance(7000); f.Controller.tick(); assert.deepEqual(casts(f), [], 'second miss: backs off');
+  f.advance(30000); f.Controller.tick(); assert.deepEqual(casts(f), []);
+  f.advance(31000); f.Controller.tick(); assert.deepEqual(casts(f), ['select 61', 'skill 2002 61'], 'a minute later it tries again');
+  f.commands.length = 0; f.World.ents.get(61).x = 600;
+  f.advance(10000); f.Controller.tick(); assert.equal(casts(f).length, 0, 'out of range: nothing cast');
+  assert.equal(f.commands.some(c => c.kind === 'move' && c.destination?.x === 600), false, 'and no walking to the member');
+});
+test('party support group heal, self heal and the stopped switch', () => {
+  const f = fixture(), c = support(f);
+  c.enabled = true; c.group = { id: 2003, group: 902, pct: 60, count: 2 };
+  f.advance(1000); f.Controller.tick(); assert.deepEqual(casts(f), [], 'only Tank is low: one below the count of two');
+  f.World.gp.social.members[2].status = 0x93; f.commands.length = 0;
+  f.advance(2000); f.Controller.tick(); assert.deepEqual(casts(f), ['skill 2003 none'], 'two below 60%: the area heal, no target');
+  c.group = { id: 0, group: 0, pct: 60, count: 2 }; c.heal = { id: 2001, group: 900, pct: 60, self: true };
+  f.World.gp.social.members[1].status = 0x5a; f.World.gp.social.members[2].status = 0x9a;
+  f.World.gp.vitals = [{ gid: 1, hp: 30, maxHp: 100, mp: 100, maxMp: 100 }]; f.commands.length = 0;
+  f.advance(2000); f.Controller.tick(); assert.deepEqual(casts(f), ['skill 2001 1'], 'heal myself at 30%');
+  f.Hunt.stop(); f.commands.length = 0; f.advance(2000); f.Controller.tick(); assert.deepEqual(casts(f), [], 'hunting stopped');
+  c.whileStopped = true; f.advance(2000); f.Controller.tick(); assert.deepEqual(casts(f), ['skill 2001 1'], 'unless allowed while stopped');
+});
 test('res travel defaults to 30m, approaches, casts and returns before resuming hunting', () => {
   const f = resurrectionTravel(); assert.equal(f.Settings.profile.party.resRadius, 300);
   f.Controller.tick(); assert.equal(f.Resurrect.trip.phase, 'approach'); assert.equal(f.commands.at(-1).kind, 'move');

@@ -23,7 +23,7 @@ for (const name of ['icon/item/etc/mall_return_scroll', 'icon/item/etc/mall_ware
   images.push({ raw, compressed: zlib.gzipSync(raw), path: `/assets/images/Media_extracted/${name}.png`, transport: `/assets/test-icons/${name.replace(/\//g, '-')}.png.gz` });
 }
 // The wide window's page icons (also the game's action icons), each with distinct bytes.
-for (const name of ['autoget', 'recovery', 'alchemy', 'shop', 'helper']) {
+for (const name of ['autoget', 'recovery', 'alchemy', 'shop', 'helper', 'party']) {
   const raw = Buffer.concat([images[0].raw, Buffer.from('nav-' + name)]);
   images.push({ raw, compressed: zlib.gzipSync(raw), path: `/assets/images/Media_extracted/icon/action/icon_cha_${name}.png`, transport: `/assets/test-icons/nav-${name}.png.gz` });
 }
@@ -143,12 +143,13 @@ const server = http.createServer((req, res) => {
         { kind: 'spawn', entity: { gid: 1, kind: 'local-player', refObjId:123, regionId: 1, x: 100, y: 0, z: 100, appearanceState: [0], movementMode: 0 } },
         { kind: 'gameplay', state: { localGid: 1, target: 0, targetPending: false, inventoryPending: false, pendingMoves: 0,
           pose: { regionId: 1, x: 100, y: 0, z: 100 }, progression: { gold: '5000', stats: { maxHp: 100, maxMp: 100 } },
-          inventory: [{slot:6,refObjId:10,typeFlags:(2<<11)|(6<<7)|44,plus:0}], inventorySlotCount: 30, equipmentSlotCount: 13, skills: [5, 6, 7, 8], vitals: [],
+          inventory: [{slot:6,refObjId:10,typeFlags:(2<<11)|(6<<7)|44,plus:0}], inventorySlotCount: 30, equipmentSlotCount: 13, skills: [5, 6, 7, 8, 9], vitals: [],
           skillCatalog: [
             { id: 5, group: 5, name: 'Test attack', icon: 'skill\\test\\skill0.ddj', level: 1, targetRequired: true, targets: 4, mp: 5, cooldownMs: 1000 },
             { id: 6, group: 6, name: 'Test buff', icon: 'skill\\test\\skill1.ddj', level: 1, targetRequired: false, mp: 5, cooldownMs: 1000 },
             { id: 7, group: 7, name: 'Second attack', icon: 'skill\\test\\skill2.ddj', level: 2, targetRequired: true, targets: 4, mp: 20, cooldownMs: 5000 },
             { id: 8, group: 8, name: 'Weapon imbue', icon: 'skill\\test\\skill3.ddj', level: 3, targetRequired: false, mp: 10, cooldownMs: 2000 },
+            { id: 9, group: 9, name: 'Test heal', icon: 'skill\\test\\skill1.ddj', level: 1, targetRequired: true, targets: 1 | 16 | 32, mp: 8, cooldownMs: 1000 },
           ] } },
       ] } } });
     });
@@ -219,6 +220,7 @@ const server = http.createServer((req, res) => {
     await page.getByRole('button',{name:'Start / stop · F8',exact:true}).click();
     await page.evaluate(()=>{SROLean.world.gp.progression=window.statsOriginalProgression;SROLean.stats.reset();});
     assert.equal(await page.getByLabel('Session',{exact:true}).textContent(),'Paused');
+    await page.getByRole('button', { name: 'Party', exact: true }).click();
     assert.equal(await page.getByLabel('Maximum res distance from hunt spot (m)', { exact: true }).inputValue(), '30');
     await page.getByLabel('Maximum res distance from hunt spot (m)', { exact: true }).fill('40');
     await page.getByLabel('Maximum res distance from hunt spot (m)', { exact: true }).dispatchEvent('change');
@@ -297,7 +299,29 @@ const server = http.createServer((req, res) => {
     await page.getByLabel('Use beginner +100% speed scroll automatically', { exact: true }).check();
     assert.equal(await page.evaluate(() => SROLean.settings.profile.potion.speedScroll), true);
     await page.getByLabel('Use beginner +100% speed scroll automatically', { exact: true }).uncheck();
-    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    // Party page: heal and buff the party, the live member list, then the party options that moved here from Settings.
+    await page.getByRole('button', { name: 'Party', exact: true }).click();
+    assert.equal(await page.getByLabel('Buff and heal party members', { exact: true }).isChecked(), false);
+    await page.getByLabel('Buff and heal party members', { exact: true }).check();
+    await page.getByLabel('Heal skill', { exact: true }).selectOption({ label: 'Test heal' });
+    await page.getByLabel('Heal below (%)', { exact: true }).fill('70');
+    await page.getByLabel('Heal below (%)', { exact: true }).dispatchEvent('change');
+    await page.getByRole('button', { name: 'Add Test heal', exact: true }).click();
+    await page.getByLabel('Only these members: Test heal', { exact: true }).fill('Mate');
+    await page.getByLabel('Only these members: Test heal', { exact: true }).dispatchEvent('change');
+    assert.deepEqual(await page.evaluate(() => JSON.parse(JSON.stringify(SROLean.settings.profile.party.support))), {
+      enabled: true, whileStopped: false, range: 30, heal: { id: 9, group: 9, pct: 70, self: false }, group: { id: 0, group: 0, pct: 60, count: 2 },
+      buffs: [{ id: 9, group: 9, only: 'Mate' }] });
+    assert.equal(await page.getByText('Not in a party.', { exact: true }).isVisible(), true);
+    await page.evaluate(() => {
+      SROLean.world.gp.social = { localName: 'TestHero', self: 10, leader: 10, options: 1, members: [{ id: 10, name: 'TestHero', status: 0xaa }, { id: 11, name: 'Mate', level: 31, status: 0x76 }] };
+      SROLean.world.ents.set(70, { gid: 70, kind: 'player', name: 'Mate', regionId: 1, x: 150, y: 0, z: 100, appearanceState: [0] });
+    });
+    await page.waitForFunction(() => /Mate[\s\S]*Lv 31/.test(document.getElementById('sro-bot-lean').shadowRoot.querySelector('.members').textContent));
+    assert.equal(await page.locator('.member .pbar.hp i').evaluate(e => e.style.width), '60%', 'party HP from the status byte');
+    assert.equal(await page.locator('.member-buffs .skill-icon.off').count(), 1, 'the assigned buff is shown as missing');
+    await page.locator('.pane').screenshot({ path: __dirname + '/lean-party-page.png' });
+    await page.evaluate(() => { SROLean.world.ents.delete(70); SROLean.world.gp.social = { members: [] }; SROLean.settings.profile.party.support.enabled = false; });
     assert.equal(await page.getByLabel('Auto-accept party-matching joins', { exact: true }).isChecked(), false);
     await page.getByLabel('Auto-accept party-matching joins', { exact: true }).check();
     await page.evaluate(() => {
@@ -351,7 +375,7 @@ const server = http.createServer((req, res) => {
     assert.deepEqual(await page.evaluate(() => testCommands.filter(c => c.kind === 'party-match-register')), [{ kind: 'party-match-register', registration: { party: 0, type: 3, purpose: 0, min: 1, max: 90, title: 'Browser recruitment' } }]);
     await page.getByLabel('Auto-recruit', { exact: true }).uncheck();
     await page.evaluate(() => { SROLean.world.gp.partyMatching = null; });
-    for (const tab of ['Loot', 'Supplies', 'Settings', 'Combat']) await page.getByRole('button', { name: tab, exact: true }).click();
+    for (const tab of ['Loot', 'Supplies', 'Party', 'Settings', 'Combat']) await page.getByRole('button', { name: tab, exact: true }).click();
     await page.getByRole('button', { name: 'Hunt area', exact: true }).click();
     await page.getByLabel('Hunt radius (m)', { exact: true }).fill('55');
     await page.getByLabel('Hunt radius (m)', { exact: true }).dispatchEvent('change');

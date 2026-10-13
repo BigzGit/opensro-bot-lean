@@ -188,6 +188,9 @@ const Controller = {
           !Restock.activeShop() && !World.gp.storage && Resurrect.tick()) {
         this.mode = 'resurrect'; return;
       }
+      if (!WalkBack.active && !Restock.trip && !Restock.recording && !Restock.activeShop() && !World.gp.storage && Support.tick()) {
+        this.mode = 'party support'; return;
+      }
       if (WalkBack.active) { this.mode = 'returning'; WalkBack.tick(); }
       else if (Restock.recording) this.mode = 'recording';
       else if (Hunt.running) { Hunt.tick(); this.mode = Restock.trip ? 'shopping' : Hunt.state; }
