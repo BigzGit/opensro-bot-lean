@@ -371,7 +371,26 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.getByRole('button', { name: 'Stop all', exact: true }).isVisible(), true);
     await page.keyboard.press('F8');
     assert.equal(await page.evaluate(() => SROLean.hunt.running), false);
+    // The panel's own spot is remembered too: drag it by the title, then a reload (re-mount) puts it back there.
+    const title = page.locator('#sro-bot-lean header').first(), panelStart = await page.locator('#sro-bot-lean').boundingBox();
+    const tb = await title.boundingBox();
+    await page.mouse.move(tb.x + 60, tb.y + 10); await page.mouse.down();
+    await page.mouse.move(tb.x + 60 - 250, tb.y + 10 + 120, { steps: 6 }); await page.mouse.up();
+    const panelMoved = await page.locator('#sro-bot-lean').boundingBox();
+    assert.ok(Math.abs(panelMoved.x - (panelStart.x - 250)) < 3 && Math.abs(panelMoved.y - (panelStart.y + 120)) < 3);
+    assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('sroLean:ui')).panel), { x: Math.round(panelMoved.x), y: Math.round(panelMoved.y) });
+    await page.getByRole('button', { name: 'Minimise bot window', exact: true }).click();
+    await orb.click();
+    const panelBack = await page.locator('#sro-bot-lean').boundingBox();
+    assert.ok(Math.abs(panelBack.x - panelMoved.x) < 3 && Math.abs(panelBack.y - panelMoved.y) < 3, 'restoring returns the panel to its spot');
+    await page.evaluate(() => { const h = document.getElementById('sro-bot-lean'); h.style.left = h.style.top = h.style.right = ''; SROLean.ui.restorePanel(); });
+    const panelReloaded = await page.locator('#sro-bot-lean').boundingBox();
+    assert.ok(Math.abs(panelReloaded.x - panelMoved.x) < 3 && Math.abs(panelReloaded.y - panelMoved.y) < 3, 'a reload puts the panel back');
+    await page.evaluate(() => { localStorage.setItem('sroLean:ui', JSON.stringify({ panel: { x: 99999, y: 99999 } })); SROLean.ui.restorePanel(); });
+    const clamped = await page.locator('#sro-bot-lean').boundingBox();
+    assert.ok(clamped.x + clamped.width <= 1201 && clamped.y >= 0 && clamped.x >= 0, 'an off-screen saved spot is pulled back on screen');
     await page.evaluate(() => localStorage.removeItem('sroLean:ui'));
+    await page.evaluate(() => SROLean.ui.restorePanel());
     await page.getByRole('button', { name: 'Skills', exact: true }).click();
     await page.waitForFunction(() => [...document.getElementById('sro-bot-lean').shadowRoot.querySelectorAll('.slot')].every(s => s.dataset.iconLoaded === 'true'));
     await page.screenshot({ path: __dirname + '/lean-skills-desktop.png', fullPage: true });

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.81
+// @version      1.2.82
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.81';
+const VERSION = '1.2.82';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -6006,7 +6006,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.81", "title": "Minimise the panel to a small icon", "items": ["The × at the top right of the panel now minimises it to a small icon instead of folding it. The bot keeps running.", "The icon's dot shows what the bot is doing: green while hunting, yellow during a town trip, walk back, alchemy or reconnect, red when stopped, dead or in error. Hover it to see the current status, HP and MP.", "The icon glows when something needs you: a warning such as running out of potions or hunting stopping, a SoX pickup, or the character dying. Hovering it or opening the panel clears the glow.", "Drag the icon anywhere. It remembers its spot, and the panel stays minimised after a reload.", "Click the icon or press F7 to bring the panel back. F7 still folds the open panel, Shift+F7 still hides everything, and F8 still starts and stops.", "The window you opened or clicked last (patch notes, bug report) is now drawn above the others."]}, {"version": "1.2.80", "title": "Stone fusion no longer stops at 30", "items": ["The 30-fusion stop is now an optional setting, \"Stop after this many fusions\", under Magic stones for the weapon. 0 means no limit and is the default, so a run goes on until the weapon has the wanted counts, a stone runs out or the game refuses."]}, {"version": "1.2.79", "title": "Stone fusion works: it uses the request the server accepts", "items": ["Fusing Luck, Steady and Immortal stones was refused by the game with code 16 every time. The bot used the page's attribute request, which the server answers with a refusal for these stones; it now uses the magic request, which is the one the server takes them in.", "A fusion can fail on this server: the stone is used up and nothing changes. That is now counted and shown, and the run carries on instead of stopping.", "A refusal now says why, for example that the stone is not of the weapon's degree, or that the weapon is at 6 of that stone or has no free magic option slot."]}, {"version": "1.2.78", "title": "The Alchemy tab fuses Luck, Steady and Immortal stones", "items": ["New **Magic stones for the weapon** section in Alchemy: choose how many Luck, Steady and Immortal stones the weapon should have (up to 6 each; 0 leaves one off).", "**Fuse stones now** only fuses them. **Start alchemy** fuses the missing stones first, then enhances with elixirs as before.", "Luck raises the enhancement success chance, Steady stops durability damage and Immortal stops destruction when an enhancement fails. The stones must be of the weapon's degree and in your bag."], "note": "It stops if a stone is missing, the game refuses a fusion, or after 30 fusions. New in this version and checked against a simulated game: if a fusion does not raise the count, tell us on Discord."}, {"version": "1.2.77", "title": "Arrows and bolts are bought on town trips", "items": ["New **Arrows and bolts** section in Supplies. Tick Buy arrows and/or Buy bolts and set when to go to town and what to refill to.", "They are bought at the repair merchant, after selling pet loot and before repairing. The count includes the stack in your ammunition slot and spare stacks in your bag, and a trip also starts when it falls to your low-stock number.", "If the merchant does not sell the item, there is no bag space or not enough gold, that item is skipped with a notice and the rest of the trip goes on."], "note": "Equipping the bought ammunition is still up to you. Both options are off by default."}, {"version": "1.2.76", "title": "Patch notes open in the game, and updates say what they bring", "items": ["After an update, a window next to the bot panel shows what changed since the version you used before, so you no longer need Discord to see what was fixed.", "Click the version number at the top of the bot panel to read the notes again.", "When a newer version is out, the top of the bot panel says what it brings, for example \"Update 1.2.77 available: …\", so you can tell whether to install it now."], "note": "The bot keeps running while the window is open; close it with Got it."}, {"version": "1.2.75", "title": "The imbue is cast during other skills and no longer wasted", "items": ["A skill takes the weapon imbue when its cast ends, and the game accepts an imbue while another skill is being cast. The bot waited for the current skill to finish first, so a skill could land without the imbue while the imbue icon was ready.", "The imbue is now cast as soon as it runs out, also in the middle of another skill's cast.", "The Renew imbue when seconds left setting from 1.2.74 is removed: an imbue's cooldown is as long as the imbue itself, so it could never renew earlier, and it only made coatings recast early and waste MP."]}];
+const RELEASE_NOTES = [{"version": "1.2.82", "title": "The panel remembers where you put it", "items": ["The panel now opens where you last dragged it, also after a reload and after bringing it back from the minimised icon. Before, it went back to the top right.", "If the game window got smaller and the saved spot is off screen, the panel is moved back inside it."]}, {"version": "1.2.81", "title": "Minimise the panel to a small icon", "items": ["The × at the top right of the panel now minimises it to a small icon instead of folding it. The bot keeps running.", "The icon's dot shows what the bot is doing: green while hunting, yellow during a town trip, walk back, alchemy or reconnect, red when stopped, dead or in error. Hover it to see the current status, HP and MP.", "The icon glows when something needs you: a warning such as running out of potions or hunting stopping, a SoX pickup, or the character dying. Hovering it or opening the panel clears the glow.", "Drag the icon anywhere. It remembers its spot, and the panel stays minimised after a reload.", "Click the icon or press F7 to bring the panel back. F7 still folds the open panel, Shift+F7 still hides everything, and F8 still starts and stops.", "The window you opened or clicked last (patch notes, bug report) is now drawn above the others."]}, {"version": "1.2.80", "title": "Stone fusion no longer stops at 30", "items": ["The 30-fusion stop is now an optional setting, \"Stop after this many fusions\", under Magic stones for the weapon. 0 means no limit and is the default, so a run goes on until the weapon has the wanted counts, a stone runs out or the game refuses."]}, {"version": "1.2.79", "title": "Stone fusion works: it uses the request the server accepts", "items": ["Fusing Luck, Steady and Immortal stones was refused by the game with code 16 every time. The bot used the page's attribute request, which the server answers with a refusal for these stones; it now uses the magic request, which is the one the server takes them in.", "A fusion can fail on this server: the stone is used up and nothing changes. That is now counted and shown, and the run carries on instead of stopping.", "A refusal now says why, for example that the stone is not of the weapon's degree, or that the weapon is at 6 of that stone or has no free magic option slot."]}, {"version": "1.2.78", "title": "The Alchemy tab fuses Luck, Steady and Immortal stones", "items": ["New **Magic stones for the weapon** section in Alchemy: choose how many Luck, Steady and Immortal stones the weapon should have (up to 6 each; 0 leaves one off).", "**Fuse stones now** only fuses them. **Start alchemy** fuses the missing stones first, then enhances with elixirs as before.", "Luck raises the enhancement success chance, Steady stops durability damage and Immortal stops destruction when an enhancement fails. The stones must be of the weapon's degree and in your bag."], "note": "It stops if a stone is missing, the game refuses a fusion, or after 30 fusions. New in this version and checked against a simulated game: if a fusion does not raise the count, tell us on Discord."}, {"version": "1.2.77", "title": "Arrows and bolts are bought on town trips", "items": ["New **Arrows and bolts** section in Supplies. Tick Buy arrows and/or Buy bolts and set when to go to town and what to refill to.", "They are bought at the repair merchant, after selling pet loot and before repairing. The count includes the stack in your ammunition slot and spare stacks in your bag, and a trip also starts when it falls to your low-stock number.", "If the merchant does not sell the item, there is no bag space or not enough gold, that item is skipped with a notice and the rest of the trip goes on."], "note": "Equipping the bought ammunition is still up to you. Both options are off by default."}, {"version": "1.2.76", "title": "Patch notes open in the game, and updates say what they bring", "items": ["After an update, a window next to the bot panel shows what changed since the version you used before, so you no longer need Discord to see what was fixed.", "Click the version number at the top of the bot panel to read the notes again.", "When a newer version is out, the top of the bot panel says what it brings, for example \"Update 1.2.77 available: …\", so you can tell whether to install it now."], "note": "The bot keeps running while the window is open; close it with Got it."}, {"version": "1.2.75", "title": "The imbue is cast during other skills and no longer wasted", "items": ["A skill takes the weapon imbue when its cast ends, and the game accepts an imbue while another skill is being cast. The bot waited for the current skill to finish first, so a skill could land without the imbue while the imbue icon was ready.", "The imbue is now cast as soon as it runs out, also in the middle of another skill's cast.", "The Renew imbue when seconds left setting from 1.2.74 is removed: an imbue's cooldown is as long as the imbue itself, so it could never renew earlier, and it only made coatings recast early and waste MP."]}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -6568,7 +6568,7 @@ const UI = {
     win.style.left = clamp(r.left, 0, Math.max(0, innerWidth - r.width)) + 'px';
     win.style.top = clamp(r.top, 0, Math.max(0, innerHeight - r.height)) + 'px';
   },
-  dragBy(header, target) {
+  dragBy(header, target, onDone) {
     header.addEventListener('pointerdown', e => {
       if (e.button !== 0 || e.target.closest('button')) return;
       const start = target.getBoundingClientRect(), origin = { x: e.clientX, y: e.clientY };
@@ -6578,7 +6578,7 @@ const UI = {
         target.style.left = clamp(start.left + event.clientX - origin.x, 0, Math.max(0, innerWidth - start.width)) + 'px';
         target.style.top = clamp(start.top + event.clientY - origin.y, 0, Math.max(0, innerHeight - 34)) + 'px';
       };
-      const done = () => { header.removeEventListener('pointermove', move); header.removeEventListener('pointerup', done); header.removeEventListener('pointercancel', done); };
+      const done = () => { onDone?.(); header.removeEventListener('pointermove', move); header.removeEventListener('pointerup', done); header.removeEventListener('pointercancel', done); };
       header.addEventListener('pointermove', move); header.addEventListener('pointerup', done); header.addEventListener('pointercancel', done);
     });
   },
@@ -6667,9 +6667,11 @@ const UI = {
     panel.append(header, this.body); this.root.append(style, panel, this.makeOrb());
     this.panel = panel;
     this.tip = el('div', null, 'skill-tip'); this.tip.hidden = true; this.root.append(this.tip);
-    this.dragBy(header, host);
-    W.addEventListener('resize', () => { this.fitWindow(this.reportBox); this.fitWindow(this.notesBox); if (this.minimised) this.placeOrb(host.offsetLeft, host.offsetTop); });
+    // The panel's spot is remembered across reloads (global, like the minimised icon's).
+    this.dragBy(header, host, () => { if (host.style.left) this.uiPrefs({ panel: { x: host.offsetLeft, y: host.offsetTop } }); });
+    W.addEventListener('resize', () => { this.fitWindow(this.reportBox); this.fitWindow(this.notesBox); if (this.minimised) this.placeOrb(host.offsetLeft, host.offsetTop); else if (host.style.left) this.fitWindow(host); });
     this.draw(); this.update();
+    this.restorePanel();
     if (this.uiPrefs().minimised) this.minimise(true);
   },
   // Minimised window: a skill-slot sized icon with a status dot. The bot keeps running.
@@ -6709,6 +6711,13 @@ const UI = {
     orb.addEventListener('pointerenter', () => { if (this.orbAlert) setTimeout(() => { this.orbAlert = ''; this.updateOrb(); }, 2500); });
     return orb;
   },
+  // Put the panel at its saved spot, kept on screen; without one it uses the default top-right position.
+  restorePanel() {
+    const host = this.root.host, saved = this.uiPrefs().panel;
+    if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
+      host.style.right = 'auto'; host.style.left = saved.x + 'px'; host.style.top = saved.y + 'px'; this.fitWindow(host);
+    } else { host.style.left = ''; host.style.top = ''; host.style.right = ''; }
+  },
   placeOrb(x, y) {
     const host = this.root.host;
     host.style.right = 'auto';
@@ -6721,15 +6730,13 @@ const UI = {
     this.minimised = on;
     if (on) {
       const r = host.getBoundingClientRect();
-      this.panelPos = host.style.left ? { left: host.style.left, top: host.style.top } : null;
       const saved = this.uiPrefs().orb;
       host.classList.add('min'); this.panel.hidden = true; this.orb.hidden = false;
       if (saved) this.placeOrb(saved.x, saved.y); else this.placeOrb(r.right - 44, r.top + 4);
       if (this.tip) this.tip.hidden = true;
     } else {
       host.classList.remove('min'); this.panel.hidden = false; this.orb.hidden = true; this.orbAlert = '';
-      if (this.panelPos) { host.style.left = this.panelPos.left; host.style.top = this.panelPos.top; this.fitWindow(host); }
-      else { host.style.left = ''; host.style.top = ''; host.style.right = ''; }
+      this.restorePanel();
     }
     this.uiPrefs({ minimised: on });
     this.updateOrb();

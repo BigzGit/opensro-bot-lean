@@ -119,7 +119,7 @@ Open **Settings → Session stats** for hunting time, XP/hour, net gold, confirm
 
 ## Minimised panel
 
-The **×** at the top right of the panel minimises it to a small icon, so it stays out of the way while the bot keeps running. Its dot shows the state: green while hunting, yellow during a town trip, walk back, alchemy or reconnect, and red when stopped, dead or in error. Hover the icon for the current status, HP and MP. It glows when something needs you (a warning, a SoX pickup or a death) until you hover it or open the panel. Drag it anywhere; it keeps its spot and stays minimised after a reload. Click it or press **F7** to bring the panel back.
+The **×** at the top right of the panel minimises it to a small icon, so it stays out of the way while the bot keeps running. Its dot shows the state: green while hunting, yellow during a town trip, walk back, alchemy or reconnect, and red when stopped, dead or in error. Hover the icon for the current status, HP and MP. It glows when something needs you (a warning, a SoX pickup or a death) until you hover it or open the panel. Drag it anywhere; it keeps its spot and stays minimised after a reload. The panel itself also reopens where you last dragged it. Click it or press **F7** to bring the panel back.
 
 ## Controls
 

@@ -101,7 +101,7 @@ const UI = {
     win.style.left = clamp(r.left, 0, Math.max(0, innerWidth - r.width)) + 'px';
     win.style.top = clamp(r.top, 0, Math.max(0, innerHeight - r.height)) + 'px';
   },
-  dragBy(header, target) {
+  dragBy(header, target, onDone) {
     header.addEventListener('pointerdown', e => {
       if (e.button !== 0 || e.target.closest('button')) return;
       const start = target.getBoundingClientRect(), origin = { x: e.clientX, y: e.clientY };
@@ -111,7 +111,7 @@ const UI = {
         target.style.left = clamp(start.left + event.clientX - origin.x, 0, Math.max(0, innerWidth - start.width)) + 'px';
         target.style.top = clamp(start.top + event.clientY - origin.y, 0, Math.max(0, innerHeight - 34)) + 'px';
       };
-      const done = () => { header.removeEventListener('pointermove', move); header.removeEventListener('pointerup', done); header.removeEventListener('pointercancel', done); };
+      const done = () => { onDone?.(); header.removeEventListener('pointermove', move); header.removeEventListener('pointerup', done); header.removeEventListener('pointercancel', done); };
       header.addEventListener('pointermove', move); header.addEventListener('pointerup', done); header.addEventListener('pointercancel', done);
     });
   },
@@ -200,9 +200,11 @@ const UI = {
     panel.append(header, this.body); this.root.append(style, panel, this.makeOrb());
     this.panel = panel;
     this.tip = el('div', null, 'skill-tip'); this.tip.hidden = true; this.root.append(this.tip);
-    this.dragBy(header, host);
-    W.addEventListener('resize', () => { this.fitWindow(this.reportBox); this.fitWindow(this.notesBox); if (this.minimised) this.placeOrb(host.offsetLeft, host.offsetTop); });
+    // The panel's spot is remembered across reloads (global, like the minimised icon's).
+    this.dragBy(header, host, () => { if (host.style.left) this.uiPrefs({ panel: { x: host.offsetLeft, y: host.offsetTop } }); });
+    W.addEventListener('resize', () => { this.fitWindow(this.reportBox); this.fitWindow(this.notesBox); if (this.minimised) this.placeOrb(host.offsetLeft, host.offsetTop); else if (host.style.left) this.fitWindow(host); });
     this.draw(); this.update();
+    this.restorePanel();
     if (this.uiPrefs().minimised) this.minimise(true);
   },
   // Minimised window: a skill-slot sized icon with a status dot. The bot keeps running.
@@ -242,6 +244,13 @@ const UI = {
     orb.addEventListener('pointerenter', () => { if (this.orbAlert) setTimeout(() => { this.orbAlert = ''; this.updateOrb(); }, 2500); });
     return orb;
   },
+  // Put the panel at its saved spot, kept on screen; without one it uses the default top-right position.
+  restorePanel() {
+    const host = this.root.host, saved = this.uiPrefs().panel;
+    if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
+      host.style.right = 'auto'; host.style.left = saved.x + 'px'; host.style.top = saved.y + 'px'; this.fitWindow(host);
+    } else { host.style.left = ''; host.style.top = ''; host.style.right = ''; }
+  },
   placeOrb(x, y) {
     const host = this.root.host;
     host.style.right = 'auto';
@@ -254,15 +263,13 @@ const UI = {
     this.minimised = on;
     if (on) {
       const r = host.getBoundingClientRect();
-      this.panelPos = host.style.left ? { left: host.style.left, top: host.style.top } : null;
       const saved = this.uiPrefs().orb;
       host.classList.add('min'); this.panel.hidden = true; this.orb.hidden = false;
       if (saved) this.placeOrb(saved.x, saved.y); else this.placeOrb(r.right - 44, r.top + 4);
       if (this.tip) this.tip.hidden = true;
     } else {
       host.classList.remove('min'); this.panel.hidden = false; this.orb.hidden = true; this.orbAlert = '';
-      if (this.panelPos) { host.style.left = this.panelPos.left; host.style.top = this.panelPos.top; this.fitWindow(host); }
-      else { host.style.left = ''; host.style.top = ''; host.style.right = ''; }
+      this.restorePanel();
     }
     this.uiPrefs({ minimised: on });
     this.updateOrb();
