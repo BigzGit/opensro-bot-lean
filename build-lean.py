@@ -74,7 +74,8 @@ combat = combat.replace(fight_old, fight_new)
 combat = combat.replace("    const lowMp = M.minMpPct && me.mpPct < M.minMpPct;\n", "    const lowMp = M.minMpPct && me.mpPct < M.minMpPct;\n    const skipped = {};\n", 1)
 attack_old = "      if (Cmd.attack(target.gid)) this.lastAttackAt = now();"
 assert attack_old in combat
-combat = combat.replace(attack_old, """      if (Cmd.attack(target.gid)) {
+combat = combat.replace(attack_old, """      if (M.imbueBeforeAttack && this.imbue()) return;
+      if (Cmd.attack(target.gid)) {
         this.lastAttackAt = now();
         this.noteFallback(skipped, this.rotation(cls).length);
       }""")
@@ -146,7 +147,7 @@ skin += '\nconst LEAN_CSS = ' + __import__('json').dumps((base / 'lean-skin.css'
 header = '''// ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.73
+// @version      1.2.74
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -166,7 +167,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.73';
+const VERSION = '1.2.74';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });

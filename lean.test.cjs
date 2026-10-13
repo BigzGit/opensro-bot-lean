@@ -1651,6 +1651,26 @@ test('party members and their pets do not make a monster another player\'s targe
   f.Hunt.running = true; f.Hunt.state = 'search'; f.World.hitByOthers.clear(); cast(5);
   assert.equal(f.Hunt.chooseTarget()?.gid, 30, 'the monster the party is fighting can be chosen');
 });
+test('the imbue is renewed before it runs out, ahead of skills and normal attacks', () => {
+  const setup = (change = {}) => {
+    const f = combatFixture();
+    f.World.rebuildCatalog([{ id: 500, group: 50, level: 1, name: 'Slash', targetRequired: true, mp: 5, cooldownGroup: 0 },
+      { id: 501, group: 51, level: 1, name: 'Imbue', targetRequired: false, mp: 5, cooldownGroup: 0 }]);
+    f.World.applyGameplay({ ...f.World.gp, skills: [500, 501], target: 30 });
+    f.Settings.profile.macro.imbue = { id: 501, group: 51 }; f.Settings.profile.macro.imbueBeforeAttack = true;
+    Object.assign(f.Settings.profile.macro, change); return f;
+  };
+  const first = f => f.commands.find(c => c.kind === 'skill')?.skillId;
+  let f = setup(); f.World.buffRemaining = () => 2500; f.Combat.fight(f.World.ents.get(30));
+  assert.equal(first(f), 501, '2.5 s left is inside the default 3 s margin, so the imbue goes first');
+  f = setup(); f.World.buffRemaining = () => 3500; f.Combat.fight(f.World.ents.get(30)); assert.equal(first(f), 500, 'plenty left: the attack skill goes first');
+  f = setup({ imbueRefreshS: 1 }); f.World.buffRemaining = () => 2500; f.Combat.fight(f.World.ents.get(30)); assert.equal(first(f), 500, 'the margin is a setting');
+  f = setup(); f.World.buffRemaining = () => -1; f.Combat.fight(f.World.ents.get(30)); assert.equal(first(f), 501, 'an expired imbue is cast first');
+  f = setup(); f.Settings.profile.macro.rotations.normal = []; f.World.buffRemaining = () => 1000; f.Combat.fight(f.World.ents.get(30));
+  assert.deepEqual(f.commands.map(c => c.kind), ['skill'], 'with no rotation skill the imbue is renewed before a normal attack'); assert.equal(first(f), 501);
+  f = setup(); f.Settings.profile.macro.rotations.normal = []; f.World.buffRemaining = () => 9000; f.Combat.fight(f.World.ents.get(30));
+  assert.deepEqual(f.commands.map(c => c.kind), ['attack']);
+});
 test('the Discord invite is real and the update notice shows once per version', () => {
   const f = fixture(), invite = /^https:\/\/discord\.gg\/[\w-]+$/;
   assert.match(source.match(/const DISCORD_URL = '([^']+)'/)?.[1], invite); assert.doesNotMatch(source, /INVITE-CODE/);

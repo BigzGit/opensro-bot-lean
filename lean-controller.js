@@ -88,6 +88,22 @@ function stopAll() {
   if (active && World.inWorld() && !World.isDead()) Cmd.move(World.pose());
 }
 
+// The imbue has to still be running when the skill lands, not just when it is sent. A cast takes a second or more,
+// so it is renewed while `imbueRefreshS` seconds are left (3 by default), before the next skill or normal attack.
+Combat.imbue = function () {
+  const M = Settings.profile.macro;
+  if (!M.imbue) return false;
+  const id = this.resolve(M.imbue);
+  if (!id || this.blocked(id) || !Cmd.canCast(id) || !this.mpOk(id, World.me())) return false;
+  const rem = World.buffRemaining(id);
+  if (rem > Math.max(400, (Number(M.imbueRefreshS) || 0) * 1000)) return false;
+  if (rem < 0 && now() - (this.buffCastAt.get('imbue') || 0) < 1200) return false;
+  if (this.cast(id, 0)) {
+    this.buffCastAt.set('imbue', now());
+    return true;
+  }
+  return false;
+};
 // Berserk fires when the gauge is full and the target's class is ticked in Combat options.
 Combat.berserk = function (cls) {
   if (!Settings.profile.macro.berserkClasses?.[cls] || World.berserkGauge < 5) return false;
