@@ -105,6 +105,7 @@ const gameplay = { localGid: 1, target: 0, targetPending: false, inventoryPendin
     await tab('Loot'); await snap('05-loot');
     await tab('Supplies'); await snap('06-potions');
     await jump('Potion restock'); await snap('07-restock');
+    await tab('Town'); await snap('08-town-triggers');
     await jump('Scroll town cycle'); await snap('08-town-cycle');
     await tab('Alchemy'); await snap('09-alchemy'); await jump('Magic stones for the weapon'); await snap('09b-alchemy-stones');
     await tab('Settings'); await snap('10-settings');

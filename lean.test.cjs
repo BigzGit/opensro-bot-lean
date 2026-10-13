@@ -1792,6 +1792,34 @@ test('town cycle does not repeat unconfirmed pet transfers and stops on full sto
   g.World.gp.storage = { npc: 60, phase: 'open', capacity: 1, items: [{ slot: 0, refObjId: 999 }] }; g.World.gp.target = 60;
   g.Town.store(); assert.match(g.Town.message, /Storage is full/); assert.equal(g.commands.some(c => c.kind === 'cos-transfer'), false);
 });
+test('town trips start for a broken weapon, worn gear, no XP and a timer, each with its own switch', () => {
+  const f = townFixture(), c = f.Town.cfg(), gp = f.World.gp, weapon = gp.inventory.find(i => i.slot === 6);
+  f.pet.inventory = []; gp.inventory.find(i => i.refObjId === 15).quantity = 500;
+  gp.progression = { ...(gp.progression || {}), level: 30, experience: '100' };
+  assert.equal(f.Town.reason(), '', 'nothing else would start a trip');
+  assert.deepEqual([c.broken, c.wear.on, c.noXp.on, c.every.on], [true, false, false, false], 'only the broken weapon is on by default');
+  weapon.durability = 0; assert.equal(f.Town.reason(), 'weapon broken');
+  c.broken = false; assert.equal(f.Town.reason(), '', 'switched off');
+  weapon.durability = 1; c.wear.on = true; c.wear.pct = 15;
+  assert.match(f.Town.reason(), /^gear durability low \(.+ at 10%\)$/, '1 of 10 is under 15%');
+  weapon.durability = 2; assert.equal(f.Town.reason(), '', '20% is enough');
+  weapon.durability = 1; const fields = weapon.tooltip; delete weapon.tooltip;
+  assert.equal(f.Town.reason(), '', 'an unknown maximum is not guessed'); weapon.tooltip = fields; weapon.durability = 10;
+  gp.inventory.push({ slot: 20, refObjId: 901, typeFlags: 44 | (6 << 7), durability: 0, variance: '0', magic: [], tooltip: weapon.tooltip });
+  assert.equal(f.Town.reason(), '', 'gear in the bag is not worn gear');
+  c.noXp.on = true; c.noXp.minutes = 10; f.Town.watch();
+  f.advance(9 * 60000); f.Town.watch(); assert.equal(f.Town.reason(), '');
+  f.advance(60000); f.Town.watch(); assert.equal(f.Town.reason(), 'no XP for 10 minutes');
+  gp.progression.experience = '150'; f.Town.watch(); assert.equal(f.Town.reason(), '', 'XP came in');
+  c.noXp.on = false; c.every.on = true; c.every.minutes = 60;
+  // The timer counts from when hunting started: 10 minutes have already passed above.
+  f.advance(40 * 60000); f.Town.watch(); assert.equal(f.Town.reason(), '');
+  f.advance(10 * 60000); f.Town.watch(); assert.equal(f.Town.reason(), 'every 60 minutes');
+  f.Town.begin(); assert.ok(f.Town.trip, 'the trip starts');
+  assert.equal(f.Town.cycleFrom, f.Town.lastXpAt, 'starting the trip restarts both clocks');
+  f.Town.cancel(); assert.equal(f.Town.reason(), '', 'so the next one is a full interval away');
+  f.Hunt.stop(); f.Town.watch(); assert.deepEqual([f.Town.lastXpAt, f.Town.cycleFrom], [0, 0], 'the clocks only run while hunting');
+});
 test('town trips buy arrows and bolts at the weapon merchant, count the equipped stack and skip what cannot be bought', () => {
   const f = townFixture(), gp = f.World.gp, c = f.Restock.cfg().ammo;
   assert.deepEqual(JSON.parse(JSON.stringify(f.Town.ammoSupplies())), [], 'off by default');

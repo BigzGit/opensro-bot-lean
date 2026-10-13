@@ -2,6 +2,9 @@
 // Native reverse scrolls are spent by travel-gate type 5/choice 2, not item-use.
 const Town = {
   trip: null, lastScrollPoint: null, message: 'Town cycle off.',
+  // Clocks for the "no XP for N minutes" and "every N minutes" triggers. They run only while hunting, alive and in
+  // the world, and restart when a trip begins or completes, so a long trip never triggers the next one.
+  xpKey: '', lastXpAt: 0, cycleFrom: 0,
   history: [], lastTrace: '',
   blocked() {
     if (!this.cfg().enabled) return 'town cycle is off';
@@ -226,8 +229,39 @@ const Town = {
     if (c.petFull && pet && pet.rec.status - pet.rec.inventory.length <= c.petFree) return 'pickup pet nearly full';
     if (this.supplies().some(s => Restock.count(s.refObjId) <= s.low)) return 'potions running low';
     if (this.ammoSupplies().some(s => this.ammoCount(s.refObjId) <= s.low)) return 'ammunition running low';
+    if (c.broken && this.weaponBroken()) return 'weapon broken';
+    const worn = c.wear?.on ? this.wear() : null;
+    if (worn && worn.pct < c.wear.pct) return `gear durability low (${worn.name} at ${Math.floor(worn.pct)}%)`;
+    if (c.noXp?.on && this.lastXpAt && now() - this.lastXpAt >= c.noXp.minutes * 60000) return `no XP for ${c.noXp.minutes} minutes`;
+    if (c.every?.on && this.cycleFrom && now() - this.cycleFrom >= c.every.minutes * 60000) return `every ${c.every.minutes} minutes`;
     return '';
   },
+  // The equipped weapon (slot 6) at zero durability.
+  weaponBroken() {
+    const w = (World.gp?.inventory || []).find(i => i.slot === 6);
+    return !!w && ItemType.isEquipment(w.typeFlags) && w.durability === 0;
+  },
+  // The most worn repairable equipped item, as a percentage of its own maximum. Items whose maximum is unknown
+  // (no tooltip yet) are left out rather than guessed.
+  wear() {
+    let low = null;
+    const equipped = World.gp?.equipmentSlotCount || 13;
+    for (const i of World.gp?.inventory || []) {
+      if (i.slot >= equipped || !ItemType.isEquipment(i.typeFlags) || !Number.isFinite(i.durability) || !i.tooltip?.fields?.canRepair) continue;
+      const max = this.maximum(i);
+      if (!max) continue;
+      const pct = i.durability / max * 100;
+      if (!low || pct < low.pct) low = { pct, name: i.name || Items.name?.(i.refObjId) || 'gear' };
+    }
+    return low;
+  },
+  watch() {
+    if (!Hunt.running || !World.inWorld() || World.isDead()) { this.lastXpAt = this.cycleFrom = 0; this.xpKey = ''; return; }
+    const p = World.gp?.progression, key = `${p?.level}:${p?.experience}`;
+    if (!this.cycleFrom) { this.restartClocks(); this.xpKey = key; return; }
+    if (key !== this.xpKey) { this.xpKey = key; this.lastXpAt = now(); }
+  },
+  restartClocks() { this.lastXpAt = this.cycleFrom = now(); },
   validate() {
     const c = this.cfg(), supplies = this.supplies();
     const missing = [['arrival', 'arrival point'], ['vendor', 'potion merchant'], ['smith', 'repair merchant'], ['gate', 'world statue / teleport'], ...(c.petFull ? [['storage', 'warehouse']] : [])].filter(([key]) => !c[key]).map(([, label]) => label);
@@ -262,6 +296,7 @@ const Town = {
     if (revival) Hunt.running = true;
     Restock.trip = null;
     Resurrect.cancelTrip('', true); Resurrect.holdUntil = 0; Loot.suspend();
+    this.restartClocks();
     this.trip = { phase: 'recall', at: now(), started: now(), origin: { ...origin }, revival,
       huntArea: revival && Hunt.cfg().center ? { center: { ...Hunt.cfg().center }, radius: Hunt.cfg().radius } : null,
       manualAt: Manual.lastAt, character: World.charName, petRef: Loot.pet()?.rec.refObjId,
@@ -498,6 +533,7 @@ const Town = {
   },
   tick() {
     const c = this.cfg();
+    this.watch();
     if (!this.trip) {
       if (this.blocked() || !this.reason()) return false;
       this.begin();
@@ -562,7 +598,7 @@ const Town = {
         if (t.phase === 'recall-wait') { this.lastScrollPoint = { ...t.origin }; this.arrived(); }
         else {
           this.lastScrollPoint = { ...World.pose() };
-          this.trip = null; Hunt.targetGid = Hunt.lootGid = 0; Hunt.state = 'search';
+          this.trip = null; Hunt.targetGid = Hunt.lootGid = 0; Hunt.state = 'search'; this.restartClocks();
           this.message = 'Town service complete; hunting resumed.'; UI.toast(this.message);
         }
       } else {

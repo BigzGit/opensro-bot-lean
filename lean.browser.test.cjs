@@ -18,7 +18,7 @@ const images = ['ic_attack', 'ic_recovery', 'ic_autoget', 'ic_sit'].map((key, i)
   images.push({ raw, compressed: zlib.gzipSync(raw), path: '/assets/images/Media_extracted/icon/action/icon_cha_auto_attack.png', transport: '/assets/test-icons/orb.png.gz' });
 }
 // The Map page: the minimap tile under the test character (region 1 = 1x0), the map button and the minimap signs.
-for (const name of ['interface/minimap/mm_map_button', ...['character', 'party', 'otherplayer', 'monster', 'unique', 'npc', 'animal'].map(s => 'interface/minimap/mm_sign_' + s)]) {
+for (const name of ['icon/item/etc/mall_return_scroll', 'icon/item/etc/mall_warehouse_ticket', 'icon/item/etc/all_potion_03', 'icon/item/etc/mall_repair_hammer', 'icon/item/etc/mall_reverse_return_scroll', 'interface/minimap/mm_map_button', ...['character', 'party', 'otherplayer', 'monster', 'unique', 'npc', 'animal'].map(s => 'interface/minimap/mm_sign_' + s)]) {
   const raw = Buffer.concat([images[1].raw, Buffer.from('map-' + name)]);
   images.push({ raw, compressed: zlib.gzipSync(raw), path: `/assets/images/Media_extracted/${name}.png`, transport: `/assets/test-icons/${name.replace(/\//g, '-')}.png.gz` });
 }
@@ -223,21 +223,41 @@ const server = http.createServer((req, res) => {
     await page.getByLabel('Maximum res distance from hunt spot (m)', { exact: true }).fill('40');
     await page.getByLabel('Maximum res distance from hunt spot (m)', { exact: true }).dispatchEvent('change');
     assert.equal(await page.evaluate(() => SROLean.settings.profile.party.resRadius), 400);
-    await page.getByRole('button', { name: 'Supplies', exact: true }).click();
+    // The town cycle and its triggers live on the Town page; with the cycle on, Supplies hides walking-route restock.
+    await page.getByRole('button', { name: 'Town', exact: true }).click();
     const townToggle = page.getByLabel('Use return scroll → town services → reverse return', { exact: true });
     assert.equal(await townToggle.isChecked(), false);
     await townToggle.check(); assert.equal(await page.evaluate(() => SROLean.town.cfg().enabled), true);
+    await page.getByRole('button', { name: 'Supplies', exact: true }).click();
     assert.equal(await page.getByRole('button', { name: 'Record from merchant', exact: true }).count(), 0);
     assert.equal(await page.getByLabel('Auto buy while hunting', { exact: true }).count(), 0);
+    await page.getByRole('button', { name: 'Town', exact: true }).click();
     await townToggle.uncheck();
+    await page.getByRole('button', { name: 'Supplies', exact: true }).click();
     assert.equal(await page.getByRole('button', { name: 'Record from merchant', exact: true }).count(), 1);
-    await townToggle.check();
-
-    await townToggle.uncheck();
+    await page.getByRole('button', { name: 'Town', exact: true }).click();
+    // The new triggers: broken weapon on by default, the others off with their own numbers.
+    assert.equal(await page.getByLabel('Weapon is broken', { exact: true }).isChecked(), true);
+    await page.getByLabel('Gear is worn', { exact: true }).check();
+    await page.getByLabel('Gear durability below (%)', { exact: true }).fill('25');
+    await page.getByLabel('Gear durability below (%)', { exact: true }).dispatchEvent('change');
+    await page.getByLabel('No XP for a while', { exact: true }).check();
+    await page.getByLabel('No XP for (minutes)', { exact: true }).fill('7');
+    await page.getByLabel('No XP for (minutes)', { exact: true }).dispatchEvent('change');
+    await page.getByLabel('On a timer', { exact: true }).check();
+    await page.getByLabel('Every (minutes)', { exact: true }).fill('90');
+    await page.getByLabel('Every (minutes)', { exact: true }).dispatchEvent('change');
+    assert.deepEqual(await page.evaluate(() => { const c = SROLean.town.cfg(); return [c.broken, c.wear, c.noXp, c.every]; }),
+      [true, { on: true, pct: 25 }, { on: true, minutes: 7 }, { on: true, minutes: 90 }]);
+    await page.waitForFunction(() => document.getElementById('sro-bot-lean').shadowRoot.querySelectorAll('.trip-flow .skill-icon[data-icon-loaded=true]').length === 5);
+    assert.match(await page.locator('.trip-flow').innerText(), /Return scroll[\s\S]*Reverse/);
+    await page.locator('.pane').screenshot({ path: __dirname + '/lean-town-page.png' });
+    for (const label of ['Gear is worn', 'No XP for a while', 'On a timer']) await page.getByLabel(label, { exact: true }).uncheck();
     const reviveToggle = page.getByLabel('Revive in town and reverse to last scroll point', { exact: true });
     assert.equal(await reviveToggle.isChecked(), true);
     await reviveToggle.uncheck(); assert.equal(await page.evaluate(() => SROLean.town.cfg().revive), false);
     await reviveToggle.check(); assert.equal(await page.evaluate(() => SROLean.town.cfg().revive), true);
+    await page.getByRole('button', { name: 'Supplies', exact: true }).click();
     assert.equal(await page.getByLabel('HP refill to', { exact: true }).inputValue(), '100');
     assert.equal(await page.getByLabel('MP refill to', { exact: true }).inputValue(), '300');
     await page.getByLabel('MP refill to', { exact: true }).fill('1000');
@@ -257,6 +277,7 @@ const server = http.createServer((req, res) => {
       return { on: c.on, low: c.low, target: c.target, refObjId: c.refObjId };
     }), { on: true, low: 15, target: 100, refObjId: 58 });
     await pillToggle.uncheck();
+    await page.getByRole('button', { name: 'Town', exact: true }).click();
     const arrivalTolerance = page.getByLabel('Town arrival tolerance (m)', { exact: true });
     assert.equal(await arrivalTolerance.inputValue(), '50');
     await arrivalTolerance.fill('80'); await arrivalTolerance.dispatchEvent('change');
@@ -271,6 +292,7 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.evaluate(() => SROLean.town.cfg().keep), 'favorite, quest');
     assert.equal(await page.getByLabel('Store pet: Elixirs', { exact: true }).count(), 0);
     assert.equal(await page.getByText('Pet loot: store elixirs, and Star / Moon / Sun gear', { exact: false }).count(), 1);
+    await page.getByRole('button', { name: 'Supplies', exact: true }).click();
     assert.equal(await page.getByLabel('Use beginner +100% speed scroll automatically', { exact: true }).isChecked(), false);
     await page.getByLabel('Use beginner +100% speed scroll automatically', { exact: true }).check();
     assert.equal(await page.evaluate(() => SROLean.settings.profile.potion.speedScroll), true);

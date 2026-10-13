@@ -195,11 +195,12 @@ const UI = {
     controls.classList.add('controls');
     this.nav = el('nav'); this.nav.setAttribute('aria-label', 'Bot settings');
     // Page icons are the game's own action-bar icons; they show only in the wide window's page list.
-    const navIcons = { Combat: 'auto_attack', Loot: 'autoget', Supplies: 'recovery', Alchemy: 'alchemy', Wardrobe: 'shop', Settings: 'helper' };
-    for (const name of ['Map', 'Combat', 'Loot', 'Supplies', 'Alchemy', 'Wardrobe', 'Settings']) {
+    const navIcons = { Combat: 'action\\icon_cha_auto_attack', Loot: 'action\\icon_cha_autoget', Supplies: 'action\\icon_cha_recovery', Town: 'item\\etc\\mall_return_scroll',
+      Alchemy: 'action\\icon_cha_alchemy', Wardrobe: 'action\\icon_cha_shop', Settings: 'action\\icon_cha_helper' };
+    for (const name of ['Map', 'Combat', 'Loot', 'Supplies', 'Town', 'Alchemy', 'Wardrobe', 'Settings']) {
       const tab = this.button(name, () => { this.current = name; this.draw(); });
       if (name === 'Map') this.paintPath(tab, MAP_ART + 'interface/minimap/mm_map_button.png');
-      else Icons.paint(tab, `action\\icon_cha_${navIcons[name]}.ddj`);
+      else Icons.paint(tab, navIcons[name] + '.ddj');
       this.nav.append(tab);
     }
     this.pane = el('div', null, 'pane'); this.feedback = el('div', null, 'feedback'); this.feedback.setAttribute('role', 'status');
@@ -617,14 +618,40 @@ const UI = {
         el('p', 'Buys only Special Universal Pill (small), the strongest universal cure. No cheaper substitute. Uses the same refill trips as HP/MP. Use cure pills above controls automatic use.', 'muted'));
       shop.append(el('p', 'Refill targets are total potion counts, including what is already in your bag. Used for low-supply, full-bag and revival trips, and walking-route restock when the town cycle is off. Set MP refill to 1000 for 1,000 MP potions. Changes apply to the next trip.', 'muted'));
       this.pane.append(shop);
+      this.pane.append(el('p', 'Town trips, what starts them, and arrows and bolts are on the Town page.', 'muted'));
+    } else if (this.current === 'Town') {
       const town = () => Town.cfg();
-      const services = this.group('Scroll town cycle',
-        this.check('Use return scroll → town services → reverse return', () => town().enabled, v => { town().enabled = v; this.draw(); }),
-        this.check('Revive in town and reverse to last scroll point', () => town().revive, v => town().revive = v),
-        this.check('Deposit SoX gear in the warehouse (character and pet bags)', () => town().storeSox, v => town().storeSox = v),
-        this.text('Also deposit gear requiring level', () => town().storeLevels, v => town().storeLevels = v, 'e.g. 85 or 80-90, 100'),
+      // The trip as the game's own item pictures, with what each step still needs.
+      const flow = el('ol', null, 'trip-flow'), count = type => World.items().filter(i => (i.typeFlags & 0xfffc) === type).reduce((n, i) => n + (i.quantity ?? 1), 0);
+      for (const [icon, label, detail] of [
+        ['mall_return_scroll', 'Return scroll', () => town().arrival ? count(0x09ec) + ' in bag' : 'arrival not saved'],
+        ['mall_warehouse_ticket', 'Warehouse', () => town().storage ? 'saved' : 'not saved'],
+        ['all_potion_03', 'Potions', () => town().vendor ? 'saved' : 'not saved'],
+        ['mall_repair_hammer', 'Repair', () => town().smith ? 'saved' : 'not saved'],
+        ['mall_reverse_return_scroll', 'Reverse', () => count(0x19ec) + ' in bag']]) {
+        const step = el('li'), slot = el('span', null, 'skill-icon'), note = el('small', detail());
+        slot.append(el('span', label[0], 'fallback')); Icons.paint(slot, `item\\etc\\${icon}.ddj`);
+        step.append(slot, el('strong', label), note); flow.append(step);
+        this.refreshers.push(() => { note.textContent = detail(); note.classList.toggle('missing', /not saved|^0 in bag/.test(note.textContent)); });
+      }
+      this.pane.append(this.group('The town trip', flow));
+      this.pane.append(this.group('Go to town when…',
+        el('p', 'Only while the scroll town cycle below is on. Always: the character bag has one free slot or less. Potions, vigor potions and pills: at the low-stock numbers in Supplies. Arrows and bolts: below.', 'muted'),
         this.check('Return when pickup pet is nearly full', () => town().petFull, v => town().petFull = v),
         this.number('Pet free slots ≤', () => town().petFree, v => town().petFree = v, 0, 10),
+        this.check('Weapon is broken', () => town().broken, v => town().broken = v),
+        this.check('Gear is worn', () => town().wear.on, v => town().wear.on = v),
+        this.number('Gear durability below (%)', () => town().wear.pct, v => town().wear.pct = v, 1, 90),
+        this.check('No XP for a while', () => town().noXp.on, v => town().noXp.on = v),
+        this.number('No XP for (minutes)', () => town().noXp.minutes, v => town().noXp.minutes = v, 1, 120),
+        this.check('On a timer', () => town().every.on, v => town().every.on = v),
+        this.number('Every (minutes)', () => town().every.minutes, v => town().every.minutes = v, 5, 600),
+        this.check('Revive in town and reverse to last scroll point', () => town().revive, v => town().revive = v),
+        el('p', 'Worn gear means the most worn repairable item you are wearing, measured against its own maximum durability; the trip repairs it. A broken weapon (0 durability) has its own switch, on by default. The XP and timer clocks run only while hunting and restart with every trip.', 'muted')));
+      const services = this.group('Scroll town cycle',
+        this.check('Use return scroll → town services → reverse return', () => town().enabled, v => { town().enabled = v; this.draw(); }),
+        this.check('Deposit SoX gear in the warehouse (character and pet bags)', () => town().storeSox, v => town().storeSox = v),
+        this.text('Also deposit gear requiring level', () => town().storeLevels, v => town().storeLevels = v, 'e.g. 85 or 80-90, 100'),
         this.number('Town arrival tolerance (m)', () => town().arrivalRadius / 10, v => town().arrivalRadius = v * 10, 10, 150),
         el('p', 'Bind your recall to Hotan, Jangan, Donwhang, Constantinople or Samarkand in the game. Quickest: while stopped, use a return scroll and press Auto-set town services where it puts you; it fills the arrival point and the four services. To do it by hand instead, save the arrival point where a return scroll places you, then stand near, select and save the warehouse, potion merchant, repair merchant and world statue / teleport. Open the potion shop before saving its merchant. Saves your standing position for each approach. Uses collision-aware walking between services. Overrides the recorded walking restock while enabled.', 'muted'));
       for (const [role, label] of [['arrival', 'Arrival point'], ['storage', 'Warehouse'], ['vendor', 'Potion merchant'], ['smith', 'Repair merchant'], ['gate', 'World statue / teleport']]) services.append(

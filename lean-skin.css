@@ -128,3 +128,9 @@ header button.layout{display:inline-flex;height:22px;min-width:0;margin-left:8px
 .map-coords{position:absolute;left:5px;bottom:4px;padding:1px 6px;background:#000a;font-size:11px;pointer-events:none}.map-coords:empty{display:none}
 .map-legend{display:flex;align-items:center;gap:8px;margin:4px 0;font-size:11px}.map-legend i{display:inline-block;width:12px;height:12px;background:center/contain no-repeat}
 @media(min-width:900px){:host(.wide) .pane>.map-box{grid-column:1/-1}:host(.wide) .map-stage canvas{height:340px}}
+/* Town page: the trip as a row of item pictures */
+.trip-flow{list-style:none;display:flex;margin:4px 0 0;padding:0}.trip-flow li{flex:1;display:grid;justify-items:center;gap:2px;position:relative;text-align:center;min-width:0}
+.trip-flow li:not(:last-child):after{content:'';position:absolute;top:17px;left:calc(50% + 21px);right:calc(-50% + 21px);height:2px;background:linear-gradient(90deg,#c9a85c,#5d5034)}
+.trip-flow strong{color:#fff;font-size:11px;font-weight:normal}.trip-flow small{color:#a09b8c;font-size:10px}.trip-flow small.missing{color:#ffc67a}
+nav button{min-width:0;padding:0 3px}
+@media(min-width:900px){:host(.wide) .pane>fieldset:has(.trip-flow){grid-column:1/-1}}

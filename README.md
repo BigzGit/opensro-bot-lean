@@ -21,14 +21,14 @@ Under **Supplies → Automatic potion use**:
 
 - **Vigor potions:** tick **Use vigor potions** and set **Vigor when HP below** and **Vigor when MP below**. Vigor potions are used when your HP or MP drops that low and the normal HP and MP potions have not been enough.
 - **Buying vigor potions:** under **Supplies → Potion restock**, tick **Buy vigor potions**, pick the **Vigor potion size** (Herb, Small, Medium, Large or X-Large; X-Large by default) and set **Vigor low stock** and **Vigor refill to**. Town trips and walking restock buy that size, and a trip is also started when the vigor stock runs low. If the potion merchant does not sell the size you picked, the trip stops with a message so you can choose another.
-- **Buying arrows and bolts:** under **Supplies → Arrows and bolts**, tick **Buy arrows** and/or **Buy bolts** and set the **go to town at or below** count and the **refill to** count (2000 each by default, off by default). They are bought on a town trip at the repair merchant, after selling pet loot and before repairing. The count includes the stack in your ammunition slot and spare stacks in your bag, and a trip also starts when it falls to the low number. If the merchant does not sell the item, there is no bag space or not enough gold, that item is skipped with a notice and the rest of the trip goes on. Equipping the bought ammunition is up to you.
+- **Buying arrows and bolts:** under **Town → Arrows and bolts**, tick **Buy arrows** and/or **Buy bolts** and set the **go to town at or below** count and the **refill to** count (2000 each by default, off by default). They are bought on a town trip at the repair merchant, after selling pet loot and before repairing. The count includes the stack in your ammunition slot and spare stacks in your bag, and a trip also starts when it falls to the low number. If the merchant does not sell the item, there is no bag space or not enough gold, that item is skipped with a notice and the rest of the trip goes on. Equipping the bought ammunition is up to you.
 - **Pet recovery kits:** tick **Use recovery kits on my pets** and set **Pet HP below**. When an attack or pickup pet drops below that HP, the bot uses one recovery kit on it, choosing the smallest kit that covers the missing HP (or the largest if none does). Your own potions always go first. Each kit has to be seen consumed before the next one is used; a pet that does not take a kit is left alone for 30 seconds. It is off by default, needs the master **Use potions automatically** switch, and does not buy kits in town.
 
 ## Automatic town trips
 
 With the town cycle on, the walking-route restock controls are hidden because every trip buys potions in town. The **On death** setting is replaced by the town revive option, and the rest thresholds only show while **Rest when low** is ticked.
 
-Set this up once in **Supplies → Scroll town cycle**:
+Set this up once on the **Town** page, under **Scroll town cycle**:
 
 1. Bind your recall to **Hotan, Jangan, Donwhang, Constantinople or Samarkand** in the game. Use a return scroll, stop the bot, and where you land click **Auto-set town services**. It saves that spot as the arrival point and fills the **Warehouse**, **Potion merchant**, **Repair merchant** and **World statue / teleport** from the server's NPC data, each as a spot a few metres from the NPC. It only fills what is empty; **Redo all automatically** replaces every saved point, and an arrival point from another town is replaced automatically. Press it where the scroll puts you if you can. If the saved arrival point is not where the scroll actually lands, the bot corrects it itself: after a recall it confirmed, once the character has stood still for three seconds in a known town, it saves that spot as the arrival point and carries on. This is only done in the town the saved services belong to.
 2. To do it by hand instead, stand near and select each service, then save its point: **Warehouse**, **Potion merchant**, **Repair merchant** and **World statue / teleport**. Open the potion shop before saving its merchant. Manual saves override the automatic ones.
@@ -45,6 +45,19 @@ When supplies run low or a bag reaches its capacity trigger, the bot recalls to 
 - **Other seal/rare gear, supplies and matching Keep names:** protected. Existing character bag items are never sold.
 
 If protected items fill a bag, the bot stays in town and asks you to free space.
+
+### What starts a town trip
+
+The **Town** page shows the trip as a row of pictures (return scroll, warehouse, potions, repair, reverse) with what each step still needs, and lists what starts a trip under **Go to town when…**:
+
+- Always: the character bag has one free slot or less. Potions, vigor potions and pills at their low-stock numbers (Supplies), and arrows and bolts at theirs (Town).
+- **Return when pickup pet is nearly full**, with **Pet free slots ≤**.
+- **Weapon is broken**: the equipped weapon is at 0 durability. On by default.
+- **Gear is worn**: the most worn repairable item you are wearing is below **Gear durability below (%)** of its own maximum (15% by default). The trip repairs it. Off by default.
+- **No XP for a while**: no experience for **No XP for (minutes)** (10 by default). Off by default.
+- **On a timer**: every **Every (minutes)** (60 by default). Off by default.
+
+The XP and timer clocks run only while hunting and restart with every trip, so a long trip never starts the next one. All of these need the town cycle on.
 
 ## Buff weapon swapping
 
@@ -76,7 +89,7 @@ Once the character is back, hunting that was running resumes: at the hunting spo
 
 ## Returning after death
 
-Leave **Revive in town and reverse to last scroll point** enabled under the town-cycle settings. With the town cycle enabled, the bot revives, completes town services and reverses back to hunt. Hunting resumes within 30 metres of the last scroll point, or within your saved hunting area after death. Carry reverse scrolls.
+Leave **Revive in town and reverse to last scroll point** enabled under **Town → Go to town when…**. With the town cycle enabled, the bot revives, completes town services and reverses back to hunt. Hunting resumes within 30 metres of the last scroll point, or within your saved hunting area after death. Carry reverse scrolls.
 
 Updates, suggestions and bug reports are on Discord (https://discord.gg/Y5H5ZyfQ7u); the **Discord** button at the top of the panel opens the invite. After an update, a window beside the panel shows the patch notes of every version since the one you used before; the bot keeps running while it is open. Click the version number at the top of the panel to read them again. When a newer version is out, the top of the panel names it and its headline ("Update 1.2.77 available: …") next to the **Update** button.
 
