@@ -1,5 +1,6 @@
 // Takes the panel screenshots used by the setup guide, from the bot's own simulated game page.
-// Usage: node guide-screenshots.cjs <folder containing playwright's node_modules> <output folder>
+// Usage: node guide-screenshots.cjs <folder containing playwright's node_modules> <output folder> [game Media_extracted folder]
+// With the game's extracted media, the page icons and the town trip pictures are the real ones instead of letters.
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
@@ -15,6 +16,13 @@ const images = ['ic_attack', 'ic_recovery', 'ic_autoget', 'ic_sit'].map((key, i)
   const raw = Buffer.from(skin[key].split(',')[1], 'base64'), compressed = zlib.gzipSync(raw);
   return { raw, compressed, path: `/assets/images/Media_extracted/icon/skill/test/skill${i}.png`, transport: `/assets/test-icons/skill${i}.png.gz` };
 });
+const media = process.argv[4];
+if (media) for (const name of ['action/icon_cha_auto_attack', 'action/icon_cha_autoget', 'action/icon_cha_recovery', 'action/icon_cha_alchemy', 'action/icon_cha_shop',
+  'action/icon_cha_helper', 'item/etc/mall_return_scroll', 'item/etc/mall_warehouse_ticket', 'item/etc/all_potion_03', 'item/etc/mall_repair_hammer',
+  'item/etc/mall_reverse_return_scroll', '../interface/minimap/mm_map_button']) {
+  const raw = fs.readFileSync(path.join(media, 'icon', name + '.png'));
+  images.push({ raw, compressed: zlib.gzipSync(raw), path: path.posix.normalize(`/assets/images/Media_extracted/icon/${name}.png`), transport: `/assets/test-icons/real-${images.length}.png.gz` });
+}
 let offset = 0;
 const manifest = { groups: [], assets: images.map((image, i) => {
   const row = { path: image.path, packPath: '/assets/test-icons/icons.pack', offset, length: image.raw.length, sha256: sha(image.raw), mime: 'image/png',
