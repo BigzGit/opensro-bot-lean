@@ -42,6 +42,9 @@ const skills = [
   [9, 'Spirit Slash', true, 40], [10, 'Iron Guard', false, 22], [11, 'Crushing Wave', true, 55], [12, 'Swift Step', false, 10],
 ].map(([id, name, target, mp], i) => ({ id, group: id, name, icon: `skill\\test\\skill${i % 4}.ddj`, level: 1 + (i % 3), targetRequired: target,
   ...(target ? { targets: 4 } : {}), mp, cooldownMs: 1500 + i * 500 }));
+// Skills you can cast on a party member, for the Party page.
+skills.push({ id: 13, group: 13, name: 'Holy Guard', icon: 'skill\\test\\skill1.ddj', level: 2, targetRequired: true, targets: 1 | 16 | 32, mp: 30, cooldownMs: 2000 },
+  { id: 14, group: 14, name: 'Mending Light', icon: 'skill\\test\\skill3.ddj', level: 3, targetRequired: true, targets: 1 | 16 | 32, mp: 45, cooldownMs: 1500 });
 const potion = (slot, ref, tf, quantity, name, heal) => ({ slot, refObjId: ref, typeFlags: tf, quantity, name, tooltip: { fields: { itemParam1_29c: heal } } });
 const gameplay = { localGid: 1, target: 0, targetPending: false, inventoryPending: false, pendingMoves: 0,
   pose: { regionId: 1, x: 100, y: 0, z: 100 },
@@ -54,7 +57,7 @@ const gameplay = { localGid: 1, target: 0, targetPending: false, inventoryPendin
     { slot: 16, refObjId: 200, typeFlags: 0x09ec, quantity: 5, name: 'Return scroll' }, { slot: 17, refObjId: 201, typeFlags: 0x19ec, quantity: 5, name: 'Reverse return scroll' },
   ],
   inventorySlotCount: 45, equipmentSlotCount: 13, skills: skills.map(s => s.id), vitals: [{ gid: 1, hp: 2900, mp: 1500, maxHp: 3200, maxMp: 1800 }],
-  social: { localName: 'Hunter', self: 10, leader: 10, options: 1, members: [{ id: 10, name: 'Hunter', status: 0 }, { id: 11, name: 'Healer', status: 0 }] },
+  social: { localName: 'Hunter', self: 10, leader: 10, options: 1, members: [{ id: 10, name: 'Hunter', status: 0 }, { id: 11, name: 'Healer', level: 61, status: 0x8a }, { id: 12, name: 'Archer', level: 63, status: 0x56 }] },
   cosRecords: [{ gid: 50, refObjId: 500, band: 4, hp: 800, mp: 0, status: 20, dead: false, commandMode: 0x147, inventory: [] }],
   skillCatalog: skills };
 (async () => {
@@ -76,6 +79,8 @@ const gameplay = { localGid: 1, target: 0, targetPending: false, inventoryPendin
       testSim.postMessage({ kind: 'fixture', message: { kind: 'session', state: { phase: 'world', character: 'Hunter' } } });
       testSim.postMessage({ kind: 'fixture', message: { kind: 'world', batch: { events: [
         { kind: 'spawn', entity: { gid: 1, kind: 'local-player', refObjId: 123, regionId: 1, x: 100, y: 0, z: 100, appearanceState: [0], movementMode: 0 } },
+        { kind: 'spawn', entity: { gid: 2, kind: 'player', name: 'Healer', regionId: 1, x: 160, y: 0, z: 100, appearanceState: [0] } },
+        { kind: 'spawn', entity: { gid: 3, kind: 'player', name: 'Archer', regionId: 1, x: 220, y: 0, z: 120, appearanceState: [0] } },
         { kind: 'gameplay', state: game }] } } });
     }, gameplay);
     await page.waitForFunction(() => window.SROLean?.world.inWorld());
@@ -92,6 +97,7 @@ const gameplay = { localGid: 1, target: 0, targetPending: false, inventoryPendin
       p.potion.speedScroll = true;
       p.mastery.enabled = true; p.mastery.ids = [257, 273]; p.mastery.gap = 2;
       p.party.autoAcceptMatching = true; p.party.acceptRes = true;
+      Object.assign(p.party.support, { enabled: true, heal: { id: 14, group: 14, pct: 60, self: false }, buffs: [{ id: 13, group: 13, only: '' }] });
     });
     await page.waitForFunction(() => [...document.getElementById('sro-bot-lean').shadowRoot.querySelectorAll('.slot')].every(s => s.dataset.iconLoaded === 'true') || true);
     const host = () => page.locator('#sro-bot-lean');
