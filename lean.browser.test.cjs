@@ -17,6 +17,11 @@ const images = ['ic_attack', 'ic_recovery', 'ic_autoget', 'ic_sit'].map((key, i)
   const raw = Buffer.concat([images[0].raw, Buffer.from('orb')]);
   images.push({ raw, compressed: zlib.gzipSync(raw), path: '/assets/images/Media_extracted/icon/action/icon_cha_auto_attack.png', transport: '/assets/test-icons/orb.png.gz' });
 }
+// The wide window's page icons (also the game's action icons), each with distinct bytes.
+for (const name of ['autoget', 'recovery', 'alchemy', 'shop', 'helper']) {
+  const raw = Buffer.concat([images[0].raw, Buffer.from('nav-' + name)]);
+  images.push({ raw, compressed: zlib.gzipSync(raw), path: `/assets/images/Media_extracted/icon/action/icon_cha_${name}.png`, transport: `/assets/test-icons/nav-${name}.png.gz` });
+}
 let offset = 0;
 const manifest = { groups: [], assets: images.map((image, i) => {
   const row = { path: image.path, packPath: '/assets/test-icons/icons.pack', offset, length: image.raw.length, sha256: sha(image.raw), mime: 'image/png' };
@@ -391,6 +396,46 @@ const server = http.createServer((req, res) => {
     assert.ok(clamped.x + clamped.width <= 1201 && clamped.y >= 0 && clamped.x >= 0, 'an off-screen saved spot is pulled back on screen');
     await page.evaluate(() => localStorage.removeItem('sroLean:ui'));
     await page.evaluate(() => SROLean.ui.restorePanel());
+    // Wide window: same pages, plus status strip, page icons, session sidebar and activity log; the choice is remembered.
+    const host = page.locator('#sro-bot-lean');
+    const compactWidth = (await host.boundingBox()).width;
+    await page.getByRole('button', { name: 'Wide', exact: true }).click();
+    assert.ok((await host.boundingBox()).width > 900, 'wide window is about 1000 px');
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('sroLean:ui')).wide), true);
+    assert.equal(await page.getByLabel('Activity', { exact: true }).isVisible(), true);
+    assert.equal(await page.locator('.status').isVisible(), false, 'the strip replaces the text status');
+    assert.equal(await page.locator('.strip strong').first().innerText(), await page.evaluate(() => SROLean.world.charName));
+    await page.waitForFunction(() => [...document.getElementById('sro-bot-lean').shadowRoot.querySelectorAll('nav button')].every(b => b.dataset.iconLoaded === 'true'));
+    assert.match(await page.getByLabel('Supplies: HP potions', { exact: true }).innerText(), /^[\d,]+$/);
+    assert.match(await page.getByLabel('Session: Hunting time', { exact: true }).innerText(), /^\d\d:\d\d:\d\d$/);
+    await page.evaluate(() => SROLean.log.info('Wide log line'));
+    await page.waitForFunction(() => document.getElementById('sro-bot-lean').shadowRoot.querySelector('.log').textContent.includes('Wide log line'));
+    // The same page switching and settings work in the wide window.
+    await page.getByRole('button', { name: 'Loot', exact: true }).click();
+    assert.equal(await page.getByRole('button', { name: 'Loot', exact: true }).getAttribute('aria-selected'), 'true');
+    await page.getByRole('button', { name: 'Start / stop · F8', exact: true }).click();
+    await page.waitForFunction(() => document.getElementById('sro-bot-lean').shadowRoot.querySelector('.state').dataset.state === 'ok');
+    assert.equal(await page.locator('.state strong').innerText(), 'Hunting');
+    await page.screenshot({ path: __dirname + '/lean-wide-desktop.png' });
+    await page.getByRole('button', { name: 'Combat', exact: true }).click();
+    await page.screenshot({ path: __dirname + '/lean-wide-combat.png' });
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await page.screenshot({ path: __dirname + '/lean-wide-settings.png' });
+    for (const name of ['Supplies', 'Alchemy', 'Wardrobe']) {
+      await page.getByRole('button', { name, exact: true }).click();
+      await page.screenshot({ path: __dirname + `/lean-wide-${name.toLowerCase()}.png` });
+    }
+    await page.keyboard.press('F8');
+    await page.waitForFunction(() => document.getElementById('sro-bot-lean').shadowRoot.querySelector('.state').dataset.state === 'stop');
+    // A narrow screen always gets the compact window, even with wide chosen.
+    await page.setViewportSize({ width: 800, height: 1000 });
+    assert.ok((await host.boundingBox()).width < 500);
+    assert.equal(await page.getByLabel('Activity', { exact: true }).isVisible(), false);
+    await page.setViewportSize({ width: 1200, height: 1000 });
+    await page.getByRole('button', { name: 'Compact', exact: true }).click();
+    assert.equal(Math.round((await host.boundingBox()).width), Math.round(compactWidth));
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('sroLean:ui')).wide), false);
+    await page.getByRole('button', { name: 'Combat', exact: true }).click();
     await page.getByRole('button', { name: 'Skills', exact: true }).click();
     await page.waitForFunction(() => [...document.getElementById('sro-bot-lean').shadowRoot.querySelectorAll('.slot')].every(s => s.dataset.iconLoaded === 'true'));
     await page.screenshot({ path: __dirname + '/lean-skills-desktop.png', fullPage: true });
@@ -556,14 +601,15 @@ const server = http.createServer((req, res) => {
       await route.fulfill({status:reportStatus,headers:{'Access-Control-Allow-Origin':'*','Retry-After':'60','Access-Control-Expose-Headers':'Retry-After'},json:reportStatus===200?{ok:true}:{error:'rate limited'}});
     });
     await page.getByRole('button',{name:'Settings',exact:true}).click();
+    if (await page.locator('.patch-notes header .fold').isVisible()) await page.locator('.patch-notes header .fold').click();
     await page.getByRole('button',{name:'Send bug report',exact:true}).click();
     const preview = page.getByRole('textbox',{name:'Report preview',exact:true});
     await preview.waitFor(); assert.equal(reportRequests.length,0);
     // The report is its own floating window: fixed on screen, inside the viewport, draggable, closed from its header.
-    const dialog = () => page.evaluate(() => { const root = document.querySelector('#sro-bot-lean').shadowRoot, d = root.querySelector('.dialog'), r = d.getBoundingClientRect();
+    const dialog = () => page.evaluate(() => { const root = document.querySelector('#sro-bot-lean').shadowRoot, d = root.querySelector('.dialog:not(.patch-notes)'), r = d.getBoundingClientRect();
       return { fixed: getComputedStyle(d).position === 'fixed', hidden: d.hidden, left: r.left, top: r.top, inside: r.left >= 0 && r.top >= 0 && r.right <= innerWidth + 1, inPanel: !!root.querySelector('.panel .dialog, .body .dialog') }; });
     const before = await dialog(); assert.deepEqual([before.fixed, before.hidden, before.inside, before.inPanel], [true, false, true, false]);
-    const titleBox = await page.locator('#sro-bot-lean').locator('css=.dialog header').boundingBox();
+    const titleBox = await page.locator('#sro-bot-lean').locator('css=.dialog:not(.patch-notes) header').boundingBox();
     await page.mouse.move(titleBox.x + 60, titleBox.y + 15); await page.mouse.down(); await page.mouse.move(titleBox.x + 120, titleBox.y + 55, { steps: 4 }); await page.mouse.up();
     const moved = await dialog(); assert.ok(moved.left > before.left + 30 && moved.top > before.top + 20);
     await page.getByRole('button',{name:'Close bug report',exact:true}).click();

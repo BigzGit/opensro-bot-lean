@@ -185,17 +185,24 @@ const UI = {
     const version = this.button(VERSION, () => this.showNotes());
     version.className = 'version'; version.title = 'What’s new: patch notes';
     const name = el('strong', 'nixxane bot '); name.append(version);
-    header.append(name, discord, this.updateButton, fold);
+    this.layoutButton = this.button('Wide', () => this.setWide(!this.wide));
+    this.layoutButton.className = 'layout'; this.layoutButton.title = 'Switch between the wide and the compact window';
+    header.append(name, this.layoutButton, discord, this.updateButton, fold);
     this.body = el('div', null, 'body'); this.status = el('div', 'Waiting for game…', 'status'); this.status.setAttribute('role', 'status');
     this.updateNote = el('div', '', 'update-note'); this.updateNote.hidden = true;
     Updates.render();
     const controls = this.row(this.button('Start / stop · F8', () => toggleBot()), this.button('Return & hunt', () => WalkBack.start(true)), this.button('Stop all', () => stopAll()));
     controls.classList.add('controls');
     this.nav = el('nav'); this.nav.setAttribute('aria-label', 'Bot settings');
-    for (const name of ['Combat', 'Loot', 'Supplies', 'Alchemy', 'Wardrobe', 'Settings']) this.nav.append(this.button(name, () => { this.current = name; this.draw(); }));
+    // Page icons are the game's own action-bar icons; they show only in the wide window's page list.
+    const navIcons = { Combat: 'auto_attack', Loot: 'autoget', Supplies: 'recovery', Alchemy: 'alchemy', Wardrobe: 'shop', Settings: 'helper' };
+    for (const name of ['Combat', 'Loot', 'Supplies', 'Alchemy', 'Wardrobe', 'Settings']) {
+      const tab = this.button(name, () => { this.current = name; this.draw(); });
+      Icons.paint(tab, `action\\icon_cha_${navIcons[name]}.ddj`); this.nav.append(tab);
+    }
     this.pane = el('div', null, 'pane'); this.feedback = el('div', null, 'feedback'); this.feedback.setAttribute('role', 'status');
     this.waitNote = el('div', '', 'waiting'); this.waitNote.setAttribute('role', 'status');
-    this.body.append(this.updateNote, this.status, this.waitNote, controls, this.nav, this.pane, this.feedback);
+    this.body.append(this.updateNote, this.makeStrip(), this.status, this.waitNote, controls, this.nav, this.pane, this.makeSide(), this.feedback, this.makeLog());
     for (const corner of ['lu', 'mu', 'ru', 'ls', 'rs', 'ld', 'md', 'rd']) panel.append(el('div', null, 'frame ' + corner));
     panel.append(header, this.body); this.root.append(style, panel, this.makeOrb());
     this.panel = panel;
@@ -203,6 +210,7 @@ const UI = {
     // The panel's spot is remembered across reloads (global, like the minimised icon's).
     this.dragBy(header, host, () => { if (host.style.left) this.uiPrefs({ panel: { x: host.offsetLeft, y: host.offsetTop } }); });
     W.addEventListener('resize', () => { this.fitWindow(this.reportBox); this.fitWindow(this.notesBox); if (this.minimised) this.placeOrb(host.offsetLeft, host.offsetTop); else if (host.style.left) this.fitWindow(host); });
+    this.setWide(!!this.uiPrefs().wide, false);
     this.draw(); this.update();
     this.restorePanel();
     if (this.uiPrefs().minimised) this.minimise(true);
@@ -214,6 +222,109 @@ const UI = {
     try { prefs = JSON.parse(W.localStorage.getItem('sroLean:ui') || '{}') || {}; } catch {}
     if (patch) { prefs = { ...prefs, ...patch }; try { W.localStorage.setItem('sroLean:ui', JSON.stringify(prefs)); } catch {} }
     return prefs;
+  },
+  // What the bot is doing, for the status strip and the minimised icon: ok (hunting), busy or stop.
+  botState() {
+    const dead = World.inWorld() && World.isDead(), mode = Controller.mode, error = mode === 'error';
+    const busy = !!Town.trip || !!WalkBack.active || Reconnect.active() || ['town service', 'returning', 'shopping', 'resurrect', 'buff gear', 'alchemy'].includes(mode);
+    const label = dead ? 'Dead' : error ? 'Error' : busy ? mode.charAt(0).toUpperCase() + mode.slice(1) : Hunt.running ? 'Hunting' : 'Stopped';
+    // `note` is what only the state can say; the icon falls back to the first wait reason, which the wide window shows below the strip.
+    const note = Town.trip ? Town.status() : Reconnect.active() && Reconnect.message ? Reconnect.message
+      : Restock.recording ? 'Recording route: ' + Restock.draft.route.length + ' points' : '';
+    const reason = note || (this.waitNote?.textContent || '').split('\n')[0];
+    return { key: dead || error ? 'stop' : busy ? 'busy' : Hunt.running ? 'ok' : 'stop', label, dead, note, reason };
+  },
+  // Wide window: status strip on top, page list on the left, session numbers on the right, activity log below.
+  // The pages themselves are the same as in the compact window. A global choice, kept with the window position.
+  setWide(on, save = true) {
+    this.wide = on;
+    this.root.host.classList.toggle('wide', on);
+    this.layoutButton.textContent = on ? 'Compact' : 'Wide';
+    if (save) this.uiPrefs({ wide: on });
+    if (on) { Stats.loadLevels(); this.updateWide(); }
+    if (!this.minimised && this.root.host.style.left) this.fitWindow(this.root.host);
+  },
+  readout(parent, label, group) {
+    const value = el('b'); value.setAttribute('aria-label', group + ': ' + label);
+    const row = el('div', null, 'readout'); row.append(el('span', label), value); parent.append(row);
+    return value;
+  },
+  makeStrip() {
+    const strip = el('div', null, 'strip wide-only');
+    this.stripName = el('strong'); this.stripLine = el('span', '', 'muted');
+    const who = el('div', null, 'who'); who.append(this.stripName, this.stripLine);
+    const bars = el('div', null, 'bars'); this.bars = {};
+    for (const [key, label] of [['hp', 'HP'], ['mp', 'MP'], ['xp', 'EXP']]) {
+      const fill = el('i'), text = el('span'), track = el('div', null, 'track'); track.append(fill);
+      const row = el('div', null, 'gauge ' + key); row.append(el('label', label), track, text); bars.append(row);
+      this.bars[key] = { fill, text };
+    }
+    this.stripState = el('div', null, 'state'); this.stripLabel = el('strong'); this.stripReason = el('span');
+    this.stripState.append(el('i', null, 'state-dot'), this.stripLabel, this.stripReason);
+    strip.append(who, bars, this.stripState);
+    return strip;
+  },
+  makeSide() {
+    const side = el('aside', null, 'side wide-only'); this.sideFields = {};
+    const session = this.group('Session');
+    for (const [key, label] of [['time', 'Hunting time'], ['rate', 'XP / hour'], ['xp', 'XP gained'], ['gold', 'Net gold'], ['kills', 'Kills'], ['deaths', 'Deaths'], ['sox', 'SoX found'], ['items', 'Items picked up'], ['potions', 'Potions used']])
+      this.sideFields[key] = this.readout(session, label, 'Session');
+    session.append(this.button('Reset session', () => Stats.reset()));
+    const supplies = this.group('Supplies');
+    for (const [key, label] of [['hp', 'HP potions'], ['mp', 'MP potions'], ['bag', 'Free bag slots'], ['pet', 'Pet bag'], ['spot', 'Hunting spot']])
+      this.sideFields[key] = this.readout(supplies, label, 'Supplies');
+    side.append(session, supplies);
+    return side;
+  },
+  makeLog() {
+    const box = el('div', null, 'logbox wide-only');
+    this.logList = el('ol', null, 'log'); this.logList.setAttribute('aria-label', 'Activity');
+    box.append(el('strong', 'Activity'), this.logList);
+    return box;
+  },
+  updateWide() {
+    if (!this.wide || !this.bars || this.minimised) return;
+    const me = World.me(), p = World.gp?.progression || {}, live = World.inWorld();
+    const level = p.level, required = Stats.integer(Stats.levels?.[level]?.expRequired), xp = Stats.integer(p.experience);
+    const xpPct = required && xp !== null ? Number(xp * 10000n / required) / 100 : null;
+    this.stripName.textContent = World.charName || 'No character';
+    this.stripLine.textContent = live ? `Level ${level ?? '?'}` : World.phase || 'Waiting for game…';
+    const n = v => Math.round(v).toLocaleString('en-US');
+    const setBar = (key, pct, text) => {
+      this.bars[key].fill.style.width = (live && Number.isFinite(pct) ? clamp(pct, 0, 100) : 0) + '%';
+      this.bars[key].text.textContent = live ? text : '—';
+    };
+    setBar('hp', me.hpPct, `${n(me.hp)} / ${n(me.maxHp)}`);
+    setBar('mp', me.mpPct, `${n(me.mp)} / ${n(me.maxMp)}`);
+    setBar('xp', xpPct, xpPct === null ? '—' : xpPct.toFixed(2) + ' %');
+    const state = this.botState();
+    this.stripState.dataset.state = state.key; this.stripLabel.textContent = state.label;
+    this.stripReason.textContent = state.note || (Hunt.running ? `Mode: ${Controller.mode}` : 'Press F8 to start');
+    const s = Stats.display();
+    for (const key of ['time', 'rate', 'xp', 'gold', 'kills', 'deaths', 'sox', 'items', 'potions']) this.sideFields[key].textContent = s[key];
+    const pet = live ? Loot.pet() : null, center = Settings.profile.hunt.center, distance = center && live ? dist2D(World.pose(), center) : Infinity;
+    this.sideFields.hp.textContent = live ? n(Potion.count('hp')) : '—';
+    this.sideFields.mp.textContent = live ? n(Potion.count('mp')) : '—';
+    this.sideFields.bag.textContent = live ? String(World.freeBagSlots()) : '—';
+    this.sideFields.pet.textContent = pet ? `${pet.rec.inventory.length} / ${pet.rec.status}` : 'none';
+    this.sideFields.spot.textContent = Number.isFinite(distance) ? Math.round(distance / 10) + ' m away' : center ? 'another region' : 'not saved';
+    // The log is rebuilt only when a line was added, newest at the bottom; it follows new lines unless scrolled up.
+    const last = Log.lines[Log.lines.length - 1];
+    if (last !== this.logLast) {
+      this.logLast = last;
+      const two = v => String(v).padStart(2, '0');
+      // A notice is also logged on its own; show "Hunting stopped" and "Hunting stopped." from the same moment once.
+      const same = (a, b) => a && b && Math.abs(a.at - b.at) < 1000 && a.text.replace(/\.$/, '') === b.text.replace(/\.$/, '');
+      const lines = Log.lines.filter(l => l.level !== 'cmd').slice(-60).filter((l, i, all) => !same(all[i - 1], l)).slice(-40);
+      const rows = lines.map(l => {
+        const row = el('li', null, l.level), at = new Date(l.at);
+        row.append(el('time', `${two(at.getHours())}:${two(at.getMinutes())}:${two(at.getSeconds())}`), el('span', l.text));
+        return row;
+      });
+      const atEnd = this.logList.scrollTop + this.logList.clientHeight >= this.logList.scrollHeight - 4;
+      this.logList.replaceChildren(...rows);
+      if (atEnd) this.logList.scrollTop = this.logList.scrollHeight;
+    }
   },
   makeOrb() {
     const orb = this.orb = el('button', null, 'orb'); orb.type = 'button'; orb.hidden = true;
@@ -281,17 +392,14 @@ const UI = {
   },
   updateOrb() {
     if (!this.orb || !this.minimised) return;
-    const dead = World.inWorld() && World.isDead();
-    if (dead && !this.orbWasDead && Hunt.running) this.alertOrb('Character died.');
-    this.orbWasDead = dead;
-    const mode = Controller.mode, busy = !!Town.trip || !!WalkBack.active || Reconnect.active() || ['town service', 'returning', 'shopping', 'resurrect', 'buff gear', 'alchemy'].includes(mode);
-    const state = dead ? 'Dead' : mode === 'error' ? 'Error' : busy ? 'Busy' : Hunt.running ? 'Hunting' : 'Stopped';
-    this.orb.dataset.state = state === 'Hunting' ? 'ok' : state === 'Busy' ? 'busy' : 'stop';
+    const state = this.botState();
+    if (state.dead && !this.orbWasDead && Hunt.running) this.alertOrb('Character died.');
+    this.orbWasDead = state.dead;
+    this.orb.dataset.state = state.key;
     this.orb.classList.toggle('alert', !!this.orbAlert);
     this.orb.classList.toggle('left', this.root.host.offsetLeft < 280);
-    this.orbState.textContent = this.orbAlert ? 'Needs you' : state === 'Busy' ? mode.charAt(0).toUpperCase() + mode.slice(1) : state;
-    const reason = Town.trip ? Town.status() : Reconnect.active() && Reconnect.message ? Reconnect.message : (this.waitNote?.textContent || '').split('\n')[0];
-    this.orbDetail.textContent = this.orbAlert || reason || (Hunt.running ? 'Hunting' : 'Press F8 to start');
+    this.orbState.textContent = this.orbAlert ? 'Needs you' : state.label;
+    this.orbDetail.textContent = this.orbAlert || state.reason || (Hunt.running ? 'Hunting' : 'Press F8 to start');
     const me = World.me();
     this.orbVitals.textContent = World.inWorld() ? `${World.charName || ''} · HP ${Math.round(me.hpPct)}% · MP ${Math.round(me.mpPct)}%` : '';
   },
@@ -589,7 +697,7 @@ const UI = {
     Reports.render();
     const diagnosticState = Diagnostics.sample();
     if (this.waitNote) this.waitNote.textContent = Diagnostics.lines(diagnosticState);
-    this.updateOrb();
+    this.updateOrb(); this.updateWide();
     if (this.townNote) this.townNote.textContent = Town.status();
     if (this.current === 'Settings' && AutoMastery.note) AutoMastery.note.textContent = AutoMastery.status();
     if (this.current === 'Settings' && this.stuckNote) this.stuckNote.textContent = AntiStuck.status();
