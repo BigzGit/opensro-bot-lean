@@ -141,3 +141,21 @@ nav button{min-width:0;padding:0 3px}
 .member-bars{display:grid;gap:3px}.pbar{height:5px;background:#050505;border:1px solid #3d3626}.pbar i{display:block;height:100%}.pbar.hp i{background:linear-gradient(#ff7a6a,#b01e1a)}.pbar.mp i{background:linear-gradient(#7fb4ff,#2557b8)}
 .member-buffs{display:flex;gap:2px}.member-buffs .skill-icon{width:22px;min-width:22px;height:22px;flex:0 0 22px}.member-buffs .skill-icon img{width:20px;height:20px}.member-buffs .skill-icon.off{filter:grayscale(1) brightness(.5)}
 @media(min-width:900px){:host(.wide) .pane>fieldset:has(.members){grid-column:1/-1}}
+/* Items page */
+.degrees{display:flex;flex-wrap:wrap;gap:4px 8px;margin:4px 0 8px}.degrees label{display:flex;align-items:center;gap:3px;font-size:11px;cursor:pointer}
+.bulk{gap:3px;margin:4px 0 6px}.bulk button{min-width:0;font-size:11px;padding:0 6px}.bulk button.armed{color:#ffc67a}
+.item-table{display:grid;border:1px solid #3d3626;max-height:none}
+.item-row{display:grid;grid-template-columns:26px minmax(0,1fr) 26px 34px repeat(5,30px);align-items:center;gap:2px;min-height:28px;padding:1px 3px;border-top:1px solid #2f2a1e}
+.item-row.head{min-height:20px;border-top:0;color:#b9a878;font-size:10px;text-align:center}.item-row.head span:nth-child(2){text-align:left}
+.item-row:not(.head):hover{background:#ffffff0a}.item-row.ruled{background:#2a2414}
+.item-row .skill-icon{width:24px;min-width:24px;height:24px;flex:0 0 24px}.item-row .skill-icon img{width:22px;height:22px}
+.item-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff}.item-name em{font-style:normal;color:#6fc1ff;margin-left:5px;font-size:10px}
+.item-row>span:nth-child(3){text-align:center;color:#d6c794}
+.item-row button.cell{min-width:0;width:100%;height:20px;padding:0;font-size:11px;border-width:3px}.item-row button.cell.on{color:#ffd65a}
+.pager{justify-content:space-between;margin-top:6px}
+.item-menu{position:fixed;z-index:30;display:grid;gap:2px;min-width:170px;padding:6px;background:rgba(11,10,7,.97);border:1px solid #6b5a36;box-shadow:0 4px 14px #000}
+.item-menu strong{color:#fff;font-weight:normal;margin:0 2px 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.item-menu button{justify-content:flex-start;height:22px}
+@media(min-width:900px){:host(.wide) .pane>fieldset:has(.item-table){grid-column:1/-1}:host(.wide) .item-row{grid-template-columns:26px minmax(0,1fr) 34px 44px repeat(5,48px)}}
+/* Ten pages: two rows of five tabs in the compact window. The wide window keeps its page list. */
+nav button{flex:1 0 calc(20% - 2px)}
+fieldset>input[type=search]{width:100%;margin:2px 0 6px}

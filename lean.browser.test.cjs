@@ -18,7 +18,7 @@ const images = ['ic_attack', 'ic_recovery', 'ic_autoget', 'ic_sit'].map((key, i)
   images.push({ raw, compressed: zlib.gzipSync(raw), path: '/assets/images/Media_extracted/icon/action/icon_cha_auto_attack.png', transport: '/assets/test-icons/orb.png.gz' });
 }
 // The Map page: the minimap tile under the test character (region 1 = 1x0), the map button and the minimap signs.
-for (const name of ['icon/item/etc/mall_return_scroll', 'icon/item/etc/mall_warehouse_ticket', 'icon/item/etc/all_potion_03', 'icon/item/etc/mall_repair_hammer', 'icon/item/etc/mall_reverse_return_scroll', 'interface/minimap/mm_map_button', ...['character', 'party', 'otherplayer', 'monster', 'unique', 'npc', 'animal'].map(s => 'interface/minimap/mm_sign_' + s)]) {
+for (const name of ['icon/action/cos_cmd_inventory', 'icon/item/etc/mall_return_scroll', 'icon/item/etc/mall_warehouse_ticket', 'icon/item/etc/all_potion_03', 'icon/item/etc/mall_repair_hammer', 'icon/item/etc/mall_reverse_return_scroll', 'interface/minimap/mm_map_button', ...['character', 'party', 'otherplayer', 'monster', 'unique', 'npc', 'animal'].map(s => 'interface/minimap/mm_sign_' + s)]) {
   const raw = Buffer.concat([images[1].raw, Buffer.from('map-' + name)]);
   images.push({ raw, compressed: zlib.gzipSync(raw), path: `/assets/images/Media_extracted/${name}.png`, transport: `/assets/test-icons/${name.replace(/\//g, '-')}.png.gz` });
 }
@@ -450,9 +450,9 @@ const server = http.createServer((req, res) => {
     const title = page.locator('#sro-bot-lean header').first(), panelStart = await page.locator('#sro-bot-lean').boundingBox();
     const tb = await title.boundingBox();
     await page.mouse.move(tb.x + 60, tb.y + 10); await page.mouse.down();
-    await page.mouse.move(tb.x + 60 - 250, tb.y + 10 + 120, { steps: 6 }); await page.mouse.up();
+    await page.mouse.move(tb.x + 60 - 250, tb.y + 10 + 40, { steps: 6 }); await page.mouse.up();
     const panelMoved = await page.locator('#sro-bot-lean').boundingBox();
-    assert.ok(Math.abs(panelMoved.x - (panelStart.x - 250)) < 3 && Math.abs(panelMoved.y - (panelStart.y + 120)) < 3);
+    assert.ok(Math.abs(panelMoved.x - (panelStart.x - 250)) < 3 && Math.abs(panelMoved.y - (panelStart.y + 40)) < 3);
     assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('sroLean:ui')).panel), { x: Math.round(panelMoved.x), y: Math.round(panelMoved.y) });
     await page.getByRole('button', { name: 'Minimise bot window', exact: true }).click();
     await orb.click();
@@ -505,6 +505,35 @@ const server = http.createServer((req, res) => {
     await page.getByRole('button', { name: 'Compact', exact: true }).click();
     assert.equal(Math.round((await host.boundingBox()).width), Math.round(compactWidth));
     assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('sroLean:ui')).wide), false);
+    // Items page: the catalogue with a rule per item, set by row buttons, the right-click menu and bulk buttons.
+    await page.getByRole('button', { name: 'Items', exact: true }).click();
+    const itemSummary = page.locator('.item-table').locator('xpath=..').locator('p.muted').first();
+    await page.waitForFunction(() => /items shown/.test(document.getElementById('sro-bot-lean').shadowRoot.querySelector('.item-table')?.parentElement.textContent || ''));
+    assert.match(await itemSummary.innerText(), /^57 items shown · 0 with a rule\.$/);
+    await page.getByLabel('Find an item', { exact: true }).fill('test sword');
+    assert.match(await itemSummary.innerText(), /^1 items shown/);
+    await page.getByRole('button', { name: 'Store Test Sword', exact: true }).click();
+    await page.getByRole('button', { name: 'Pick Test Sword', exact: true }).click();
+    assert.deepEqual(await page.evaluate(() => SROLean.settings.profile.items.rules[10]), { act: 'store', pick: 'yes' });
+    assert.equal(await page.getByRole('button', { name: 'Store Test Sword', exact: true }).getAttribute('aria-pressed'), 'true');
+    await page.locator('.item-row[data-id="10"]').click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Drop', exact: true }).click();
+    assert.deepEqual(await page.evaluate(() => SROLean.settings.profile.items.rules[10]), { act: 'drop' }, 'drop replaces pick: never picked up again');
+    await page.getByLabel('Find an item', { exact: true }).fill('');
+    await page.getByLabel('Item group', { exact: true }).selectOption('mall');
+    assert.match(await itemSummary.innerText(), /^55 items shown/);
+    const bulkSell = page.getByRole('button', { name: 'All shown: Sell', exact: true });
+    await bulkSell.click(); assert.equal(await bulkSell.innerText(), 'Sell 55?', 'asks for a second click');
+    assert.equal(await page.evaluate(() => Object.keys(SROLean.settings.profile.items.rules).length), 1);
+    await bulkSell.click(); assert.equal(await page.evaluate(() => Object.keys(SROLean.settings.profile.items.rules).length), 56);
+    await page.getByLabel('Item group', { exact: true }).selectOption('all');
+    await page.getByLabel('Only items with a rule', { exact: true }).check();
+    assert.match(await itemSummary.innerText(), /^56 items shown · 56 with a rule\.$/);
+    await page.locator('.pane').screenshot({ path: __dirname + '/lean-items-page.png' });
+    const bulkClear = page.getByRole('button', { name: 'All shown: Clear', exact: true });
+    await bulkClear.click(); await bulkClear.click();
+    assert.equal(await page.evaluate(() => Object.keys(SROLean.settings.profile.items.rules).length), 0);
+    await page.getByLabel('Only items with a rule', { exact: true }).uncheck();
     // Map page: minimap tile, entities in view, marking a point and making it the hunting spot, zoom and follow.
     await page.evaluate(() => testSim.postMessage({ kind: 'fixture', message: { kind: 'world', batch: { events: [
       { kind: 'spawn', entity: { gid: 50, kind: 'monster', name: 'Map mob', regionId: 1, x: 260, y: 0, z: 160, appearanceState: [0], rarity: 0 } },

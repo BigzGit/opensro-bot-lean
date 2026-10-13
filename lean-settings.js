@@ -2,6 +2,7 @@ const DISCORD_URL = 'https://discord.gg/Y5H5ZyfQ7u';
 const NOTES_URL = 'https://nixxane.github.io/opensro-bot-lean-site/#patch-notes';
 const CLASS_KEYS = ['normal', 'champion', 'giant', 'party', 'elite', 'unique'];
 const DEFAULT_PROFILE = {
+  items: { rules: {} },
   alchemy: { target: 3, limit: 20, elixir: 0, powder: false, stones: { luck: 0, steady: 0, immortal: 0 }, stoneLimit: 0 },
   mastery: { enabled: false, ids: [], gap: 0, skills: false, reserve: 0, order: 'masteries' },
   party: { autoAcceptMatching: false, autoRecruit: false, autoRes: false, acceptRes: false, resRadius: 300, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true,
@@ -47,7 +48,7 @@ const DEFAULT_PROFILE = {
 function botProfile(input) {
   const result = deepMerge(DEFAULT_PROFILE, {});
   if (!input || typeof input !== 'object') return result;
-  for (const key of ['macro', 'potion', 'hunt', 'wardrobe', 'party', 'alchemy', 'mastery']) {
+  for (const key of ['macro', 'potion', 'hunt', 'wardrobe', 'party', 'alchemy', 'mastery', 'items']) {
     if (!input[key] || typeof input[key] !== 'object') continue;
     for (const field of Object.keys(DEFAULT_PROFILE[key])) {
       if (field in input[key]) result[key][field] = deepMerge(DEFAULT_PROFILE[key][field], input[key][field]);

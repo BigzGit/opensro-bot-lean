@@ -15,6 +15,10 @@ A compact OpenSRO bot for hunting, potions, pet loot and automatic town trips.
 
 Settings are saved separately for each character. The bot checks for updates on load and every 15 minutes; click **Update** beside the version when it appears, install, then reload when ready.
 
+## Item rules
+
+The **Items** page lists every item in the game with sBot-style filters (group, race, gender, type, degree, search, only items with a rule). Per item choose **Pick** always/never and one action: **Store** (warehouse on town trips), **Sell** (pet loot at the repair merchant), **Keep**, or **Drop** (thrown away from your bag or the pet while hunting, never picked up again). Click a cell, right-click a row, or use the bulk buttons for everything shown (second click confirms). Rules come first; other items follow the Loot switches. Your own bag is never sold, and supplies the town trip needs are never stored from it.
+
 ## Vigor and pet potions
 
 Under **Supplies → Automatic potion use**:

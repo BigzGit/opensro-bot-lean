@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, SpeedScroll, Log, AntiStuck, Items, AutoMastery, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Items, AutoMastery, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -274,6 +274,61 @@ test('the weakest attacker goes first, also when no target is held', () => {
   s.f.Hunt.tick(); assert.deepEqual(s.selected(), [43], 'of two normals, the one closest to dead');
   s = giantFight(); s.f.Hunt.targetGid = 0; s.f.World.gp.target = 0; s.mob(41, 0, 160, 'Small'); s.hit(41);
   s.f.Hunt.tick(); assert.deepEqual(s.selected(), [41], 'with no target, the small attacker before the nearer giant');
+});
+test('item rules decide pickup before the loot categories', () => {
+  const f = fixture(); f.Hunt.start(); const d = f.drop(), P = f.Settings.profile.hunt.pickup;
+  assert.equal(f.Loot.allowed(d), true, 'potions are collected by default');
+  f.ItemRules.set([101], { pick: 'no' }); assert.equal(f.Loot.allowed(d), false); assert.equal(f.Loot.whyNot(d), 'rule');
+  P.potions = false; f.ItemRules.set([101], { pick: 'yes' }); assert.equal(f.Loot.allowed(d), true, 'always: even with Potions off');
+  P.exclude = 'hp potion'; assert.equal(f.Loot.allowed(d), true, 'and past the exclude names');
+  f.ItemRules.set([101], { act: 'drop' }); assert.equal(f.Loot.allowed(d), false, 'a dropped item is never picked up again');
+  assert.deepEqual(JSON.parse(JSON.stringify(f.ItemRules.get(101))), { act: 'drop' }, 'drop clears the pick part');
+  f.ItemRules.set([101], { act: null }); assert.equal(f.ItemRules.get(101), null, 'an empty rule is removed');
+});
+test('item rules decide what the town trip stores and sells', () => {
+  const f = townFixture(), elixir = f.pet.inventory[0], other = f.pet.inventory[4], potion = f.World.gp.inventory.find(i => i.refObjId === 15);
+  assert.deepEqual([f.Town.eligible(other), f.Town.sellable(other)], [false, true], 'without a rule other loot is sold');
+  f.ItemRules.set([other.refObjId], { act: 'store' }); assert.deepEqual([f.Town.eligible(other), f.Town.sellable(other)], [true, false], 'store rule');
+  assert.deepEqual([f.Town.eligible(elixir), f.Town.sellable(elixir)], [true, false], 'elixirs are stored by default');
+  f.ItemRules.set([elixir.refObjId], { act: 'sell' }); assert.deepEqual([f.Town.eligible(elixir), f.Town.sellable(elixir)], [false, true], 'sell rule');
+  f.ItemRules.set([elixir.refObjId], { act: 'keep' }); assert.deepEqual([f.Town.eligible(elixir), f.Town.sellable(elixir)], [false, false], 'keep rule');
+  f.ItemRules.set([15], { act: 'store' }); assert.equal(f.Town.depositItem(potion, true), false, 'potions the trip needs stay in the bag');
+  f.World.gp.inventory.push({ slot: 20, refObjId: 1003, typeFlags: 108, quantity: 1, name: 'Other item' });
+  assert.equal(f.Town.depositItem(f.World.gp.inventory.at(-1), true), true, 'other bag items with a store rule are deposited');
+});
+test('item rules drop from the bag and the pet, one at a time, never worn gear', () => {
+  const f = townFixture(), gp = f.World.gp;
+  gp.inventory.push({ slot: 20, refObjId: 1003, typeFlags: 108, quantity: 1 });
+  f.ItemRules.set([1003, 900], { act: 'drop' });
+  f.ItemRules.dropTick(); assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'item-drop', slot: 20 }, 'the bag item; the worn weapon (slot 6) stays');
+  const sent = f.commands.length; f.advance(1000); f.ItemRules.dropTick(); assert.equal(f.commands.length, sent, 'waits to see it leave the bag');
+  gp.inventory = gp.inventory.filter(i => i.slot !== 20); f.advance(300); f.ItemRules.dropTick();
+  assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'cos-drop', gid: f.pet.gid, slot: 4 }, 'then the pet item');
+  assert.ok(f.Log.lines.some(l => /Dropped .* \(item rule\)/.test(l.text)));
+  const n = f.commands.length; f.advance(6000); f.ItemRules.dropTick(); assert.equal(f.commands.length, n, 'not confirmed: backs off');
+  assert.match(f.ItemRules.message, /not dropped; trying again in 30 s/);
+  f.advance(31000); f.ItemRules.dropTick(); assert.equal(f.commands.at(-1).kind, 'cos-drop', 'and tries again later');
+  f.pet.inventory = f.pet.inventory.filter(i => i.slot !== 4); f.Town.begin(); const m = f.commands.length;
+  gp.inventory.push({ slot: 21, refObjId: 1003, typeFlags: 108, quantity: 1 }); f.advance(6000); f.ItemRules.dropTick();
+  assert.equal(f.commands.slice(m).some(c => c.kind === 'item-drop'), false, 'never during town service');
+  f.Town.cancel(); f.Hunt.stop(); f.ItemRules.dropTick(); assert.equal(f.commands.slice(m).some(c => c.kind === 'item-drop'), false, 'nor while stopped');
+});
+test('item codenames give race, gender, degree, type and the filters', () => {
+  const f = fixture();
+  for (const [id, code, name] of [[97, 'ITEM_CH_SWORD_09_C', 'Sword 9'], [4040, 'ITEM_CH_SWORD_09_C_RARE', 'Sword 9 (Sun)'], [500, 'ITEM_EU_W_LIGHT_05_SA_A', 'Light shoulder'],
+    [501, 'ITEM_EU_TSTAFF_03_A', 'Staff'], [502, 'ITEM_CH_RING_01_A', 'Ring'], [8, 'ITEM_ETC_HP_POTION_04', 'HP potion'], [503, 'ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_WEAPON_A_09', 'Elixir']])
+    f.Items.data.set(id, { name, code, icon: '' });
+  const pick = (k, v) => JSON.parse(JSON.stringify(Object.fromEntries(Object.entries(f.ItemRules.info(k)).filter(([key]) => v.includes(key)))));
+  assert.deepEqual(pick(97, ['race', 'degree', 'group', 'kind', 'sox']), { race: 'CH', degree: 9, group: 'weapon', kind: 'Sword', sox: 0 });
+  assert.equal(f.ItemRules.info(4040).sox, 3, '_C_RARE is Sun');
+  assert.deepEqual(pick(500, ['race', 'gender', 'degree', 'group', 'kind', 'material']), { race: 'EU', gender: 'Female', degree: 5, group: 'armour', kind: 'Shoulder', material: 'Protector' });
+  assert.deepEqual(pick(501, ['group', 'kind']), { group: 'weapon', kind: 'Staff' });
+  assert.deepEqual([f.ItemRules.info(502).group, f.ItemRules.info(8).group, f.ItemRules.info(503).group], ['accessory', 'potion', 'alchemy']);
+  const ids = filter => JSON.parse(JSON.stringify(f.ItemRules.list(filter).map(i => i.id)));
+  assert.deepEqual(ids({ group: 'equipment', degrees: new Set([9]) }), [97, 4040]);
+  assert.deepEqual(ids({ race: 'EU', kind: 'Protector' }), [500]);
+  assert.deepEqual(ids({ query: 'potion' }), [8]);
+  f.ItemRules.set([502], { act: 'sell' }); assert.deepEqual(ids({ custom: true }), [502], 'custom: only items with a rule');
 });
 test('stop and manual control prevent further automation', () => {
   const f = fixture(); f.Hunt.start(); f.drop(); f.Hunt.tick(); f.Hunt.stop();

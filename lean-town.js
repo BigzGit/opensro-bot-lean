@@ -207,7 +207,16 @@ const Town = {
   // the player relies on stays put: names in Keep, a saved buff set's weapon or shield, and the weapon picked for
   // alchemy (checked by bag slot, so only for items from the character bag).
   depositItem(item, fromBag = false) {
-    const c = this.cfg();
+    const c = this.cfg(), act = ItemRules.get(item.refObjId)?.act;
+    // An item rule decides first. Store: any kind of item, except from the bag what the trip itself needs
+    // (potions, pills, return/reverse/speed scrolls, the supplies it buys). Sell, keep or drop: never deposited.
+    if (act && act !== 'store') return false;
+    if (act === 'store') {
+      if (fromBag && this.needed(item)) return false;
+      const key = BuffGear.key(item);
+      if (BuffGear.cfg().buffSets.some(s => s.weapon === key || s.shield === key)) return false;
+      return !(fromBag && Alchemy.selected && Alchemy.selected.slot === item.slot);
+    }
     if (!Number.isInteger(item.typeFlags) || !ItemType.isEquipment(item.typeFlags)) return false;
     const level = this.requiredLevel(item);
     if (!(c.storeSox && Items.soxOf(item) > 0) && !(level !== null && this.levelRanges().some(([a, b]) => level >= a && level <= b))) return false;
@@ -219,9 +228,21 @@ const Town = {
   // Loot kept in the warehouse instead of being sold. Stones are also deposited from the character bag; elixirs are
   // not, because alchemy takes them from there.
   kept: ['elixirs', 'magicStones', 'attrStones'],
-  stone(item) { return this.disposable(item) && ['magicStones', 'attrStones'].includes(Loot.category(item.typeFlags)); },
-  eligible(item) { return this.depositItem(item) || this.disposable(item) && this.kept.includes(Loot.category(item.typeFlags)); },
-  sellable(item) { return this.disposable(item) && !this.kept.includes(Loot.category(item.typeFlags)); },
+  // Supplies the town trip needs and buys, kept in the bag whatever the rules say.
+  needed(item) {
+    const tf = item.typeFlags;
+    return !Number.isInteger(tf) || ItemType.isPotion(tf) || ItemType.isCure(tf) || (tf & 0x7fc) === 0x1ec || item.refObjId === 24198 ||
+      Restock.supplies().some(s => s.refObjId === item.refObjId);
+  },
+  ruled(item) { const act = ItemRules.get(item.refObjId)?.act; return act && act !== 'store' ? act : ''; },
+  stone(item) { return !this.ruled(item) && this.disposable(item) && ['magicStones', 'attrStones'].includes(Loot.category(item.typeFlags)); },
+  eligible(item) { return !this.ruled(item) && (this.depositItem(item) || this.disposable(item) && this.kept.includes(Loot.category(item.typeFlags))); },
+  // Pet loot only (the character bag is never sold). A Sell rule sells it; keep, store and drop rules never do.
+  sellable(item) {
+    const act = ItemRules.get(item.refObjId)?.act;
+    if (act) return act === 'sell';
+    return this.disposable(item) && !this.kept.includes(Loot.category(item.typeFlags));
+  },
   autoRevive() { return this.cfg().enabled && this.cfg().revive; },
   reason() {
     const c = this.cfg(), pet = Loot.pet();

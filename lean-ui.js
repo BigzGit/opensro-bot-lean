@@ -195,9 +195,9 @@ const UI = {
     controls.classList.add('controls');
     this.nav = el('nav'); this.nav.setAttribute('aria-label', 'Bot settings');
     // Page icons are the game's own action-bar icons; they show only in the wide window's page list.
-    const navIcons = { Party: 'action\\icon_cha_party', Combat: 'action\\icon_cha_auto_attack', Loot: 'action\\icon_cha_autoget', Supplies: 'action\\icon_cha_recovery', Town: 'item\\etc\\mall_return_scroll',
+    const navIcons = { Items: 'action\\cos_cmd_inventory', Party: 'action\\icon_cha_party', Combat: 'action\\icon_cha_auto_attack', Loot: 'action\\icon_cha_autoget', Supplies: 'action\\icon_cha_recovery', Town: 'item\\etc\\mall_return_scroll',
       Alchemy: 'action\\icon_cha_alchemy', Wardrobe: 'action\\icon_cha_shop', Settings: 'action\\icon_cha_helper' };
-    for (const name of ['Map', 'Combat', 'Party', 'Loot', 'Supplies', 'Town', 'Alchemy', 'Wardrobe', 'Settings']) {
+    for (const name of ['Map', 'Combat', 'Party', 'Loot', 'Items', 'Supplies', 'Town', 'Alchemy', 'Wardrobe', 'Settings']) {
       const tab = this.button(name, () => { this.current = name; this.draw(); });
       if (name === 'Map') this.paintPath(tab, MAP_ART + 'interface/minimap/mm_map_button.png');
       else Icons.paint(tab, navIcons[name] + '.ddj');
@@ -754,6 +754,8 @@ const UI = {
         this.check('Auto-resurrect party members', () => party().autoRes, v => { party().autoRes = v; Resurrect.reset(); }),
         this.number('Maximum res distance from hunt spot (m)', () => party().resRadius / 10, v => party().resRadius = v * 10, 1, 100),
         el('p', 'Works during hunting and while stopped. Walks into skill range for visible dead members within the maximum radius, casts Rebirth, then returns. During hunting the radius is measured from the saved hunt spot; while stopped it uses your starting position. Collision data is required for walking. Travel stops after 30 seconds or 12 seconds without progress per leg. The member must accept the revival. Travel, shopping and manual control take priority.', 'muted')));
+    } else if (this.current === 'Items') {
+      this.drawItems();
     } else if (this.current === 'Map') {
       LeanMap.draw(this.pane);
     } else if (this.current === 'Alchemy') {
@@ -791,6 +793,110 @@ const UI = {
     }
     this.update();
     this.pane.scrollTop = scroll;
+  },
+  // Items page: every item of the game's catalogue with its rule (sBot's item list). Filters re-render only the table,
+  // so typing in the search box keeps its focus. 100 rows per page; bulk buttons apply to everything the filters show.
+  itemFilter: { query: '', group: 'all', race: '', gender: '', kind: '', degrees: new Set(), custom: false, page: 0 },
+  drawItems() {
+    if (!Items.data.size) {
+      this.pane.append(this.group('Items', el('div', 'Loading the game\u2019s item list…', 'empty')));
+      Items.ready().then(() => { if (this.current === 'Items') this.draw(); }, () => { if (this.current === 'Items') this.toast('The item list could not be loaded; try again in a moment.', 'warn'); });
+      return;
+    }
+    const f = this.itemFilter, refresh = () => { f.page = 0; renderTable(); };
+    const choose = (title, options, key) => {
+      const input = el('select'); input.setAttribute('aria-label', title);
+      input.append(...options.map(([value, text]) => { const o = el('option', text); o.value = value; return o; }));
+      input.value = f[key]; input.addEventListener('change', () => { f[key] = input.value; refresh(); });
+      const label = el('label', null, 'field'); label.append(el('span', title), input); return label;
+    };
+    const kinds = ['Head', 'Shoulder', 'Chest', 'Hand', 'Trouser', 'Boot', 'Shield', 'Garment', 'Protector', 'Armor', 'Necklace', 'Earring', 'Ring',
+      'Blade', 'Sword', 'Glaive', 'Spear', 'Bow', '1HSword', '2HSword', 'Axe', 'X-Bow', 'Dagger', 'Staff', 'W-Rod', 'C-Rod', 'Harp'];
+    const search = el('input'); search.type = 'search'; search.placeholder = 'Find an item (name, code or id)'; search.value = f.query; search.setAttribute('aria-label', 'Find an item');
+    search.addEventListener('input', () => { f.query = search.value; refresh(); });
+    const degrees = el('div', null, 'degrees');
+    for (let d = 1; d <= 12; d++) {
+      const box = el('input'); box.type = 'checkbox'; box.checked = f.degrees.has(d); box.setAttribute('aria-label', 'Degree ' + d);
+      box.addEventListener('change', () => { box.checked ? f.degrees.add(d) : f.degrees.delete(d); refresh(); });
+      const label = el('label'); label.append(box, el('span', String(d))); degrees.append(label);
+    }
+    const custom = el('input'); custom.type = 'checkbox'; custom.checked = f.custom; custom.setAttribute('aria-label', 'Only items with a rule');
+    custom.addEventListener('change', () => { f.custom = custom.checked; refresh(); });
+    const customLabel = el('label', null, 'field'); customLabel.append(el('span', 'Only items with a rule'), custom);
+    const filters = this.group('Choose items',
+      choose('Item group', [['all', 'All items'], ['equipment', 'Equipment'], ['weapon', 'Weapons'], ['armour', 'Armour and shields'], ['accessory', 'Accessories'], ['potion', 'Potions'],
+        ['pill', 'Pills'], ['alchemy', 'Alchemy'], ['ammo', 'Arrows and bolts'], ['scroll', 'Scrolls'], ['pet', 'Pet items'], ['quest', 'Quest items'], ['mall', 'Item mall'], ['other', 'Other']], 'group'),
+      choose('Race', [['', 'Any'], ['CH', 'Chinese'], ['EU', 'European']], 'race'),
+      choose('Gender', [['', 'Any'], ['Male', 'Male'], ['Female', 'Female']], 'gender'),
+      choose('Type', [['', 'Any'], ...kinds.map(k => [k, k])], 'kind'),
+      el('div', 'Degree', 'muted'), degrees, search, customLabel);
+    const bulk = el('div', null, 'row bulk'), table = el('div', null, 'item-table'), pager = el('div', null, 'row pager'), summary = el('p', '', 'muted');
+    table.setAttribute('role', 'table'); table.setAttribute('aria-label', 'Item rules');
+    const rules = this.group('Item rules', summary, bulk, table, pager,
+      el('p', 'Pick: always takes the item whatever the Loot switches say, never leaves it. Store puts it in the warehouse on town trips (also from your bag, except potions and scrolls the trip needs). Sell sells it from the pet at the repair merchant; your own bag is never sold. Keep never stores or sells it. Drop throws it away from your bag or the pet while hunting, and it is never picked up again. Right-click a row for the same choices.', 'muted'));
+    this.pane.append(filters, rules);
+    const set = (ids, change, label) => { ItemRules.set(ids, change); this.toast(`${label}: ${ids.length} item${ids.length === 1 ? '' : 's'}.`); renderTable(); };
+    // Bulk buttons ask for a second click when they change more than one item.
+    const bulkActions = [['Pick always', { pick: 'yes' }], ['Pick never', { pick: 'no' }], ['Store', { act: 'store' }], ['Sell', { act: 'sell' }], ['Keep', { act: 'keep' }],
+      ['Drop', { act: 'drop' }], ['Clear', { pick: null, act: null }]];
+    let shown = [], armed = null;
+    for (const [label, change] of bulkActions) {
+      const button = this.button(label, () => {
+        const ids = shown.map(i => i.id);
+        if (!ids.length) return;
+        if (ids.length > 1 && armed !== label) {
+          armed = label; button.textContent = `${label} ${ids.length}?`; button.classList.add('armed');
+          setTimeout(() => { if (armed === label) { armed = null; button.textContent = label; button.classList.remove('armed'); } }, 4000);
+          return;
+        }
+        armed = null; button.textContent = label; button.classList.remove('armed'); set(ids, change, label);
+      });
+      button.setAttribute('aria-label', 'All shown: ' + label); bulk.append(button);
+    }
+    const menu = (info, x, y) => {
+      this.itemMenu?.remove();
+      const box = el('div', null, 'item-menu'); box.setAttribute('role', 'menu');
+      box.append(el('strong', info.name));
+      for (const [label, change] of [['Pick always', { pick: 'yes' }], ['Pick never', { pick: 'no' }], ['Pick by Loot switches', { pick: null }], ['Store', { act: 'store' }], ['Sell', { act: 'sell' }],
+        ['Keep', { act: 'keep' }], ['Drop', { act: 'drop' }], ['No action', { act: null }], ['Clear rule', { pick: null, act: null }]]) {
+        const item = this.button(label, () => { box.remove(); set([info.id], change, label); }); item.setAttribute('role', 'menuitem'); box.append(item);
+      }
+      this.root.append(box); this.itemMenu = box;
+      box.style.left = clamp(x, 0, innerWidth - 180) + 'px'; box.style.top = clamp(y, 0, innerHeight - box.offsetHeight - 4) + 'px';
+      setTimeout(() => this.root.addEventListener('pointerdown', e => { if (!box.contains(e.composedPath()[0])) box.remove(); }, { once: true }), 0);
+    };
+    const renderTable = () => {
+      shown = ItemRules.list(f);
+      const pages = Math.max(1, Math.ceil(shown.length / 100)); f.page = clamp(f.page, 0, pages - 1);
+      summary.textContent = `${shown.length.toLocaleString('en-US')} items shown · ${ItemRules.count()} with a rule.`;
+      const head = el('div', null, 'item-row head'); head.setAttribute('role', 'row');
+      for (const text of ['', 'Item', 'Deg', 'Pick', 'Store', 'Sell', 'Keep', 'Drop']) head.append(el('span', text));
+      const rows = shown.slice(f.page * 100, f.page * 100 + 100).map(info => {
+        const rule = ItemRules.get(info.id) || {}, row = el('div', null, 'item-row' + (rule.pick || rule.act ? ' ruled' : ''));
+        row.setAttribute('role', 'row'); row.dataset.id = info.id;
+        const slot = el('span', null, 'skill-icon'); slot.append(el('span', '', 'fallback')); if (info.icon) Icons.paint(slot, info.icon);
+        const name = el('span', null, 'item-name'); name.append(el('span', info.name));
+        if (info.sox) name.append(el('em', ['', 'Star', 'Moon', 'Sun'][info.sox], 'sox'));
+        name.title = info.code + ' · #' + info.id;
+        const pick = this.button(rule.pick === 'yes' ? 'Yes' : rule.pick === 'no' ? 'No' : '–', () =>
+          set([info.id], { pick: rule.pick === 'yes' ? 'no' : rule.pick === 'no' ? null : 'yes' }, 'Pick'));
+        pick.className = 'cell'; pick.setAttribute('aria-label', 'Pick ' + info.name);
+        row.append(slot, name, el('span', info.degree ? String(info.degree) : ''), pick);
+        for (const act of ITEM_ACTIONS) {
+          const cell = this.button(rule.act === act ? '●' : '', () => set([info.id], { act: rule.act === act ? null : act }, act[0].toUpperCase() + act.slice(1)));
+          cell.className = 'cell' + (rule.act === act ? ' on' : ''); cell.setAttribute('aria-label', act[0].toUpperCase() + act.slice(1) + ' ' + info.name);
+          cell.setAttribute('aria-pressed', String(rule.act === act)); row.append(cell);
+        }
+        row.addEventListener('contextmenu', e => { e.preventDefault(); menu(info, e.clientX, e.clientY); });
+        return row;
+      });
+      table.replaceChildren(head, ...rows);
+      if (!rows.length) table.append(el('div', 'No item matches these filters.', 'empty'));
+      const prev = this.button('‹ Previous', () => { f.page--; renderTable(); }), next = this.button('Next ›', () => { f.page++; renderTable(); });
+      prev.disabled = f.page === 0; next.disabled = f.page >= pages - 1;
+      pager.replaceChildren(prev, el('span', `Page ${f.page + 1} of ${pages}`, 'muted'), next);
+    };
+    renderTable();
   },
   skillKey() {
     return (World.gp?.skills || []).map(id => { const s = World.skill(id); return `${id}:${s?.name}:${s?.icon}:${s?.level}`; }).join('|');

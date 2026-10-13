@@ -171,7 +171,7 @@ skin += '\nconst LEAN_CSS = ' + __import__('json').dumps((base / 'lean-skin.css'
 header = '''// ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.88
+// @version      1.2.89
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -191,7 +191,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.88';
+const VERSION = '1.2.89';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -239,6 +239,7 @@ parts = [header, utils, (base / 'lean-settings.js').read_text(encoding='utf-8'),
          release_notes(), (base / 'lean-update.js').read_text(encoding='utf-8'),
          (base / 'lean-diagnostics.js').read_text(encoding='utf-8'),
          (base / 'lean-reports.js').read_text(encoding='utf-8'),
+         (base / 'lean-items.js').read_text(encoding='utf-8'),
          (base / 'lean-map.js').read_text(encoding='utf-8'),
          (base / 'lean-ui.js').read_text(encoding='utf-8'),
          (base / 'lean-boot.js').read_text(encoding='utf-8'), '})();\n']

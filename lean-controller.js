@@ -208,6 +208,7 @@ const Controller = {
       Party.resumeTick();
       AutoMastery.tick();
       Potion.tick();
+      ItemRules.dropTick();
       Loot.checkPetFull();
       if (Town.tick()) { this.mode = 'town service'; return; }
       if (BuffGear.tick()) { this.mode = 'buff gear'; return; }
