@@ -122,6 +122,30 @@ walkback = (base / 'lean-walkback.js').read_text(encoding='utf-8')
 icon_loader = section('function assetLoaderMain(self)', '\nconst Assets = {')
 icon_loader = icon_loader[:icon_loader.index('  // ---- skillData.json')]
 icon_loader = icon_loader.replace("const OWN_CACHE = 'sro-asistan-assets-v1';", "const OWN_CACHE = 'sro-lean-icons-v1';")
+# The live game publishes SROPACK2 packs: same header layout as SROPACK1, but a member may be stored
+# gzip-compressed (asset.stored = { length, encoding: 'gzip' }): it occupies stored.length bytes at its
+# offset and decodes to asset.length bytes, which the loader then checks against the SHA-256 as before.
+def loader_patch(old, new):
+    global icon_loader
+    assert icon_loader.count(old) == 1, old
+    icon_loader = icon_loader.replace(old, new)
+loader_patch("if (magic !== 'SROPACK1') throw", "if (magic !== 'SROPACK1' && magic !== 'SROPACK2') throw")
+loader_patch("""        const start = 12 + len + asset.offset;
+        if (start + asset.length <= pack.length) {
+          const b = pack.slice(start, start + asset.length);""",
+"""        const start = 12 + len + asset.offset, span = asset.stored ? asset.stored.length : asset.length;
+        if (start + span <= pack.length) {
+          let b = pack.slice(start, start + span);
+          if (asset.stored) b = await gunzip(b);""")
+loader_patch("""    const raw = await fetchBytes(asset.packPath, { range: [start, start + asset.length - 1], timeout: 45000 });
+    stats.range++;
+    return raw;""",
+"""    const span = asset.stored ? asset.stored.length : asset.length;
+    const raw = await fetchBytes(asset.packPath, { range: [start, start + span - 1], timeout: 45000 });
+    stats.range++;
+    if (!asset.stored) return raw;
+    if (asset.stored.encoding !== 'gzip') throw fail('format', 'unknown pack member encoding: ' + asset.path);
+    return gunzip(raw);""")
 icon_loader += '''  self.onmessage = async e => {
     const msg = e.data || {};
     if (msg.op === 'init') { ORIGIN = String(msg.origin || ''); self.postMessage({ ready: true }); return; }
@@ -147,7 +171,7 @@ skin += '\nconst LEAN_CSS = ' + __import__('json').dumps((base / 'lean-skin.css'
 header = '''// ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.84
+// @version      1.2.85
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -167,7 +191,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.84';
+const VERSION = '1.2.85';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });

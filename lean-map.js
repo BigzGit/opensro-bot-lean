@@ -1,6 +1,7 @@
 // Map page: the game's own minimap tiles on a canvas, with the hunting area, monsters, party and players.
 // Outdoors only: positions become absolute units (region x * 1920 + x, region z * 1920 + z; Z grows north, drawn up).
-// One minimap tile (minimap/<rx>x<rz>.png, 256 px) covers one 1920-unit region. Dungeons have no tiles here yet.
+// One minimap tile (minimap/<rx>x<rz>, 256 px) covers one 1920-unit region. Dungeons have no tiles here yet.
+// The live game ships tiles as .texture (NTX1: DXT-compressed, decoded here); older builds as .png.
 // It only reads game state; the one setting it changes is the hunting spot, and only when the player asks.
 const MAP_ART = '/assets/images/Media_extracted/';
 // Monster class colours, as the game's own map window draws them.
@@ -24,11 +25,72 @@ const LeanMap = {
     const hit = cache.get(path);
     if (hit) return hit.img;
     const entry = { img: null }; cache.set(path, entry);
-    Icons.request(path).then(blob => {
-      const img = new Image(); img.onload = () => { entry.img = img; this.dirty = true; }; img.src = URL.createObjectURL(blob);
-    }, () => { entry.missing = true; });
-    if (cache === this.tiles && cache.size > 80) for (const [key, value] of cache) { if (cache.size <= 60) break; if (key !== path) { if (value.img) URL.revokeObjectURL(value.img.src); cache.delete(key); } }
+    const load = cache === this.tiles ? this.tile(path) : Icons.request(path).then(blob => createImageBitmap(blob));
+    load.then(img => { entry.img = img; this.dirty = true; }, e => {
+      entry.missing = true;
+      if (!/not found in the game packs/i.test(e?.message || '') && e?.message !== this.lastTileError) { this.lastTileError = e?.message; Log.warn('Map tile ' + path + ': ' + e?.message); }
+    });
+    if (cache === this.tiles && cache.size > 80) for (const [key, value] of cache) { if (cache.size <= 60) break; if (key !== path) { value.img?.close?.(); cache.delete(key); } }
     return null;
+  },
+  // A tile: the .texture the live game publishes, else the .png of older builds. Resolves to a drawable or null.
+  async tile(path) {
+    try { return await this.ntxImage(new Uint8Array(await (await Icons.request(path + '.texture')).arrayBuffer())); }
+    catch (e) { if (!/not found in the game packs/i.test(e.message)) throw e; }
+    const blob = await Icons.request(path + '.png');
+    return createImageBitmap(blob);
+  },
+  // NTX1 header (20 bytes, little endian): magic, width, height, format (21 = BGRA, DXT1/3/5 four-cc), mip count;
+  // then the mips, largest first. Only the first mip is drawn. Same layout as the game client's native textures.
+  ntxImage(bytes) {
+    const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (bytes.length < 20 || v.getUint32(0, true) !== 0x3158544e) throw Error('not a native texture');
+    const w = v.getUint32(4, true), h = v.getUint32(8, true), code = v.getUint32(12, true);
+    if (!w || !h || w > 2048 || h > 2048) throw Error('bad texture size');
+    const out = new ImageData(w, h), px = out.data, blocks = { 0x31545844: 8, 0x33545844: 16, 0x35545844: 16 }[code];
+    if (code === 21) {
+      if (bytes.length < 20 + w * h * 4) throw Error('truncated texture');
+      for (let i = 0; i < w * h * 4; i += 4) { px[i] = bytes[20 + i + 2]; px[i + 1] = bytes[20 + i + 1]; px[i + 2] = bytes[20 + i]; px[i + 3] = bytes[20 + i + 3]; }
+      return createImageBitmap(out);
+    }
+    if (!blocks) throw Error('unsupported texture format');
+    const cols = Math.ceil(w / 4), rows = Math.ceil(h / 4);
+    if (bytes.length < 20 + cols * rows * blocks) throw Error('truncated texture');
+    const pal = new Uint8Array(16);
+    for (let by = 0; by < rows; by++) for (let bx = 0; bx < cols; bx++) {
+      const at = 20 + (by * cols + bx) * blocks, color = at + (blocks === 16 ? 8 : 0);
+      const c0 = v.getUint16(color, true), c1 = v.getUint16(color + 2, true), three = blocks === 8 && c0 <= c1;
+      for (let k = 0; k < 2; k++) {
+        const c = k ? c1 : c0, r = c >> 11, g = (c >> 5) & 63, b = c & 31;
+        pal[k * 4] = (r << 3) | (r >> 2); pal[k * 4 + 1] = (g << 2) | (g >> 4); pal[k * 4 + 2] = (b << 3) | (b >> 2); pal[k * 4 + 3] = 255;
+      }
+      for (let ch = 0; ch < 3; ch++) {
+        const a = pal[ch], b = pal[4 + ch];
+        pal[8 + ch] = Math.floor(three ? (a + b) / 2 : (2 * a + b) / 3);
+        pal[12 + ch] = three ? 0 : Math.floor((a + 2 * b) / 3);
+      }
+      pal[11] = 255; pal[15] = three ? 0 : 255;
+      const sel = v.getUint32(color + 4, true);
+      for (let p = 0; p < 16; p++) {
+        const x = bx * 4 + (p & 3), y = by * 4 + (p >> 2);
+        if (x >= w || y >= h) continue;
+        const s = ((sel >>> (p * 2)) & 3) * 4, o = (y * w + x) * 4;
+        px[o] = pal[s]; px[o + 1] = pal[s + 1]; px[o + 2] = pal[s + 2]; px[o + 3] = pal[s + 3];
+        if (code === 0x33545844) px[o + 3] = ((bytes[at + (p >> 1)] >>> ((p & 1) * 4)) & 15) * 17;
+        else if (code === 0x35545844) px[o + 3] = this.dxt5Alpha(bytes, at, p);
+      }
+    }
+    return createImageBitmap(out);
+  },
+  dxt5Alpha(bytes, at, p) {
+    const a0 = bytes[at], a1 = bytes[at + 1], bit = p * 3, byte = at + 2 + (bit >> 3);
+    const s = ((bytes[byte] | ((bytes[byte + 1] ?? 0) << 8)) >>> (bit & 7)) & 7;
+    if (s === 0) return a0;
+    if (s === 1) return a1;
+    if (a0 > a1) return Math.floor(((8 - s) * a0 + (s - 1) * a1) / 7);
+    if (s === 6) return 0;
+    if (s === 7) return 255;
+    return Math.floor(((6 - s) * a0 + (s - 1) * a1) / 5);
   },
   sign(name) { return this.image(this.signs, MAP_ART + 'interface/minimap/mm_sign_' + name + '.png'); },
   draw(parent) {
@@ -134,7 +196,7 @@ const LeanMap = {
     const x0 = v.X - w / 2 * upp, x1 = v.X + w / 2 * upp, z0 = v.Z - h / 2 * upp, z1 = v.Z + h / 2 * upp;
     for (let rx = Math.max(0, Math.floor(x0 / SECTOR)); rx <= Math.min(255, Math.floor(x1 / SECTOR)); rx++)
       for (let rz = Math.max(0, Math.floor(z0 / SECTOR)); rz <= Math.min(127, Math.floor(z1 / SECTOR)); rz++) {
-        const img = this.image(this.tiles, `${MAP_ART}minimap/${rx}x${rz}.png`);
+        const img = this.image(this.tiles, `${MAP_ART}minimap/${rx}x${rz}`);
         if (!img) continue;
         const l = Math.floor(sx(rx * SECTOR)), t = Math.floor(sy((rz + 1) * SECTOR));
         ctx.drawImage(img, l, t, Math.ceil(sx((rx + 1) * SECTOR)) - l, Math.ceil(sy(rz * SECTOR)) - t);

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.84
+// @version      1.2.85
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.84';
+const VERSION = '1.2.85';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -4367,7 +4367,7 @@ function assetLoaderMain(self) {
       const p = fetchBytes(packPath, { range: [0, 11], timeout: 30000 }).then((h) => {
         let magic = '';
         for (let i = 0; i < 8; i++) magic += String.fromCharCode(h[i]);
-        if (magic !== 'SROPACK1') throw fail('format', 'bad pack identifier: ' + packPath);
+        if (magic !== 'SROPACK1' && magic !== 'SROPACK2') throw fail('format', 'bad pack identifier: ' + packPath);
         const len = new DataView(h.buffer, h.byteOffset, h.byteLength).getUint32(8, true);
         if (len > 16 << 20) throw fail('format', 'bad pack header: ' + packPath);
         return 12 + len;
@@ -4396,9 +4396,10 @@ function assetLoaderMain(self) {
       const pack = await cacheGet(GAME_CACHE, ORIGIN + '/assets/.verified/' + pk.sha256);
       if (pack && pack.length >= 12) {
         const len = new DataView(pack.buffer, pack.byteOffset, pack.byteLength).getUint32(8, true);
-        const start = 12 + len + asset.offset;
-        if (start + asset.length <= pack.length) {
-          const b = pack.slice(start, start + asset.length);
+        const start = 12 + len + asset.offset, span = asset.stored ? asset.stored.length : asset.length;
+        if (start + span <= pack.length) {
+          let b = pack.slice(start, start + span);
+          if (asset.stored) b = await gunzip(b);
           if ((await sha256(b)) === asset.sha256) {
             stats.gamePack++;
             return b;
@@ -4423,9 +4424,12 @@ function assetLoaderMain(self) {
       }
     }
     const start = (await packStart(asset.packPath)) + asset.offset;
-    const raw = await fetchBytes(asset.packPath, { range: [start, start + asset.length - 1], timeout: 45000 });
+    const span = asset.stored ? asset.stored.length : asset.length;
+    const raw = await fetchBytes(asset.packPath, { range: [start, start + span - 1], timeout: 45000 });
     stats.range++;
-    return raw;
+    if (!asset.stored) return raw;
+    if (asset.stored.encoding !== 'gzip') throw fail('format', 'unknown pack member encoding: ' + asset.path);
+    return gunzip(raw);
   }
 
   // tries: {refreshed, waits}: one manifest re-read and up to 3 backoff waits per request.
@@ -6006,7 +6010,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.84", "title": "Map page", "items": ["New Map page, first in the page list. It draws the game's own minimap around you with your hunting radius (yellow circle) and chase distance (dashed ring).", "It shows you (arrow), monsters (uniques and stronger classes stand out), party members (also ones out of sight, at the map's edge), other players with their names when zoomed in, NPCs and pets.", "Click the map to mark a point, then \"Make this the hunting spot\" to hunt there. Drag to look around, + and − (or the mouse wheel) to zoom, \"Follow me\" to centre on you again.", "Hunt radius and chase distance can be changed right under the map."], "note": "Dungeons have no map yet. In the wide window the map uses the full page width."}, {"version": "1.2.83", "title": "Wide window", "items": ["New Wide button at the top of the panel. It opens a wide window: a status strip with HP, MP and EXP bars and what the bot is doing, the pages as a list with the game's own icons on the left, session numbers and supplies always on the right, and the activity log along the bottom.", "The pages are the same as before, set out in two columns, so nothing has moved inside them. Compact goes back to the usual window, which stays the default.", "The choice is remembered. Screens narrower than 900 pixels always get the compact window."], "note": "This is step 1 of the new layout shown on the site's concept page. The map, party and town pages come later."}, {"version": "1.2.82", "title": "The panel remembers where you put it", "items": ["The panel now opens where you last dragged it, also after a reload and after bringing it back from the minimised icon. Before, it went back to the top right.", "If the game window got smaller and the saved spot is off screen, the panel is moved back inside it."]}, {"version": "1.2.81", "title": "Minimise the panel to a small icon", "items": ["The × at the top right of the panel now minimises it to a small icon instead of folding it. The bot keeps running.", "The icon's dot shows what the bot is doing: green while hunting, yellow during a town trip, walk back, alchemy or reconnect, red when stopped, dead or in error. Hover it to see the current status, HP and MP.", "The icon glows when something needs you: a warning such as running out of potions or hunting stopping, a SoX pickup, or the character dying. Hovering it or opening the panel clears the glow.", "Drag the icon anywhere. It remembers its spot, and the panel stays minimised after a reload.", "Click the icon or press F7 to bring the panel back. F7 still folds the open panel, Shift+F7 still hides everything, and F8 still starts and stops.", "The window you opened or clicked last (patch notes, bug report) is now drawn above the others."]}, {"version": "1.2.80", "title": "Stone fusion no longer stops at 30", "items": ["The 30-fusion stop is now an optional setting, \"Stop after this many fusions\", under Magic stones for the weapon. 0 means no limit and is the default, so a run goes on until the weapon has the wanted counts, a stone runs out or the game refuses."]}, {"version": "1.2.79", "title": "Stone fusion works: it uses the request the server accepts", "items": ["Fusing Luck, Steady and Immortal stones was refused by the game with code 16 every time. The bot used the page's attribute request, which the server answers with a refusal for these stones; it now uses the magic request, which is the one the server takes them in.", "A fusion can fail on this server: the stone is used up and nothing changes. That is now counted and shown, and the run carries on instead of stopping.", "A refusal now says why, for example that the stone is not of the weapon's degree, or that the weapon is at 6 of that stone or has no free magic option slot."]}, {"version": "1.2.78", "title": "The Alchemy tab fuses Luck, Steady and Immortal stones", "items": ["New **Magic stones for the weapon** section in Alchemy: choose how many Luck, Steady and Immortal stones the weapon should have (up to 6 each; 0 leaves one off).", "**Fuse stones now** only fuses them. **Start alchemy** fuses the missing stones first, then enhances with elixirs as before.", "Luck raises the enhancement success chance, Steady stops durability damage and Immortal stops destruction when an enhancement fails. The stones must be of the weapon's degree and in your bag."], "note": "It stops if a stone is missing, the game refuses a fusion, or after 30 fusions. New in this version and checked against a simulated game: if a fusion does not raise the count, tell us on Discord."}, {"version": "1.2.77", "title": "Arrows and bolts are bought on town trips", "items": ["New **Arrows and bolts** section in Supplies. Tick Buy arrows and/or Buy bolts and set when to go to town and what to refill to.", "They are bought at the repair merchant, after selling pet loot and before repairing. The count includes the stack in your ammunition slot and spare stacks in your bag, and a trip also starts when it falls to your low-stock number.", "If the merchant does not sell the item, there is no bag space or not enough gold, that item is skipped with a notice and the rest of the trip goes on."], "note": "Equipping the bought ammunition is still up to you. Both options are off by default."}];
+const RELEASE_NOTES = [{"version": "1.2.85", "title": "The map shows the ground again", "items": ["The Map page showed only a black background in the game. The game now publishes its minimap tiles in a new compressed format inside a new kind of asset pack, which the bot could not read. It reads both now, so the minimap appears under the markers.", "The same fix lets the bot read any other game picture that moves to the new packs, so icons keep working after future game updates."]}, {"version": "1.2.84", "title": "Map page", "items": ["New Map page, first in the page list. It draws the game's own minimap around you with your hunting radius (yellow circle) and chase distance (dashed ring).", "It shows you (arrow), monsters (uniques and stronger classes stand out), party members (also ones out of sight, at the map's edge), other players with their names when zoomed in, NPCs and pets.", "Click the map to mark a point, then \"Make this the hunting spot\" to hunt there. Drag to look around, + and − (or the mouse wheel) to zoom, \"Follow me\" to centre on you again.", "Hunt radius and chase distance can be changed right under the map."], "note": "Dungeons have no map yet. In the wide window the map uses the full page width."}, {"version": "1.2.83", "title": "Wide window", "items": ["New Wide button at the top of the panel. It opens a wide window: a status strip with HP, MP and EXP bars and what the bot is doing, the pages as a list with the game's own icons on the left, session numbers and supplies always on the right, and the activity log along the bottom.", "The pages are the same as before, set out in two columns, so nothing has moved inside them. Compact goes back to the usual window, which stays the default.", "The choice is remembered. Screens narrower than 900 pixels always get the compact window."], "note": "This is step 1 of the new layout shown on the site's concept page. The map, party and town pages come later."}, {"version": "1.2.82", "title": "The panel remembers where you put it", "items": ["The panel now opens where you last dragged it, also after a reload and after bringing it back from the minimised icon. Before, it went back to the top right.", "If the game window got smaller and the saved spot is off screen, the panel is moved back inside it."]}, {"version": "1.2.81", "title": "Minimise the panel to a small icon", "items": ["The × at the top right of the panel now minimises it to a small icon instead of folding it. The bot keeps running.", "The icon's dot shows what the bot is doing: green while hunting, yellow during a town trip, walk back, alchemy or reconnect, red when stopped, dead or in error. Hover it to see the current status, HP and MP.", "The icon glows when something needs you: a warning such as running out of potions or hunting stopping, a SoX pickup, or the character dying. Hovering it or opening the panel clears the glow.", "Drag the icon anywhere. It remembers its spot, and the panel stays minimised after a reload.", "Click the icon or press F7 to bring the panel back. F7 still folds the open panel, Shift+F7 still hides everything, and F8 still starts and stops.", "The window you opened or clicked last (patch notes, bug report) is now drawn above the others."]}, {"version": "1.2.80", "title": "Stone fusion no longer stops at 30", "items": ["The 30-fusion stop is now an optional setting, \"Stop after this many fusions\", under Magic stones for the weapon. 0 means no limit and is the default, so a run goes on until the weapon has the wanted counts, a stone runs out or the game refuses."]}, {"version": "1.2.79", "title": "Stone fusion works: it uses the request the server accepts", "items": ["Fusing Luck, Steady and Immortal stones was refused by the game with code 16 every time. The bot used the page's attribute request, which the server answers with a refusal for these stones; it now uses the magic request, which is the one the server takes them in.", "A fusion can fail on this server: the stone is used up and nothing changes. That is now counted and shown, and the run carries on instead of stopping.", "A refusal now says why, for example that the stone is not of the weapon's degree, or that the weapon is at 6 of that stone or has no free magic option slot."]}, {"version": "1.2.78", "title": "The Alchemy tab fuses Luck, Steady and Immortal stones", "items": ["New **Magic stones for the weapon** section in Alchemy: choose how many Luck, Steady and Immortal stones the weapon should have (up to 6 each; 0 leaves one off).", "**Fuse stones now** only fuses them. **Start alchemy** fuses the missing stones first, then enhances with elixirs as before.", "Luck raises the enhancement success chance, Steady stops durability damage and Immortal stops destruction when an enhancement fails. The stones must be of the weapon's degree and in your bag."], "note": "It stops if a stone is missing, the game refuses a fusion, or after 30 fusions. New in this version and checked against a simulated game: if a fusion does not raise the count, tell us on Discord."}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -6467,7 +6471,8 @@ const Reports = {
 
 // Map page: the game's own minimap tiles on a canvas, with the hunting area, monsters, party and players.
 // Outdoors only: positions become absolute units (region x * 1920 + x, region z * 1920 + z; Z grows north, drawn up).
-// One minimap tile (minimap/<rx>x<rz>.png, 256 px) covers one 1920-unit region. Dungeons have no tiles here yet.
+// One minimap tile (minimap/<rx>x<rz>, 256 px) covers one 1920-unit region. Dungeons have no tiles here yet.
+// The live game ships tiles as .texture (NTX1: DXT-compressed, decoded here); older builds as .png.
 // It only reads game state; the one setting it changes is the hunting spot, and only when the player asks.
 const MAP_ART = '/assets/images/Media_extracted/';
 // Monster class colours, as the game's own map window draws them.
@@ -6491,11 +6496,72 @@ const LeanMap = {
     const hit = cache.get(path);
     if (hit) return hit.img;
     const entry = { img: null }; cache.set(path, entry);
-    Icons.request(path).then(blob => {
-      const img = new Image(); img.onload = () => { entry.img = img; this.dirty = true; }; img.src = URL.createObjectURL(blob);
-    }, () => { entry.missing = true; });
-    if (cache === this.tiles && cache.size > 80) for (const [key, value] of cache) { if (cache.size <= 60) break; if (key !== path) { if (value.img) URL.revokeObjectURL(value.img.src); cache.delete(key); } }
+    const load = cache === this.tiles ? this.tile(path) : Icons.request(path).then(blob => createImageBitmap(blob));
+    load.then(img => { entry.img = img; this.dirty = true; }, e => {
+      entry.missing = true;
+      if (!/not found in the game packs/i.test(e?.message || '') && e?.message !== this.lastTileError) { this.lastTileError = e?.message; Log.warn('Map tile ' + path + ': ' + e?.message); }
+    });
+    if (cache === this.tiles && cache.size > 80) for (const [key, value] of cache) { if (cache.size <= 60) break; if (key !== path) { value.img?.close?.(); cache.delete(key); } }
     return null;
+  },
+  // A tile: the .texture the live game publishes, else the .png of older builds. Resolves to a drawable or null.
+  async tile(path) {
+    try { return await this.ntxImage(new Uint8Array(await (await Icons.request(path + '.texture')).arrayBuffer())); }
+    catch (e) { if (!/not found in the game packs/i.test(e.message)) throw e; }
+    const blob = await Icons.request(path + '.png');
+    return createImageBitmap(blob);
+  },
+  // NTX1 header (20 bytes, little endian): magic, width, height, format (21 = BGRA, DXT1/3/5 four-cc), mip count;
+  // then the mips, largest first. Only the first mip is drawn. Same layout as the game client's native textures.
+  ntxImage(bytes) {
+    const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (bytes.length < 20 || v.getUint32(0, true) !== 0x3158544e) throw Error('not a native texture');
+    const w = v.getUint32(4, true), h = v.getUint32(8, true), code = v.getUint32(12, true);
+    if (!w || !h || w > 2048 || h > 2048) throw Error('bad texture size');
+    const out = new ImageData(w, h), px = out.data, blocks = { 0x31545844: 8, 0x33545844: 16, 0x35545844: 16 }[code];
+    if (code === 21) {
+      if (bytes.length < 20 + w * h * 4) throw Error('truncated texture');
+      for (let i = 0; i < w * h * 4; i += 4) { px[i] = bytes[20 + i + 2]; px[i + 1] = bytes[20 + i + 1]; px[i + 2] = bytes[20 + i]; px[i + 3] = bytes[20 + i + 3]; }
+      return createImageBitmap(out);
+    }
+    if (!blocks) throw Error('unsupported texture format');
+    const cols = Math.ceil(w / 4), rows = Math.ceil(h / 4);
+    if (bytes.length < 20 + cols * rows * blocks) throw Error('truncated texture');
+    const pal = new Uint8Array(16);
+    for (let by = 0; by < rows; by++) for (let bx = 0; bx < cols; bx++) {
+      const at = 20 + (by * cols + bx) * blocks, color = at + (blocks === 16 ? 8 : 0);
+      const c0 = v.getUint16(color, true), c1 = v.getUint16(color + 2, true), three = blocks === 8 && c0 <= c1;
+      for (let k = 0; k < 2; k++) {
+        const c = k ? c1 : c0, r = c >> 11, g = (c >> 5) & 63, b = c & 31;
+        pal[k * 4] = (r << 3) | (r >> 2); pal[k * 4 + 1] = (g << 2) | (g >> 4); pal[k * 4 + 2] = (b << 3) | (b >> 2); pal[k * 4 + 3] = 255;
+      }
+      for (let ch = 0; ch < 3; ch++) {
+        const a = pal[ch], b = pal[4 + ch];
+        pal[8 + ch] = Math.floor(three ? (a + b) / 2 : (2 * a + b) / 3);
+        pal[12 + ch] = three ? 0 : Math.floor((a + 2 * b) / 3);
+      }
+      pal[11] = 255; pal[15] = three ? 0 : 255;
+      const sel = v.getUint32(color + 4, true);
+      for (let p = 0; p < 16; p++) {
+        const x = bx * 4 + (p & 3), y = by * 4 + (p >> 2);
+        if (x >= w || y >= h) continue;
+        const s = ((sel >>> (p * 2)) & 3) * 4, o = (y * w + x) * 4;
+        px[o] = pal[s]; px[o + 1] = pal[s + 1]; px[o + 2] = pal[s + 2]; px[o + 3] = pal[s + 3];
+        if (code === 0x33545844) px[o + 3] = ((bytes[at + (p >> 1)] >>> ((p & 1) * 4)) & 15) * 17;
+        else if (code === 0x35545844) px[o + 3] = this.dxt5Alpha(bytes, at, p);
+      }
+    }
+    return createImageBitmap(out);
+  },
+  dxt5Alpha(bytes, at, p) {
+    const a0 = bytes[at], a1 = bytes[at + 1], bit = p * 3, byte = at + 2 + (bit >> 3);
+    const s = ((bytes[byte] | ((bytes[byte + 1] ?? 0) << 8)) >>> (bit & 7)) & 7;
+    if (s === 0) return a0;
+    if (s === 1) return a1;
+    if (a0 > a1) return Math.floor(((8 - s) * a0 + (s - 1) * a1) / 7);
+    if (s === 6) return 0;
+    if (s === 7) return 255;
+    return Math.floor(((6 - s) * a0 + (s - 1) * a1) / 5);
   },
   sign(name) { return this.image(this.signs, MAP_ART + 'interface/minimap/mm_sign_' + name + '.png'); },
   draw(parent) {
@@ -6601,7 +6667,7 @@ const LeanMap = {
     const x0 = v.X - w / 2 * upp, x1 = v.X + w / 2 * upp, z0 = v.Z - h / 2 * upp, z1 = v.Z + h / 2 * upp;
     for (let rx = Math.max(0, Math.floor(x0 / SECTOR)); rx <= Math.min(255, Math.floor(x1 / SECTOR)); rx++)
       for (let rz = Math.max(0, Math.floor(z0 / SECTOR)); rz <= Math.min(127, Math.floor(z1 / SECTOR)); rz++) {
-        const img = this.image(this.tiles, `${MAP_ART}minimap/${rx}x${rz}.png`);
+        const img = this.image(this.tiles, `${MAP_ART}minimap/${rx}x${rz}`);
         if (!img) continue;
         const l = Math.floor(sx(rx * SECTOR)), t = Math.floor(sy((rz + 1) * SECTOR));
         ctx.drawImage(img, l, t, Math.ceil(sx((rx + 1) * SECTOR)) - l, Math.ceil(sy(rz * SECTOR)) - t);

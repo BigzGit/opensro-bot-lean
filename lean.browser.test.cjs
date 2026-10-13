@@ -18,7 +18,7 @@ const images = ['ic_attack', 'ic_recovery', 'ic_autoget', 'ic_sit'].map((key, i)
   images.push({ raw, compressed: zlib.gzipSync(raw), path: '/assets/images/Media_extracted/icon/action/icon_cha_auto_attack.png', transport: '/assets/test-icons/orb.png.gz' });
 }
 // The Map page: the minimap tile under the test character (region 1 = 1x0), the map button and the minimap signs.
-for (const name of ['minimap/1x0', 'interface/minimap/mm_map_button', ...['character', 'party', 'otherplayer', 'monster', 'unique', 'npc', 'animal'].map(s => 'interface/minimap/mm_sign_' + s)]) {
+for (const name of ['interface/minimap/mm_map_button', ...['character', 'party', 'otherplayer', 'monster', 'unique', 'npc', 'animal'].map(s => 'interface/minimap/mm_sign_' + s)]) {
   const raw = Buffer.concat([images[1].raw, Buffer.from('map-' + name)]);
   images.push({ raw, compressed: zlib.gzipSync(raw), path: `/assets/images/Media_extracted/${name}.png`, transport: `/assets/test-icons/${name.replace(/\//g, '-')}.png.gz` });
 }
@@ -63,10 +63,25 @@ const jsonAssets = Object.entries(jsonFixtures).map(([p, value], i) => {
 });
 const header = Buffer.alloc(12); header.write('SROPACK1'); header.writeUInt32LE(2, 8);
 const pack = Buffer.concat([header, Buffer.from('{}'), ...images.map(i => i.raw)]);
+// Live-format minimap tile for region 1 (1x0): an 8x8 NTX1 DXT1 texture, all red (colour 0 = 0xF800, every selector 0),
+// inside an SROPACK2 pack whose member is stored gzip-compressed.
+const ntx = Buffer.alloc(20 + 4 * 8);
+ntx.write('NTX1', 0); ntx.writeUInt32LE(8, 4); ntx.writeUInt32LE(8, 8); ntx.write('DXT1', 12); ntx.writeUInt32LE(1, 16);
+for (let b = 0; b < 4; b++) { ntx.writeUInt16LE(0xf800, 20 + b * 8); ntx.writeUInt16LE(0x001f, 22 + b * 8); }
+const ntxStored = zlib.gzipSync(ntx), header2 = Buffer.alloc(12); header2.write('SROPACK2'); header2.writeUInt32LE(2, 8);
+const pack2 = Buffer.concat([header2, Buffer.from('{}'), ntxStored]);
+manifest.assets.push({ path: '/assets/images/Media_extracted/minimap/1x0.texture', packPath: '/assets/test-icons/minimap.pack', offset: 0,
+  length: ntx.length, sha256: sha(ntx), mime: 'application/octet-stream', stored: { length: ntxStored.length, encoding: 'gzip' } });
 const server = http.createServer((req, res) => {
   if (req.url === '/assets/packs/manifest.json') { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(manifest)); return; }
   const image = [...images,...jsonAssets].find(i => i.transport === req.url);
   if (image) { res.setHeader('Content-Type', 'application/octet-stream'); res.end(image.compressed); return; }
+  if (req.url === '/assets/test-icons/minimap.pack') {
+    const range = req.headers.range?.match(/bytes=(\d+)-(\d+)/);
+    if (range) { const a = Number(range[1]), b = Number(range[2]); res.writeHead(206, { 'Content-Range': `bytes ${a}-${b}/${pack2.length}` }); res.end(pack2.subarray(a, b + 1)); }
+    else res.end(pack2);
+    return;
+  }
   if (req.url === '/assets/test-icons/icons.pack') {
     const range = req.headers.range?.match(/bytes=(\d+)-(\d+)/);
     if (range) { const a = Number(range[1]), b = Number(range[2]); res.writeHead(206, { 'Content-Range': `bytes ${a}-${b}/${pack.length}` }); res.end(pack.subarray(a, b + 1)); }
@@ -454,8 +469,13 @@ const server = http.createServer((req, res) => {
     const mapInfo = page.locator('.map-box p.muted').first();
     await page.waitForFunction(() => /In view: 2 monsters, 1 players/.test(document.getElementById('sro-bot-lean').shadowRoot.querySelector('.map-box p.muted').textContent));
     assert.match(await mapInfo.innerText(), /^You: X -?\d+ · Y -?\d+\. Hunting spot: \d+ m away/);
-    for (let i = 0; i < 50 && !assets.some(u => u.endsWith('/assets/test-icons/minimap-1x0.png.gz')); i++) await page.waitForTimeout(100);
-    assert.ok(assets.some(u => u.endsWith('/assets/test-icons/minimap-1x0.png.gz')), 'the minimap tile under the character is loaded');
+    // The tile under the character comes from the SROPACK2 pack (gzip-stored NTX1) and is painted: the canvas is red there.
+    await page.waitForFunction(() => {
+      const c = document.getElementById('sro-bot-lean').shadowRoot.querySelector('.map-stage canvas'), r = window.devicePixelRatio || 1;
+      const [red, green] = c.getContext('2d').getImageData(Math.round((c.clientWidth / 2 + 30) * r), Math.round((c.clientHeight / 2 - 30) * r), 1, 1).data;
+      return red > 150 && green < 100;
+    });
+    assert.ok(assets.some(u => u.endsWith('/assets/test-icons/minimap.pack')), 'the tile was read from the version 2 pack');
     await page.waitForFunction(() => document.getElementById('sro-bot-lean').shadowRoot.querySelector('nav button').dataset.iconLoaded === 'true');
     assert.equal(await page.getByRole('button', { name: 'Make this the hunting spot', exact: true }).isVisible(), false);
     const canvasBox = await page.getByLabel('Map of the hunting area', { exact: true }).boundingBox();
