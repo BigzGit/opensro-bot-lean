@@ -2595,7 +2595,7 @@ function stoneFixture(change = {}) {
 test('alchemy fuses the wanted stones one at a time, of the weapon degree, and confirms each by the stone leaving the bag', () => {
   const f = stoneFixture(); assert.equal(f.Alchemy.attributeCount(f.Alchemy.item(), 'MATTR_LUCK'), 0);
   f.Alchemy.start(true); f.Controller.tick();
-  assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'alchemy-start', mode: 'attribute', slots: [13, 16] });
+  assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'alchemy-start', mode: 'magic', slots: [13, 16] });
   for (let n = 0; n < 8; n++) { f.advance(100); f.Controller.tick(); }
   assert.equal(f.commands.length, 1, 'nothing more is sent before the result');
   f.fused(16, 77, 1); assert.match(f.Alchemy.message, /Luck is now 1 of 6/); assert.equal(f.Alchemy.item().plus, 0);
@@ -2606,15 +2606,32 @@ test('alchemy fuses the wanted stones one at a time, of the weapon degree, and c
 });
 test('alchemy fuses stones before the elixirs, in order, and stops when a stone is missing', () => {
   const f = stoneFixture({ luck: 1, steady: 1 }); f.Alchemy.start(); f.Controller.tick();
-  assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'alchemy-start', mode: 'attribute', slots: [13, 16] }, 'luck first');
+  assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'alchemy-start', mode: 'magic', slots: [13, 16] }, 'luck first');
   f.fused(16, 77, 1); f.advance(1500); f.Controller.tick();
-  assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'alchemy-start', mode: 'attribute', slots: [13, 17] }, 'then steady');
+  assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'alchemy-start', mode: 'magic', slots: [13, 17] }, 'then steady');
   f.fused(17, 78, 1); f.advance(1500); f.Controller.tick();
   assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'alchemy-start', mode: 'reinforce', slots: [13, 14] }, 'then the elixirs');
   const g = stoneFixture({ luck: 1, steady: 1 }); g.World.gp.inventory = g.World.gp.inventory.filter(i => i.slot !== 17);
   g.Alchemy.start(); g.Controller.tick(); g.fused(16, 77, 1); g.advance(1500); g.Controller.tick();
   assert.equal(g.Alchemy.run, null); assert.match(g.Alchemy.message, /No Steady stone of degree 9 in the bag/);
   assert.equal(g.commands.filter(c => c.mode === 'reinforce').length, 0);
+});
+test('a failed stone fusion uses the stone up and the run carries on; a refusal explains itself and stops', () => {
+  const f = stoneFixture(); f.Alchemy.start(true); f.Controller.tick();
+  // 0xb651 answers a failed fusion with error 0x23 and flags 0x80 on slot 0, after the stone left the bag.
+  const gp = f.World.gp;
+  f.World.applyGameplay({ ...gp, inventory: gp.inventory.map(i => i.slot === 16 ? { ...i, quantity: i.quantity - 1 } : i), inventoryPending: false,
+    alchemy: { ...gp.alchemy, pending: false, flags: 0x80, slot: 0, error: 0x23 } });
+  f.Controller.tick();
+  assert.ok(f.Alchemy.run, 'a failed fusion is not a stop'); assert.equal(f.Alchemy.pending, null);
+  assert.match(f.Alchemy.message, /Luck fusion failed and the stone was used up \(still 0\)/); assert.equal(f.Alchemy.result.stoneFailures, 1);
+  f.advance(1500); f.Controller.tick(); assert.equal(f.commands.filter(c => c.kind === 'alchemy-start').length, 2, 'the next stone is sent');
+  const g = stoneFixture(); g.Alchemy.start(true); g.Controller.tick();
+  g.World.applyGameplay({ ...g.World.gp, alchemy: { ...g.World.gp.alchemy, pending: false, flags: 0, slot: 0, error: 0x21 } }); g.Controller.tick();
+  assert.equal(g.Alchemy.run, null); assert.match(g.Alchemy.message, /code 33: the stone is not of the weapon's degree/);
+  const h = stoneFixture(); h.Alchemy.start(true); h.Controller.tick();
+  h.World.applyGameplay({ ...h.World.gp, alchemy: { ...h.World.gp.alchemy, pending: false, flags: 0, slot: 0, error: 16 } }); h.Controller.tick();
+  assert.match(h.Alchemy.message, /code 16: the game does not accept this stone here/);
 });
 test('alchemy stone setup needs a known degree and readable attributes, a wanted count and settled state', () => {
   let f = stoneFixture({ luck: 0 }); f.Alchemy.start(true); assert.equal(f.Alchemy.run, null); assert.match(f.Alchemy.message, /at least one stone count/);

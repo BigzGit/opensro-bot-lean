@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.78
+// @version      1.2.79
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.78';
+const VERSION = '1.2.79';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -5744,13 +5744,16 @@ const LeanWardrobe = {
 // material-spending request.
 // A stone adds 1 to the weapon's attribute count (at most 6): Luck raises the enhancement success chance, Steady
 // protects the durability and Immortal the weapon itself when an enhancement fails. Stone items are one per weapon
-// degree 1..12, in consecutive ids, and are used in the game's attribute tab (weapon + stone).
+// degree 1..12, in consecutive ids. The server takes these stones (item type 3,3,11,7) only in the request it calls
+// "magic" (mode byte 3). The page's own attribute mode sends byte 2, which the server answers with refusal 0x10 for
+// them, so the command here uses mode 'magic'. A fusion can fail: the stone is then used up and the answer is 0x23.
 const STONES = {
   luck: { label: 'Luck', option: 'MATTR_LUCK', base: 6871 },
   steady: { label: 'Steady', option: 'MATTR_SOLID', base: 6859 },
   immortal: { label: 'Immortal', option: 'MATTR_ATHANASIA', base: 6847 },
 };
 const STONE_MAX = 6;
+const STONE_FAILED = 0x23;
 const Alchemy = {
   windowOwner: null, selected: null, run: null, pending: null, result: null, message: 'Select a bag weapon to begin.', started: false,
   cfg() { return Settings.profile.alchemy; },
@@ -5836,7 +5839,7 @@ const Alchemy = {
     }
     this.run = { slot: item.slot, identity: this.identity(item), fingerprint: this.fingerprint(item), stonesOnly,
       cfg: { ...c }, config: JSON.stringify(c), manualAt: Manual.lastAt, character: World.charName,
-      attempts: 0, successes: 0, failures: 0, elixirs: 0, powders: 0, stoneAttempts: 0, stonesUsed: { luck: 0, steady: 0, immortal: 0 }, nextAt: now(), opening: null };
+      attempts: 0, successes: 0, failures: 0, elixirs: 0, powders: 0, stoneAttempts: 0, stoneFailures: 0, stonesUsed: { luck: 0, steady: 0, immortal: 0 }, nextAt: now(), opening: null };
     this.result = this.run; this.message = 'Preparing alchemy.';
   },
   stop(reason = 'Alchemy stopped. An attempt already sent may still finish.') {
@@ -5844,7 +5847,7 @@ const Alchemy = {
     // Close only a session we opened/used, on the same character. Native close
     // does not cancel reinforcement; keep the pending result until confirmed.
     const owner = this.windowOwner; this.windowOwner = null;
-    if (owner && owner.character === World.charName && World.inWorld() && ['reinforce', 'attribute'].includes(World.gp?.alchemy?.mode))
+    if (owner && owner.character === World.charName && World.inWorld() && ['reinforce', 'magic'].includes(World.gp?.alchemy?.mode))
       Cmd.raw({ kind: 'alchemy-close' }, 'Close alchemy');
   },
   init() {
@@ -5859,11 +5862,13 @@ const Alchemy = {
     const p = this.pending, gp = World.gp, a = gp?.alchemy;
     if (!p || !a || gp === p.state) return;
     if (a.pending) {
-      if (a.mode !== (p.stone ? 'attribute' : 'reinforce') || a.slot !== p.run.slot) this.stop('Alchemy state changed unexpectedly. Wait for the outstanding result.');
+      if (a.mode !== (p.stone ? 'magic' : 'reinforce') || a.slot !== p.run.slot) this.stop('Alchemy state changed unexpectedly. Wait for the outstanding result.');
       return;
     }
     if (a !== p.before && a.error !== null && a.error !== undefined) {
-      this.pending = null; this.stop('Alchemy refused by the game (code ' + a.error + ').'); return;
+      // A failed stone fusion is answered like a refusal (0x23), but the stone is gone: it is a result, not a stop.
+      if (p.stone && a.error === STONE_FAILED) return this.observeStone(p, gp, true);
+      this.pending = null; this.stop(p.stone ? this.stoneRefusal(a.error) : 'Alchemy refused by the game (code ' + a.error + ').'); return;
     }
     if (p.stone) return this.observeStone(p, gp);
     const outcome = a.flags & 0x70;
@@ -5891,16 +5896,22 @@ const Alchemy = {
     else if (p.run.attempts >= p.run.cfg.limit) this.stop('Attempt limit reached.');
   },
   // A stone fusion is confirmed by exactly one stone leaving the bag with the inventory settled, not by a flag alone.
-  observeStone(p, gp) {
+  stoneRefusal(code) {
+    const why = { 0x10: 'the game does not accept this stone here', 0x12: 'the slots were not accepted', 6: 'an item or stone was missing',
+      7: 'there was no stone', 9: 'this weapon cannot take that attribute', 0x21: 'the stone is not of the weapon\'s degree',
+      0x22: 'the weapon is at 6 of that stone or has no free magic option slot', 0x24: 'an Astral stone needs more Immortal charges' }[code];
+    return `Stone fusion refused by the game (code ${code}${why ? ': ' + why : ''}).`;
+  },
+  observeStone(p, gp, failed = false) {
     if (gp.inventoryPending || Restock.count(p.stone.ref) !== p.stone.before - 1) return;
     const item = World.items().find(i => i.slot === p.run.slot), label = STONES[p.stone.kind].label;
     if (!this.weapon(item) || this.identity(item) !== p.run.identity) { this.stop('Weapon identity changed. Outstanding result requires manual review.'); return; }
     const count = this.attributeCount(item, STONES[p.stone.kind].option);
-    this.pending = null; p.run.stonesUsed[p.stone.kind]++;
+    this.pending = null; p.run.stonesUsed[p.stone.kind]++; if (failed) p.run.stoneFailures++;
     p.run.fingerprint = this.fingerprint(item); this.selected = { slot: item.slot, fingerprint: p.run.fingerprint };
     p.run.nextAt = now() + 1000;
     if (this.run !== p.run) return;
-    this.message = count > p.stone.count ? `${label} is now ${count} of ${STONE_MAX}.` : `A ${label} stone was used but the count did not rise (still ${count}).`;
+    this.message = failed ? `The ${label} fusion failed and the stone was used up (still ${count}).` : count > p.stone.count ? `${label} is now ${count} of ${STONE_MAX}.` : `A ${label} stone was used but the count did not rise (still ${count}).`;
   },
   tick() {
     this.observe();
@@ -5930,7 +5941,7 @@ const Alchemy = {
       if (r.stoneAttempts >= 30) return this.stop('Stopped after 30 stone fusions.');
       const slots = [item.slot, need.item.slot];
       if (slots.some(slot => !Number.isInteger(slot) || slot < 13 || slot > 255) || new Set(slots).size !== slots.length) return this.stop('Invalid material slots.');
-      if (Cmd.raw({ kind: 'alchemy-start', mode: 'attribute', slots }, 'Alchemy: fuse a ' + STONES[need.kind].label + ' stone')) {
+      if (Cmd.raw({ kind: 'alchemy-start', mode: 'magic', slots }, 'Alchemy: fuse a ' + STONES[need.kind].label + ' stone')) {
         this.windowOwner = { character: r.character };
         r.stoneAttempts++;
         this.pending = { run: r, state: gp, before: gp.alchemy, at: now(), plus: item.plus,
@@ -5967,7 +5978,7 @@ const Alchemy = {
     const stones = UI.group('Magic stones for the weapon');
     for (const [kind, s] of Object.entries(STONES)) stones.append(UI.number(s.label + ' stones: fuse up to (0 = off)', () => c().stones[kind], n => c().stones[kind] = n, 0, STONE_MAX));
     stones.append(UI.row(UI.button('Fuse stones now', () => this.start(true)), UI.button('Stop', () => this.stop())),
-      el('p', 'Each stone adds 1 to that attribute on the weapon, up to 6. Luck raises the enhancement success chance, Steady stops durability damage and Immortal stops destruction when an enhancement fails; none of them stops the + from being reset (an Astral stone does that, from +4). The stone must be of the weapon\'s degree and in your bag. Start alchemy fuses the stones first, then enhances; Fuse stones now only fuses them. Stops if a stone is missing, the game refuses, or after 30 fusions.', 'muted'));
+      el('p', 'Each stone adds 1 to that attribute on the weapon, up to 6. Luck raises the enhancement success chance, Steady stops durability damage and Immortal stops destruction when an enhancement fails; none of them stops the + from being reset (an Astral stone does that, from +4). The stone must be of the weapon\'s degree and in your bag. Start alchemy fuses the stones first, then enhances; Fuse stones now only fuses them. A fusion can fail and use up the stone. Adding a kind the weapon does not have yet needs a free magic option slot. Stops if a stone is missing, the game refuses, or after 30 fusions.', 'muted'));
     UI.pane.append(stones);
     this.refresh();
   },
@@ -5993,7 +6004,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.78", "title": "The Alchemy tab fuses Luck, Steady and Immortal stones", "items": ["New **Magic stones for the weapon** section in Alchemy: choose how many Luck, Steady and Immortal stones the weapon should have (up to 6 each; 0 leaves one off).", "**Fuse stones now** only fuses them. **Start alchemy** fuses the missing stones first, then enhances with elixirs as before.", "Luck raises the enhancement success chance, Steady stops durability damage and Immortal stops destruction when an enhancement fails. The stones must be of the weapon's degree and in your bag."], "note": "It stops if a stone is missing, the game refuses a fusion, or after 30 fusions. New in this version and checked against a simulated game: if a fusion does not raise the count, tell us on Discord."}, {"version": "1.2.77", "title": "Arrows and bolts are bought on town trips", "items": ["New **Arrows and bolts** section in Supplies. Tick Buy arrows and/or Buy bolts and set when to go to town and what to refill to.", "They are bought at the repair merchant, after selling pet loot and before repairing. The count includes the stack in your ammunition slot and spare stacks in your bag, and a trip also starts when it falls to your low-stock number.", "If the merchant does not sell the item, there is no bag space or not enough gold, that item is skipped with a notice and the rest of the trip goes on."], "note": "Equipping the bought ammunition is still up to you. Both options are off by default."}, {"version": "1.2.76", "title": "Patch notes open in the game, and updates say what they bring", "items": ["After an update, a window next to the bot panel shows what changed since the version you used before, so you no longer need Discord to see what was fixed.", "Click the version number at the top of the bot panel to read the notes again.", "When a newer version is out, the top of the bot panel says what it brings, for example \"Update 1.2.77 available: …\", so you can tell whether to install it now."], "note": "The bot keeps running while the window is open; close it with Got it."}, {"version": "1.2.75", "title": "The imbue is cast during other skills and no longer wasted", "items": ["A skill takes the weapon imbue when its cast ends, and the game accepts an imbue while another skill is being cast. The bot waited for the current skill to finish first, so a skill could land without the imbue while the imbue icon was ready.", "The imbue is now cast as soon as it runs out, also in the middle of another skill's cast.", "The Renew imbue when seconds left setting from 1.2.74 is removed: an imbue's cooldown is as long as the imbue itself, so it could never renew earlier, and it only made coatings recast early and waste MP."]}];
+const RELEASE_NOTES = [{"version": "1.2.79", "title": "Stone fusion works: it uses the request the server accepts", "items": ["Fusing Luck, Steady and Immortal stones was refused by the game with code 16 every time. The bot used the page's attribute request, which the server answers with a refusal for these stones; it now uses the magic request, which is the one the server takes them in.", "A fusion can fail on this server: the stone is used up and nothing changes. That is now counted and shown, and the run carries on instead of stopping.", "A refusal now says why, for example that the stone is not of the weapon's degree, or that the weapon is at 6 of that stone or has no free magic option slot."]}, {"version": "1.2.78", "title": "The Alchemy tab fuses Luck, Steady and Immortal stones", "items": ["New **Magic stones for the weapon** section in Alchemy: choose how many Luck, Steady and Immortal stones the weapon should have (up to 6 each; 0 leaves one off).", "**Fuse stones now** only fuses them. **Start alchemy** fuses the missing stones first, then enhances with elixirs as before.", "Luck raises the enhancement success chance, Steady stops durability damage and Immortal stops destruction when an enhancement fails. The stones must be of the weapon's degree and in your bag."], "note": "It stops if a stone is missing, the game refuses a fusion, or after 30 fusions. New in this version and checked against a simulated game: if a fusion does not raise the count, tell us on Discord."}, {"version": "1.2.77", "title": "Arrows and bolts are bought on town trips", "items": ["New **Arrows and bolts** section in Supplies. Tick Buy arrows and/or Buy bolts and set when to go to town and what to refill to.", "They are bought at the repair merchant, after selling pet loot and before repairing. The count includes the stack in your ammunition slot and spare stacks in your bag, and a trip also starts when it falls to your low-stock number.", "If the merchant does not sell the item, there is no bag space or not enough gold, that item is skipped with a notice and the rest of the trip goes on."], "note": "Equipping the bought ammunition is still up to you. Both options are off by default."}, {"version": "1.2.76", "title": "Patch notes open in the game, and updates say what they bring", "items": ["After an update, a window next to the bot panel shows what changed since the version you used before, so you no longer need Discord to see what was fixed.", "Click the version number at the top of the bot panel to read the notes again.", "When a newer version is out, the top of the bot panel says what it brings, for example \"Update 1.2.77 available: …\", so you can tell whether to install it now."], "note": "The bot keeps running while the window is open; close it with Got it."}, {"version": "1.2.75", "title": "The imbue is cast during other skills and no longer wasted", "items": ["A skill takes the weapon imbue when its cast ends, and the game accepts an imbue while another skill is being cast. The bot waited for the current skill to finish first, so a skill could land without the imbue while the imbue icon was ready.", "The imbue is now cast as soon as it runs out, also in the middle of another skill's cast.", "The Renew imbue when seconds left setting from 1.2.74 is removed: an imbue's cooldown is as long as the imbue itself, so it could never renew earlier, and it only made coatings recast early and waste MP."]}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
