@@ -71,6 +71,7 @@ const server = http.createServer((req, res) => {
     const updateSha = 'b'.repeat(40);
     await page.route('https://api.github.com/repos/nixxane/opensro-bot-lean/commits/main', route => route.fulfill({ json: { sha: updateSha } }));
     await page.route('https://raw.githubusercontent.com/nixxane/opensro-bot-lean/' + updateSha + '/bot.lean.meta.js', route => route.fulfill({ body: '// @version      9.0.0\n' }));
+    await page.route('https://raw.githubusercontent.com/nixxane/opensro-bot-lean/' + updateSha + '/notes/9.0.0.md', route => route.fulfill({ body: '# Faster <b>looting</b>\n- item\n' }));
     const errors = [], assets = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('request', request => { if (request.url().includes('/assets/')) assets.push(request.url()); });
@@ -79,6 +80,9 @@ const server = http.createServer((req, res) => {
     await page.getByText(/^nixxane bot 1\./).waitFor();
     const updateButton = page.getByRole('button', { name: 'Update 9.0.0', exact: true });
     await updateButton.waitFor();
+    // The new version's headline is shown as text, so a player sees why to update before installing.
+    await page.getByText('Update 9.0.0 available: Faster <b>looting</b>', { exact: true }).waitFor();
+    assert.match(await updateButton.getAttribute('title'), /^9\.0\.0: Faster <b>looting<\/b> · Open Tampermonkey/);
     await page.evaluate(() => { window.open = (...args) => { window.updateOpened = args; }; });
     await updateButton.click();
     assert.deepEqual(await page.evaluate(() => window.updateOpened), ['https://raw.githubusercontent.com/nixxane/opensro-bot-lean/' + updateSha + '/bot.lean.user.js', '_blank', 'noopener,noreferrer']);

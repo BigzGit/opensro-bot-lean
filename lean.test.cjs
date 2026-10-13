@@ -1707,6 +1707,31 @@ test('the Discord invite is real and the update notice shows once per version', 
   f.storage.delete('sroBotLean:v1:seenVersion'); f.storage.set('sroBotLean:v1:profile:default', JSON.stringify({}));
   assert.equal(f.Updates.announce(), true); assert.match(f.notices.at(-1), /Updated to/, 'an existing install is not welcomed as new');
 });
+test('after an update the patch notes of every version since the last one open once; a new install is welcomed', () => {
+  const version = source.match(/const VERSION = '([\d.]+)'/)[1];
+  const setup = (seen, profile = true) => {
+    const f = fixture(), shown = [];
+    f.UI.showNotes = notes => { shown.push(Array.from(notes, n => n.version)); return true; };
+    if (seen !== undefined) f.storage.set('sroBotLean:v1:seenVersion', JSON.stringify(seen));
+    if (profile) f.storage.set('sroBotLean:v1:profile:default', JSON.stringify({}));
+    return { f, shown };
+  };
+  const notes = vm.runInNewContext(source.match(/const RELEASE_NOTES = (\[[^\n]+\]);/)[1]);
+  assert.equal(notes[0].version, version, 'the installed version has built-in notes');
+  assert.ok(notes.every(n => n.title && n.items.length && n.items.every(i => typeof i === 'string' && i)), 'every release has a title and items');
+  const all = Array.from(notes, n => n.version), [latest, previous] = all;
+  assert.ok(previous, 'notes of the previous version are kept too');
+  let { f, shown } = setup('0.0.1');
+  assert.equal(f.Updates.announce(), true); assert.deepEqual(shown, [all], 'skipped versions are included, newest first');
+  assert.equal(f.notices.length, 0, 'no Discord toast when the notes open');
+  assert.equal(f.Updates.announce(), false); assert.equal(shown.length, 1, 'once per version');
+  ({ f, shown } = setup(previous)); f.Updates.announce(); assert.deepEqual(shown, [[latest]]);
+  ({ f, shown } = setup(undefined)); f.Updates.announce(); assert.deepEqual(shown, [[latest]], 'an install without a stored version sees this version only');
+  ({ f, shown } = setup('garbage')); f.Updates.announce(); assert.deepEqual(shown, [[latest]]);
+  ({ f, shown } = setup(undefined, false)); f.Updates.announce(); assert.deepEqual(shown, []); assert.match(f.notices.at(-1), /Welcome/, 'a new install gets no patch notes');
+  ({ f, shown } = setup('9.0.0')); f.Updates.announce(); assert.deepEqual(shown, []); assert.match(f.notices.at(-1), /Updated to/, 'a downgrade has no notes to show');
+  assert.equal(f.Updates.newer('1.2.10', '1.2.9'), true); assert.equal(f.Updates.newer('1.2.9', '1.2.10'), false); assert.equal(f.Updates.newer('x', '1.0.0'), false);
+});
 test('the searching status says why no monster is eligible', () => {
   const f = fixture(), mob = (gid, extra = {}) => f.World.ents.set(gid, { gid, kind: 'monster', name: 'Wolf', level: 40, regionId: 1, x: 120, y: 0, z: 100, attackFlags: 16, appearanceState: [0], ...extra });
   f.Hunt.running = true; f.Hunt.state = 'search';
@@ -3056,7 +3081,8 @@ async function updateTests() {
   await check('updates pin metadata and user-initiated installer to the same trusted commit', async () => {
     const f = fixture(), calls = updater(f); f.UI.updateButton = {};
     await f.Updates.check();
-    assert.equal(calls.length, 2); assert.equal(calls[1].url, base + 'meta.js');
+    assert.equal(calls.length, 3); assert.equal(calls[1].url, base + 'meta.js');
+    assert.equal(calls[2].url, 'https://raw.githubusercontent.com/nixxane/opensro-bot-lean/' + sha + '/notes/1.2.100.md', 'the headline comes from the same commit');
     assert.equal(calls[0].options.credentials, 'omit'); assert.equal(calls[0].options.cache, 'no-store');
     assert.equal(f.UI.updateButton.hidden, false); assert.equal(f.UI.updateButton.textContent, 'Update 1.2.100');
     let opened; f.win.open = (...args) => { opened = args; };
@@ -3064,6 +3090,35 @@ async function updateTests() {
     assert.deepEqual(opened, [base + 'user.js', '_blank', 'noopener,noreferrer']);
     assert.equal(f.commands.length, 0); assert.equal(f.Hunt.running, false);
     updater(f, '1.2.34'); await f.Updates.check(); assert.equal(f.Updates.latest, null); assert.equal(f.UI.updateButton.hidden, true);
+  });
+  await check('an available update shows the headline of its patch notes as one line of plain text', async () => {
+    const run = async (notes, ok = true) => {
+      const f = fixture(), calls = [];
+      f.UI.updateButton = {}; f.UI.updateNote = {};
+      f.win.fetch = async url => {
+        calls.push(url);
+        if (url.includes('api.github.com')) return { ok: true, json: async () => ({ sha }) };
+        if (url.endsWith('meta.js')) return { ok: true, text: async () => '// @version      1.2.100' + String.fromCharCode(10) };
+        if (notes === null) throw Error('offline');
+        return { ok, text: async () => notes };
+      };
+      await f.Updates.check(); return { f, calls };
+    };
+    const nl = String.fromCharCode(10);
+    let { f, calls } = await run('# Faster looting' + nl + '- item' + nl);
+    assert.equal(f.Updates.latest.title, 'Faster looting');
+    assert.equal(f.UI.updateNote.hidden, false); assert.equal(f.UI.updateNote.textContent, 'Update 1.2.100 available: Faster looting');
+    assert.match(f.UI.updateButton.title, /^1\.2\.100: Faster looting · Open Tampermonkey/);
+    await f.Updates.check(); assert.equal(calls.filter(u => u.includes('/notes/')).length, 1, 'the headline is read once per version');
+    const hostile = '# A' + String.fromCharCode(0, 27, 133) + 'B <img src=x onerror=alert(1)> ' + 'x'.repeat(300);
+    ({ f } = await run(hostile));
+    assert.equal(f.Updates.latest.title.length, 120); assert.ok(f.Updates.latest.title.startsWith('AB <img src=x'), 'control characters dropped, text kept as text');
+    ({ f } = await run('# One' + String.fromCharCode(8232) + 'Two')); assert.equal(f.Updates.latest.title, 'One', 'a line separator ends the headline');
+    for (const [notes, ok] of [['no title line', true], ['# Gone', false], [null, true]]) {
+      ({ f } = await run(notes, ok));
+      assert.equal(f.Updates.latest.version, '1.2.100', 'the update is still offered'); assert.equal(f.Updates.latest.title, '');
+      assert.equal(f.UI.updateNote.hidden, true); assert.match(f.UI.updateButton.title, /^Open Tampermonkey/);
+    }
   });
   await check('offline and invalid update responses never create an install link and release the check lock', async () => {
     for (const response of [null, { ok: false }, { ok: true, json: async () => ({ sha: '../evil' }) }]) {

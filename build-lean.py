@@ -147,7 +147,7 @@ skin += '\nconst LEAN_CSS = ' + __import__('json').dumps((base / 'lean-skin.css'
 header = '''// ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.75
+// @version      1.2.76
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -167,12 +167,29 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.75';
+const VERSION = '1.2.76';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
 const T = (tr, en) => en ?? tr;
 '''
+# Patch notes shown in the game after an update: notes/<version>.md, a "# title" line, "- " items, optional "> " note.
+def release_notes():
+    import re, json
+    version = re.search(r"const VERSION = '([\d.]+)';", header).group(1)
+    key = lambda v: tuple(int(x) for x in v.split('.'))
+    releases = []
+    for path in (base / 'notes').glob('*.md'):
+        assert re.fullmatch(r'\d+\.\d+\.\d+', path.stem), 'notes file name is not a version: ' + path.name
+        lines = [line.rstrip() for line in path.read_text(encoding='utf-8').splitlines() if line.strip()]
+        assert lines and lines[0].startswith('# '), path.name + ' must start with "# title"'
+        items = [line[2:] for line in lines[1:] if line.startswith('- ')]
+        note = [line[2:] for line in lines[1:] if line.startswith('> ')]
+        assert items and len(items) + len(note) == len(lines) - 1, path.name + ': every line after the title starts with "- " or "> "'
+        releases.append({'version': path.stem, 'title': lines[0][2:], 'items': items, **({'note': ' '.join(note)} if note else {})})
+    releases.sort(key=lambda r: key(r['version']), reverse=True)
+    assert releases and releases[0]['version'] == version, 'write notes/' + version + '.md before building'
+    return 'const RELEASE_NOTES = ' + json.dumps(releases[:8], ensure_ascii=False) + ';'
 parts = [header, utils, (base / 'lean-settings.js').read_text(encoding='utf-8'), geometry,
          hook, display, world, commands, ticker, potion, attackable, combat, restock, hunt,
          (base / 'lean-navigation.js').read_text(encoding='utf-8'), walkback,
@@ -194,7 +211,7 @@ parts = [header, utils, (base / 'lean-settings.js').read_text(encoding='utf-8'),
          (base / 'lean-wardrobe-core.js').read_text(encoding='utf-8'),
          (base / 'lean-wardrobe.js').read_text(encoding='utf-8'),
          (base / 'lean-alchemy.js').read_text(encoding='utf-8'),
-         (base / 'lean-update.js').read_text(encoding='utf-8'),
+         release_notes(), (base / 'lean-update.js').read_text(encoding='utf-8'),
          (base / 'lean-diagnostics.js').read_text(encoding='utf-8'),
          (base / 'lean-reports.js').read_text(encoding='utf-8'),
          (base / 'lean-ui.js').read_text(encoding='utf-8'),

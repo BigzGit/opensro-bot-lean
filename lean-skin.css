@@ -14,6 +14,7 @@
 header{position:relative;z-index:1;height:34px;display:flex;align-items:center;justify-content:center;cursor:move;touch-action:none;padding:6px 32px 0;color:#fff}
 header button.update,header button.discord{height:22px;min-width:0;margin-left:8px;font-size:11px}
 header strong{font-weight:normal;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+header button.version{display:inline;height:auto;min-width:0;padding:0;border:0;background:none;color:inherit;font:inherit;line-height:inherit;text-decoration:underline dotted;text-underline-offset:3px}header button.version:hover{color:#f0d98c}
 header button.fold{position:absolute;right:10px;top:10px;width:16px;min-width:16px;height:16px;padding:0;border:0;background:var(--s-close);color:transparent;font-size:0}
 header button.fold:hover{background-image:var(--s-close_f)}
 .body{position:relative;z-index:1;margin:0 15px}
@@ -65,3 +66,5 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;max-height:130px;
 textarea{width:100%;color:inherit;background:#151916;font:11px monospace}
 
 .dialog{position:fixed;width:min(430px,calc(100vw - 8px));z-index:2147483646}.dialog[hidden]{display:none}.dialog-body{max-height:min(70vh,640px);margin:0 15px}.report-preview .field{display:block}.report-preview .field>span{display:block;margin-bottom:4px}.report-image{display:block;width:100%;height:auto;margin:6px 0;border:1px solid #5d5034}
+.patch-notes .release{margin:2px 0 10px}.patch-notes .release>strong{display:block;color:#f0d98c;font-weight:normal;margin-bottom:4px}.patch-notes ul{margin:0;padding-left:18px}.patch-notes li{margin:3px 0;line-height:1.4}.patch-notes .row{margin-bottom:6px}
+.update-note{color:#f0d98c;font-size:11px;line-height:1.35;margin:2px 0 6px}.update-note[hidden]{display:none}

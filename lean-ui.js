@@ -55,6 +55,30 @@ const UI = {
     this.reportDescription.value = Reports.draft.description;
     this.reportStatus.textContent = Reports.draft.sent ? 'Report already sent. Close this preview to prepare another.' : 'Review the report before sending. Screenshot is optional.';
   },
+  // Patch notes beside the panel, newest first. Plain text only; it never pauses the bot. Returns false before mount.
+  showNotes(notes = RELEASE_NOTES, title = 'Patch notes') {
+    if (!this.root || !notes.length) return false;
+    const close = () => { this.notesBox.hidden = true; };
+    const releases = notes.map(n => {
+      const box = el('div', null, 'release'), list = el('ul');
+      list.append(...n.items.map(item => el('li', item)));
+      box.append(el('strong', n.version + ' · ' + n.title), list);
+      if (n.note) box.append(el('p', n.note, 'muted'));
+      return box;
+    });
+    const site = this.button('All patch notes', () => W.open(NOTES_URL, '_blank', 'noopener,noreferrer'));
+    this.notesBox?.remove();
+    this.notesBox = this.windowFrame(title, close,
+      ...releases, this.row(this.button('Got it', close), site));
+    this.notesBox.classList.add('patch-notes');
+    this.root.append(this.notesBox);
+    // Beside the panel (left if there is room, else right), never over the middle of the game.
+    const panel = this.root.host.getBoundingClientRect(), width = Math.min(430, innerWidth - 8);
+    this.notesBox.style.left = (panel.left - width - 8 >= 0 ? panel.left - width - 8 : panel.right + 8) + 'px';
+    this.notesBox.style.top = Math.max(4, panel.top) + 'px';
+    this.fitWindow(this.notesBox);
+    return true;
+  },
   // A draggable in-page window in the panel's skin. Lives in the same shadow root, so typing is protected like the panel.
   windowFrame(title, onClose, ...children) {
     const win = el('section', null, 'panel dialog'), header = el('header');
@@ -154,21 +178,25 @@ const UI = {
       W.open(DISCORD_URL, '_blank', 'noopener,noreferrer');
     });
     discord.className = 'discord'; discord.title = 'Updates, suggestions and bug reports';
-    header.append(el('strong', 'nixxane bot ' + VERSION), discord, this.updateButton, fold);
-    Updates.render();
+    const version = this.button(VERSION, () => this.showNotes());
+    version.className = 'version'; version.title = 'What’s new: patch notes';
+    const name = el('strong', 'nixxane bot '); name.append(version);
+    header.append(name, discord, this.updateButton, fold);
     this.body = el('div', null, 'body'); this.status = el('div', 'Waiting for game…', 'status'); this.status.setAttribute('role', 'status');
+    this.updateNote = el('div', '', 'update-note'); this.updateNote.hidden = true;
+    Updates.render();
     const controls = this.row(this.button('Start / stop · F8', () => toggleBot()), this.button('Return & hunt', () => WalkBack.start(true)), this.button('Stop all', () => stopAll()));
     controls.classList.add('controls');
     this.nav = el('nav'); this.nav.setAttribute('aria-label', 'Bot settings');
     for (const name of ['Combat', 'Loot', 'Supplies', 'Alchemy', 'Wardrobe', 'Settings']) this.nav.append(this.button(name, () => { this.current = name; this.draw(); }));
     this.pane = el('div', null, 'pane'); this.feedback = el('div', null, 'feedback'); this.feedback.setAttribute('role', 'status');
     this.waitNote = el('div', '', 'waiting'); this.waitNote.setAttribute('role', 'status');
-    this.body.append(this.status, this.waitNote, controls, this.nav, this.pane, this.feedback);
+    this.body.append(this.updateNote, this.status, this.waitNote, controls, this.nav, this.pane, this.feedback);
     for (const corner of ['lu', 'mu', 'ru', 'ls', 'rs', 'ld', 'md', 'rd']) panel.append(el('div', null, 'frame ' + corner));
     panel.append(header, this.body); this.root.append(style, panel);
     this.tip = el('div', null, 'skill-tip'); this.tip.hidden = true; this.root.append(this.tip);
     this.dragBy(header, host);
-    W.addEventListener('resize', () => this.fitWindow(this.reportBox));
+    W.addEventListener('resize', () => { this.fitWindow(this.reportBox); this.fitWindow(this.notesBox); });
     this.draw(); this.update();
   },
   skillOptions() {
