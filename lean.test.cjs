@@ -2574,6 +2574,57 @@ test('alchemy sends native reinforcement slots and confirms success and failure 
   assert.equal(f.Alchemy.result.elixirs, 2); assert.equal(f.Alchemy.result.powders, 2);
 });
 
+function stoneFixture(change = {}) {
+  const f = alchemyFixture();
+  const refs = [{ paramId: 77, optionName: 'MATTR_LUCK' }, { paramId: 78, optionName: 'MATTR_SOLID' }, { paramId: 79, optionName: 'MATTR_ATHANASIA' }];
+  f.World.gp.inventory = f.World.gp.inventory.map(i => i.slot === 13 ? { ...i, magicReferences: refs } : i);
+  f.World.gp.inventory.push({ slot: 16, refObjId: 6879, typeFlags: 0x3dec, quantity: 3 }, { slot: 17, refObjId: 6867, typeFlags: 0x3dec, quantity: 3 },
+    { slot: 18, refObjId: 6855, typeFlags: 0x3dec, quantity: 3 });
+  Object.assign(f.Settings.profile.alchemy.stones, { luck: 2, steady: 0, immortal: 0 }, change);
+  f.Alchemy.select(13);
+  const have = { 77: 0, 78: 0, 79: 0 };
+  // The game fuses one stone: the bag loses it and the weapon's option count rises.
+  f.fused = (slot, param, count) => {
+    const gp = f.World.gp; have[param] = count;
+    const inventory = gp.inventory.map(i => i.slot === slot ? { ...i, quantity: i.quantity - 1 } : i.slot === 13 ? { ...i, magic: Object.entries(have).filter(([, c]) => c).map(([id, c]) => String((BigInt(c) << 32n) | BigInt(id))) } : i);
+    f.World.applyGameplay({ ...gp, inventory, inventoryPending: false, alchemy: { ...gp.alchemy, pending: false, flags: 0x10, slot: 13, error: null } });
+    f.Controller.tick();
+  };
+  return f;
+}
+test('alchemy fuses the wanted stones one at a time, of the weapon degree, and confirms each by the stone leaving the bag', () => {
+  const f = stoneFixture(); assert.equal(f.Alchemy.attributeCount(f.Alchemy.item(), 'MATTR_LUCK'), 0);
+  f.Alchemy.start(true); f.Controller.tick();
+  assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'alchemy-start', mode: 'attribute', slots: [13, 16] });
+  for (let n = 0; n < 8; n++) { f.advance(100); f.Controller.tick(); }
+  assert.equal(f.commands.length, 1, 'nothing more is sent before the result');
+  f.fused(16, 77, 1); assert.match(f.Alchemy.message, /Luck is now 1 of 6/); assert.equal(f.Alchemy.item().plus, 0);
+  f.advance(1500); f.Controller.tick(); assert.equal(f.commands.length, 2, 'the second stone follows');
+  f.fused(16, 77, 2); f.advance(1500); f.Controller.tick();
+  assert.equal(f.Alchemy.run, null); assert.match(f.Alchemy.message, /wanted stone counts/); assert.equal(f.commands.filter(c => c.mode === 'reinforce').length, 0, 'fusing only: no elixir is used');
+  assert.equal(f.Alchemy.result.stonesUsed.luck, 2); assert.equal(f.commands.at(-1).kind, 'alchemy-close');
+});
+test('alchemy fuses stones before the elixirs, in order, and stops when a stone is missing', () => {
+  const f = stoneFixture({ luck: 1, steady: 1 }); f.Alchemy.start(); f.Controller.tick();
+  assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'alchemy-start', mode: 'attribute', slots: [13, 16] }, 'luck first');
+  f.fused(16, 77, 1); f.advance(1500); f.Controller.tick();
+  assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'alchemy-start', mode: 'attribute', slots: [13, 17] }, 'then steady');
+  f.fused(17, 78, 1); f.advance(1500); f.Controller.tick();
+  assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'alchemy-start', mode: 'reinforce', slots: [13, 14] }, 'then the elixirs');
+  const g = stoneFixture({ luck: 1, steady: 1 }); g.World.gp.inventory = g.World.gp.inventory.filter(i => i.slot !== 17);
+  g.Alchemy.start(); g.Controller.tick(); g.fused(16, 77, 1); g.advance(1500); g.Controller.tick();
+  assert.equal(g.Alchemy.run, null); assert.match(g.Alchemy.message, /No Steady stone of degree 9 in the bag/);
+  assert.equal(g.commands.filter(c => c.mode === 'reinforce').length, 0);
+});
+test('alchemy stone setup needs a known degree and readable attributes, a wanted count and settled state', () => {
+  let f = stoneFixture({ luck: 0 }); f.Alchemy.start(true); assert.equal(f.Alchemy.run, null); assert.match(f.Alchemy.message, /at least one stone count/);
+  f = stoneFixture(); f.World.gp.inventory[0].magic = [String((1n << 32n) | 999n)]; f.Alchemy.select(13); f.Alchemy.start(true);
+  assert.equal(f.Alchemy.run, null); assert.match(f.Alchemy.message, /attributes are not loaded/); assert.equal(f.commands.length, 0);
+  f = stoneFixture(); delete f.World.gp.inventory[0].tooltip; f.Alchemy.select(13); f.Alchemy.start(true); assert.equal(f.Alchemy.run, null); assert.match(f.Alchemy.message, /degree is unknown/);
+  f = stoneFixture({ luck: 6 }); f.World.gp.inventory[0].magic = [String((6n << 32n) | 77n)]; f.Alchemy.select(13); f.Alchemy.start(true); f.Controller.tick();
+  assert.equal(f.commands.length, 0, 'already at the wanted count: nothing to fuse'); assert.equal(f.Alchemy.run, null);
+  f = stoneFixture({ luck: 9 }); assert.equal(f.Alchemy.wanted().length, 1); f.Alchemy.start(true); f.Controller.tick(); assert.equal(f.commands.length, 1, 'counts above 6 are capped, not rejected');
+});
 test('alchemy stops at target or attempt limit instead of spending further materials', () => {
   for (const target of [true, false]) {
     const f = alchemyFixture(); Object.assign(f.Settings.profile.alchemy, target ? { target: 1 } : { target: 5, limit: 1 });

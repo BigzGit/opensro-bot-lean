@@ -56,6 +56,9 @@ const gameplay = { localGid: 1, target: 0, targetPending: false, inventoryPendin
   try {
     const page = await browser.newPage();
     await page.route('https://api.github.com/**', route => route.abort());
+    // A bot that has already shown this version's patch notes does not open them over the panel.
+    const version = script.match(/const VERSION = '([\d.]+)'/)[1];
+    await page.addInitScript(v => { try { localStorage.setItem('sroBotLean:v1:seenVersion', JSON.stringify(v)); } catch {} }, version);
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.addScriptTag({ content: script });
     await page.getByText(/^nixxane bot 1\./).waitFor();
@@ -103,7 +106,7 @@ const gameplay = { localGid: 1, target: 0, targetPending: false, inventoryPendin
     await tab('Supplies'); await snap('06-potions');
     await jump('Potion restock'); await snap('07-restock');
     await jump('Scroll town cycle'); await snap('08-town-cycle');
-    await tab('Alchemy'); await snap('09-alchemy');
+    await tab('Alchemy'); await snap('09-alchemy'); await jump('Magic stones for the weapon'); await snap('09b-alchemy-stones');
     await tab('Settings'); await snap('10-settings');
     await jump('Anti-stuck'); await snap('11-anti-stuck');
     await jump('Auto mastery and skills'); await snap('12-mastery');
