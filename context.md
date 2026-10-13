@@ -48,6 +48,7 @@ The panel lives inside an open shadow root on `#sro-bot-lean`. Runtime diagnosti
 | `lean-wardrobe-core.js` | Generated wardrobe appearance core; edit its generator/input adaptation, not generated output alone. |
 | `lean-wardrobe.js` | Compact wardrobe browser. |
 | `lean-reports.js` | Manual frozen report preview, optional one-frame screen capture and bounded uploads to the report receiver. |
+| `lean-map.js` | Map page: game minimap tiles on a canvas, hunting area, entities, party; click to set the hunting spot. Outdoors only. |
 | `lean-ui.js`, `lean-skin.css` | Controls, shadow-DOM panel, refresh and styling. |
 | `lean-boot.js` | Initialization, lifecycle resets, hotkeys and keyboard isolation. |
 | `lean.test.cjs` | VM-based integration tests against the generated userscript. |

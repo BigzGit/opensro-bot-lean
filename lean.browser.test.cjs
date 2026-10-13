@@ -17,6 +17,11 @@ const images = ['ic_attack', 'ic_recovery', 'ic_autoget', 'ic_sit'].map((key, i)
   const raw = Buffer.concat([images[0].raw, Buffer.from('orb')]);
   images.push({ raw, compressed: zlib.gzipSync(raw), path: '/assets/images/Media_extracted/icon/action/icon_cha_auto_attack.png', transport: '/assets/test-icons/orb.png.gz' });
 }
+// The Map page: the minimap tile under the test character (region 1 = 1x0), the map button and the minimap signs.
+for (const name of ['minimap/1x0', 'interface/minimap/mm_map_button', ...['character', 'party', 'otherplayer', 'monster', 'unique', 'npc', 'animal'].map(s => 'interface/minimap/mm_sign_' + s)]) {
+  const raw = Buffer.concat([images[1].raw, Buffer.from('map-' + name)]);
+  images.push({ raw, compressed: zlib.gzipSync(raw), path: `/assets/images/Media_extracted/${name}.png`, transport: `/assets/test-icons/${name.replace(/\//g, '-')}.png.gz` });
+}
 // The wide window's page icons (also the game's action icons), each with distinct bytes.
 for (const name of ['autoget', 'recovery', 'alchemy', 'shop', 'helper']) {
   const raw = Buffer.concat([images[0].raw, Buffer.from('nav-' + name)]);
@@ -85,6 +90,10 @@ const server = http.createServer((req, res) => {
     const errors = [], assets = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('request', request => { if (request.url().includes('/assets/')) assets.push(request.url()); });
+    // The once-per-version patch notes open 5 s after a load, over whatever the test is doing; mark this version seen.
+    // (Their selection and window are covered by the integration tests.)
+    const version = script.match(/const VERSION = '([\d.]+)';/)[1];
+    await page.addInitScript(v => localStorage.setItem('sroBotLean:v1:seenVersion', JSON.stringify(v)), version);
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.addScriptTag({ content: script });
     await page.getByText(/^nixxane bot 1\./).waitFor();
@@ -435,6 +444,45 @@ const server = http.createServer((req, res) => {
     await page.getByRole('button', { name: 'Compact', exact: true }).click();
     assert.equal(Math.round((await host.boundingBox()).width), Math.round(compactWidth));
     assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('sroLean:ui')).wide), false);
+    // Map page: minimap tile, entities in view, marking a point and making it the hunting spot, zoom and follow.
+    await page.evaluate(() => testSim.postMessage({ kind: 'fixture', message: { kind: 'world', batch: { events: [
+      { kind: 'spawn', entity: { gid: 50, kind: 'monster', name: 'Map mob', regionId: 1, x: 260, y: 0, z: 160, appearanceState: [0], rarity: 0 } },
+      { kind: 'spawn', entity: { gid: 51, kind: 'monster', name: 'Map unique', regionId: 1, x: 40, y: 0, z: 220, appearanceState: [0], rarity: 3 } },
+      { kind: 'spawn', entity: { gid: 52, kind: 'player', name: 'Stranger', regionId: 1, x: 150, y: 0, z: 40, appearanceState: [0] } },
+    ] } } }));
+    await page.getByRole('button', { name: 'Map', exact: true }).click();
+    const mapInfo = page.locator('.map-box p.muted').first();
+    await page.waitForFunction(() => /In view: 2 monsters, 1 players/.test(document.getElementById('sro-bot-lean').shadowRoot.querySelector('.map-box p.muted').textContent));
+    assert.match(await mapInfo.innerText(), /^You: X -?\d+ · Y -?\d+\. Hunting spot: \d+ m away/);
+    for (let i = 0; i < 50 && !assets.some(u => u.endsWith('/assets/test-icons/minimap-1x0.png.gz')); i++) await page.waitForTimeout(100);
+    assert.ok(assets.some(u => u.endsWith('/assets/test-icons/minimap-1x0.png.gz')), 'the minimap tile under the character is loaded');
+    await page.waitForFunction(() => document.getElementById('sro-bot-lean').shadowRoot.querySelector('nav button').dataset.iconLoaded === 'true');
+    assert.equal(await page.getByRole('button', { name: 'Make this the hunting spot', exact: true }).isVisible(), false);
+    const canvasBox = await page.getByLabel('Map of the hunting area', { exact: true }).boundingBox();
+    const upp = await page.evaluate(() => SROLean.map.upp), pose = await page.evaluate(() => SROLean.world.pose());
+    // 40 px right and 30 px up of the centre (the character) is 40 * upp units east and 30 * upp units north.
+    await page.mouse.click(canvasBox.x + canvasBox.width / 2 + 40, canvasBox.y + canvasBox.height / 2 - 30);
+    await page.getByRole('button', { name: 'Make this the hunting spot', exact: true }).click();
+    const newCentre = await page.evaluate(() => SROLean.settings.profile.hunt.center);
+    assert.equal(newCentre.regionId, 1);
+    assert.ok(Math.abs(newCentre.x - (pose.x + 40 * upp)) <= upp && Math.abs(newCentre.z - (pose.z + 30 * upp)) <= upp, JSON.stringify(newCentre));
+    assert.equal(await page.getByRole('button', { name: 'Make this the hunting spot', exact: true }).isVisible(), false);
+    await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
+    assert.ok(await page.evaluate(() => SROLean.map.upp) < upp);
+    assert.equal(await page.getByRole('button', { name: 'Follow me', exact: true }).isDisabled(), true);
+    await page.mouse.move(canvasBox.x + 100, canvasBox.y + 100); await page.mouse.down();
+    await page.mouse.move(canvasBox.x + 160, canvasBox.y + 140, { steps: 4 }); await page.mouse.up();
+    assert.equal(await page.evaluate(() => SROLean.map.follow), false, 'dragging the map stops following');
+    assert.equal(await page.getByRole('button', { name: 'Make this the hunting spot', exact: true }).isVisible(), false, 'a drag does not mark a point');
+    await page.getByRole('button', { name: 'Follow me', exact: true }).click();
+    assert.equal(await page.evaluate(() => SROLean.map.follow), true);
+    await page.locator('.map-box').screenshot({ path: __dirname + '/lean-map-compact.png' });
+    await page.getByRole('button', { name: 'Wide', exact: true }).click();
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: __dirname + '/lean-wide-map.png' });
+    await page.getByRole('button', { name: 'Compact', exact: true }).click();
+    await page.evaluate(() => testSim.postMessage({ kind: 'fixture', message: { kind: 'world', batch: { events: [50, 51, 52].map(gid => ({ kind: 'despawn', gid })) } } }));
+    await page.evaluate(() => { SROLean.settings.profile.hunt.center = { regionId: 1, x: 100, y: 0, z: 100 }; SROLean.settings.saveProfile(); });
     await page.getByRole('button', { name: 'Combat', exact: true }).click();
     await page.getByRole('button', { name: 'Skills', exact: true }).click();
     await page.waitForFunction(() => [...document.getElementById('sro-bot-lean').shadowRoot.querySelectorAll('.slot')].every(s => s.dataset.iconLoaded === 'true'));

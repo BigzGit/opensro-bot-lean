@@ -121,3 +121,10 @@ header button.layout{display:inline-flex;height:22px;min-width:0;margin-left:8px
 :host(.wide) .log{list-style:none;margin:4px 0 0;padding:0;height:78px;overflow:auto;overscroll-behavior:contain;font-size:11px;scrollbar-color:#796a48 #171711}
 :host(.wide) .log li{display:flex;gap:8px;padding:1px 0}:host(.wide) .log time{color:#7f7458;font-variant-numeric:tabular-nums;flex:none}:host(.wide) .log li.warn span,:host(.wide) .log li.error span{color:#ffc67a}
 }
+/* Map page */
+.map-stage{position:relative;border:1px solid #6b5a36;box-shadow:0 0 0 2px #0b0a07,0 0 0 3px #4a4130;margin:2px 0 6px}
+.map-stage canvas{display:block;width:100%;height:280px;cursor:crosshair;touch-action:none}
+.map-tools{position:absolute;right:5px;top:5px;display:flex;gap:2px}.map-tools button{min-width:24px;height:22px;padding:0 6px;font-size:12px}
+.map-coords{position:absolute;left:5px;bottom:4px;padding:1px 6px;background:#000a;font-size:11px;pointer-events:none}.map-coords:empty{display:none}
+.map-legend{display:flex;align-items:center;gap:8px;margin:4px 0;font-size:11px}.map-legend i{display:inline-block;width:12px;height:12px;background:center/contain no-repeat}
+@media(min-width:900px){:host(.wide) .pane>.map-box{grid-column:1/-1}:host(.wide) .map-stage canvas{height:340px}}

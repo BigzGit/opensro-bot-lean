@@ -1,0 +1,217 @@
+// Map page: the game's own minimap tiles on a canvas, with the hunting area, monsters, party and players.
+// Outdoors only: positions become absolute units (region x * 1920 + x, region z * 1920 + z; Z grows north, drawn up).
+// One minimap tile (minimap/<rx>x<rz>.png, 256 px) covers one 1920-unit region. Dungeons have no tiles here yet.
+// It only reads game state; the one setting it changes is the hunting spot, and only when the player asks.
+const MAP_ART = '/assets/images/Media_extracted/';
+// Monster class colours, as the game's own map window draws them.
+const MAP_CLASS_COLOR = { normal: '#e0e0e0', champion: '#7fb8ff', giant: '#ffd65a', party: '#ff9b4a', elite: '#c78bff', unique: '#ff5a5a', titan: '#ff3dd0' };
+const LeanMap = {
+  upp: 5, // world units per screen pixel (10 units = 1 m)
+  view: null, follow: true, picked: null, canvas: null, info: null, timer: 0,
+  tiles: new Map(), signs: new Map(),
+  space(p) {
+    const rid = Number(p?.regionId ?? p?.region);
+    if (!isNum(rid) || !isNum(p.x) || !isNum(p.z) || rid & DUNGEON) return null;
+    return { X: (rid & 255) * SECTOR + p.x, Z: (rid >>> 8) * SECTOR + p.z };
+  },
+  local(X, Z) {
+    const rx = Math.floor(X / SECTOR), rz = Math.floor(Z / SECTOR);
+    if (rx < 0 || rx > 255 || rz < 0 || rz > 127) return null;
+    return { regionId: (rz << 8) | rx, x: X - rx * SECTOR, z: Z - rz * SECTOR };
+  },
+  // A tile or sign image, loaded once from the game's packs. Missing tiles (open sea) are remembered quietly.
+  image(cache, path) {
+    const hit = cache.get(path);
+    if (hit) return hit.img;
+    const entry = { img: null }; cache.set(path, entry);
+    Icons.request(path).then(blob => {
+      const img = new Image(); img.onload = () => { entry.img = img; this.dirty = true; }; img.src = URL.createObjectURL(blob);
+    }, () => { entry.missing = true; });
+    if (cache === this.tiles && cache.size > 80) for (const [key, value] of cache) { if (cache.size <= 60) break; if (key !== path) { if (value.img) URL.revokeObjectURL(value.img.src); cache.delete(key); } }
+    return null;
+  },
+  sign(name) { return this.image(this.signs, MAP_ART + 'interface/minimap/mm_sign_' + name + '.png'); },
+  draw(parent) {
+    const box = UI.group('Map');
+    box.classList.add('map-box');
+    const stage = el('div', null, 'map-stage');
+    this.canvas = el('canvas'); this.canvas.setAttribute('aria-label', 'Map of the hunting area');
+    const zoomIn = UI.button('+', () => this.zoom(1 / 1.5)), zoomOut = UI.button('−', () => this.zoom(1.5));
+    zoomIn.setAttribute('aria-label', 'Zoom in'); zoomOut.setAttribute('aria-label', 'Zoom out');
+    this.followButton = UI.button('Follow me', () => { this.follow = true; this.view = null; this.dirty = true; });
+    const tools = el('div', null, 'map-tools'); tools.append(zoomIn, zoomOut, this.followButton);
+    this.coords = el('div', '', 'map-coords');
+    stage.append(this.canvas, tools, this.coords);
+    this.info = el('p', '', 'muted');
+    this.pickRow = UI.row(UI.button('Make this the hunting spot', () => this.setCentre()), UI.button('Clear mark', () => { this.picked = null; this.dirty = true; this.render(); }));
+    box.append(stage, this.info, this.pickRow);
+    const H = () => Settings.profile.hunt;
+    const area = UI.group('Hunting area',
+      UI.button('Set hunting spot here', () => { if (World.inWorld() && Hunt.setCenter()) { UI.toast('Hunting spot saved.'); this.dirty = true; } }),
+      UI.number('Hunt radius (m)', () => H().radius / 10, v => { H().radius = v * 10; this.dirty = true; }, 5, 200),
+      UI.number('Chase distance (m)', () => H().chase / 10, v => { H().chase = v * 10; this.dirty = true; }, 10, 300));
+    const legend = UI.group('Legend');
+    for (const [name, label] of [['character', 'You'], ['party', 'Party member'], ['otherplayer', 'Other player'], ['monster', 'Monster'], ['unique', 'Unique'], ['npc', 'NPC'], ['animal', 'Pet']]) {
+      const row = el('div', null, 'map-legend'), mark = el('i'); mark.dataset.sign = name;
+      row.append(mark, el('span', label)); legend.append(row);
+    }
+    legend.append(el('p', 'Yellow circle: hunt radius. Dashed ring: chase distance. Click the map to mark a point, drag to move it, use + and − to zoom.', 'muted'));
+    parent.append(box, area, legend);
+    for (const mark of legend.querySelectorAll('i[data-sign]')) this.paintSign(mark, mark.dataset.sign);
+    this.bind(); this.dirty = true; this.render();
+    clearInterval(this.timer); this.timer = setInterval(() => this.tick(), 200);
+  },
+  paintSign(node, name) {
+    Icons.url(MAP_ART + 'interface/minimap/mm_sign_' + name + '.png').then(url => { if (url && node.isConnected) node.style.backgroundImage = `url("${url}")`; });
+  },
+  bind() {
+    const c = this.canvas;
+    c.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      this.drag = { x: e.clientX, y: e.clientY, view: this.view && { ...this.view }, moved: false };
+      c.setPointerCapture(e.pointerId);
+    });
+    c.addEventListener('pointermove', e => {
+      const at = this.toWorld(e);
+      const local = at && this.local(at.X, at.Z), shown = local && displayCoords(local);
+      this.coords.textContent = shown ? `X ${shown.x} · Y ${shown.y}` : '';
+      const d = this.drag;
+      if (!d || !d.view) return;
+      const dx = e.clientX - d.x, dy = e.clientY - d.y;
+      if (Math.abs(dx) + Math.abs(dy) > 4) d.moved = true;
+      if (d.moved) { this.follow = false; this.view = { X: d.view.X - dx * this.upp, Z: d.view.Z + dy * this.upp }; this.dirty = true; }
+    });
+    const up = e => {
+      const d = this.drag; this.drag = null;
+      if (!d || d.moved || e.type === 'pointercancel') return;
+      const at = this.toWorld(e), local = at && this.local(at.X, at.Z);
+      if (local) { this.picked = local; this.dirty = true; this.render(); }
+    };
+    c.addEventListener('pointerup', up); c.addEventListener('pointercancel', up);
+    c.addEventListener('wheel', e => { e.preventDefault(); this.zoom(e.deltaY > 0 ? 1.25 : 0.8); }, { passive: false });
+  },
+  toWorld(e) {
+    if (!this.view) return null;
+    const r = this.canvas.getBoundingClientRect();
+    return { X: this.view.X + (e.clientX - r.left - r.width / 2) * this.upp, Z: this.view.Z - (e.clientY - r.top - r.height / 2) * this.upp };
+  },
+  zoom(f) { this.upp = clamp(this.upp * f, 1.5, 30); this.dirty = true; },
+  setCentre() {
+    const pt = this.picked, pose = World.pose();
+    if (!pt || !World.inWorld()) return;
+    // The height of a map point is unknown; the character's current height is used, as the game's own map does.
+    Settings.profile.hunt.center = { regionId: pt.regionId, x: Math.round(pt.x), y: Number(pose?.y) || 0, z: Math.round(pt.z) };
+    Settings.saveProfile(); bus.emit('center');
+    this.picked = null; this.dirty = true;
+    UI.toast('Hunting spot set on the map.'); this.render();
+  },
+  tick() {
+    if (!this.canvas?.isConnected) { clearInterval(this.timer); this.timer = 0; return; }
+    if (UI.minimised || document.hidden) return;
+    this.dirty = true;
+    // One message per distinct error, so a drawing problem shows in the log instead of failing silently every 200 ms.
+    try { this.render(); } catch (e) { if (e.message !== this.lastError) { this.lastError = e.message; Log.warn('Map: ' + e.message); } }
+  },
+  render() {
+    const c = this.canvas;
+    if (!c?.isConnected || !this.dirty) return;
+    this.dirty = false;
+    const w = c.clientWidth, h = c.clientHeight;
+    if (!w || !h) return;
+    const ratio = W.devicePixelRatio || 1;
+    if (c.width !== Math.round(w * ratio) || c.height !== Math.round(h * ratio)) { c.width = Math.round(w * ratio); c.height = Math.round(h * ratio); }
+    const ctx = c.getContext('2d'); ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.fillStyle = '#0b0d0a'; ctx.fillRect(0, 0, w, h);
+    const pose = World.inWorld() ? World.pose() : null, me = this.space(pose);
+    this.followButton.disabled = this.follow && !!me;
+    this.pickRow.hidden = !this.picked;
+    if (!pose) { this.note(ctx, w, h, 'Waiting for the game…'); this.info.textContent = ''; return; }
+    if (!me) { this.note(ctx, w, h, 'There is no map for dungeons yet.'); this.info.textContent = ''; return; }
+    if (this.follow || !this.view) this.view = { X: me.X, Z: me.Z };
+    const upp = this.upp, v = this.view;
+    const sx = X => w / 2 + (X - v.X) / upp, sy = Z => h / 2 - (Z - v.Z) / upp;
+    // Minimap tiles under the visible box.
+    const x0 = v.X - w / 2 * upp, x1 = v.X + w / 2 * upp, z0 = v.Z - h / 2 * upp, z1 = v.Z + h / 2 * upp;
+    for (let rx = Math.max(0, Math.floor(x0 / SECTOR)); rx <= Math.min(255, Math.floor(x1 / SECTOR)); rx++)
+      for (let rz = Math.max(0, Math.floor(z0 / SECTOR)); rz <= Math.min(127, Math.floor(z1 / SECTOR)); rz++) {
+        const img = this.image(this.tiles, `${MAP_ART}minimap/${rx}x${rz}.png`);
+        if (!img) continue;
+        const l = Math.floor(sx(rx * SECTOR)), t = Math.floor(sy((rz + 1) * SECTOR));
+        ctx.drawImage(img, l, t, Math.ceil(sx((rx + 1) * SECTOR)) - l, Math.ceil(sy(rz * SECTOR)) - t);
+      }
+    // Hunting area: radius (filled) and chase distance (dashed).
+    const H = Settings.profile.hunt, centre = this.space(H.center);
+    if (centre) {
+      const cx = sx(centre.X), cy = sy(centre.Z);
+      ctx.save();
+      ctx.setLineDash([5, 4]); ctx.strokeStyle = 'rgba(255,214,90,.55)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(cx, cy, (Number(H.chase) || 0) / upp, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]); ctx.fillStyle = 'rgba(255,214,90,.12)'; ctx.strokeStyle = 'rgba(255,214,90,.95)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, cy, (Number(H.radius) || 0) / upp, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#ffd65a'; ctx.fillRect(cx - 2.5, cy - 2.5, 5, 5);
+      ctx.restore();
+    }
+    // Entities in view. Party members are drawn from the party list too, so ones out of sight still show.
+    const social = World.gp?.social, party = new Set((social?.members || []).map(m => m?.name).filter(Boolean));
+    const target = World.gp?.target, local = World.localGid(), drawn = new Set();
+    const put = (name, x, y, size, fallback) => {
+      const img = this.sign(name);
+      if (img) ctx.drawImage(img, Math.round(x - size / 2), Math.round(y - size / 2), size, size);
+      else { ctx.fillStyle = fallback; ctx.beginPath(); ctx.arc(x, y, size / 3, 0, Math.PI * 2); ctx.fill(); }
+    };
+    let monsters = 0, players = 0;
+    for (const e of World.ents.values()) {
+      if (!e || e.gid === local || e.kind === 'local-player') continue;
+      const s = this.space(e);
+      if (!s) continue;
+      const x = sx(s.X), y = sy(s.Z);
+      if (x < -10 || y < -10 || x > w + 10 || y > h + 10) continue;
+      if (e.kind === 'monster') {
+        if (!World.isAlive(e)) continue;
+        monsters++;
+        const cls = monsterClass(e);
+        if (e.rarity === 3) put('unique', x, y, 13, MAP_CLASS_COLOR.unique);
+        else if (cls === 'normal') put('monster', x, y, 8, MAP_CLASS_COLOR.normal);
+        else { ctx.fillStyle = MAP_CLASS_COLOR[cls] || '#fff'; ctx.beginPath(); ctx.arc(x, y, cls === 'champion' ? 3.5 : 4.5, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke(); }
+      } else if (e.kind === 'player') {
+        players++;
+        const member = party.has(e.name); if (member) drawn.add(e.name);
+        put(member ? 'party' : 'otherplayer', x, y, 9, member ? '#5aff7a' : '#5ab4ff');
+        if (upp <= 4 && e.name) this.label(ctx, e.name, x + 7, y - 4, member ? '#9dff9d' : '#cfe8ff');
+      } else if (e.kind === 'npc') put('npc', x, y, 9, '#f0f0a0');
+      else if (e.kind === 'cos') put('animal', x, y, 9, '#c8a2ff');
+      else continue;
+      if (e.gid === target) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI * 2); ctx.stroke(); }
+    }
+    for (const m of social?.members || []) {
+      if (!m || m.id === social.self || drawn.has(m.name) || m.name === social.localName) continue;
+      const s = this.space(m);
+      if (!s) continue;
+      put('party', clamp(sx(s.X), 6, w - 6), clamp(sy(s.Z), 6, h - 6), 9, '#5aff7a');
+    }
+    // A marked point (click), then you on top. Heading 0 = east, counter-clockwise; the sign points east.
+    if (this.picked) {
+      const s = this.space(this.picked), x = sx(s.X), y = sy(s.Z);
+      ctx.strokeStyle = '#6fc1ff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x - 11, y); ctx.lineTo(x + 11, y); ctx.moveTo(x, y - 11); ctx.lineTo(x, y + 11); ctx.stroke();
+    }
+    const mx = clamp(sx(me.X), 8, w - 8), my = clamp(sy(me.Z), 8, h - 8), img = this.sign('character');
+    ctx.save(); ctx.translate(mx, my); ctx.rotate(-((Number(pose.angle) || 0) / 65535) * Math.PI * 2);
+    if (img) ctx.drawImage(img, -8, -8, 16, 16); else { ctx.fillStyle = '#fff'; ctx.fillRect(-4, -4, 8, 8); }
+    ctx.restore();
+    // Scale bar.
+    const metres = [10, 20, 50, 100, 200, 500].find(m => m * 10 / upp >= 60) || 500, bar = metres * 10 / upp;
+    ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(w - bar - 18, h - 22, bar + 12, 16);
+    ctx.fillStyle = '#efdaa4'; ctx.fillRect(w - bar - 12, h - 12, bar, 2); this.label(ctx, metres + ' m', w - bar - 12, h - 15, '#efdaa4');
+    const shown = displayCoords(pose), distance = H.center ? dist2D(pose, H.center) : Infinity;
+    const pick = this.picked && displayCoords(this.picked);
+    this.info.textContent = `You: X ${shown.x} · Y ${shown.y}. Hunting spot: ${Number.isFinite(distance) ? Math.round(distance / 10) + ' m away' : H.center ? 'another region' : 'not saved'}. In view: ${monsters} monsters, ${players} players.`
+      + (pick ? ` Marked point: X ${pick.x} · Y ${pick.y}.` : '');
+  },
+  label(ctx, text, x, y, color) {
+    ctx.font = '11px Arial'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.85)'; ctx.strokeText(text, x, y); ctx.fillStyle = color; ctx.fillText(text, x, y);
+  },
+  note(ctx, w, h, text) {
+    ctx.font = '12px Arial'; ctx.textAlign = 'center'; ctx.fillStyle = '#a09b8c'; ctx.fillText(text, w / 2, h / 2); ctx.textAlign = 'start';
+  },
+};

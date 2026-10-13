@@ -117,6 +117,10 @@ When the bot confirms a pickup of Star, Moon or Sun equipment, it shows the item
 
 Open **Settings → Session stats** for hunting time, XP/hour, net gold, confirmed kills, deaths, potion use, pickups and SoX found. Totals pause when hunting stops and stay across toggles. **Reset session**, reloading or changing character clears them. Stats stay local to the page.
 
+## Map
+
+The **Map** page draws the game's minimap around you with your hunt radius (yellow circle) and chase distance (dashed ring), and shows you, monsters, party members (also ones out of sight, at the edge), other players, NPCs and pets. Click the map to mark a point and press **Make this the hunting spot** to hunt there; the point uses your current height, as the game's own map does. Drag to look around, use **+** and **−** or the mouse wheel to zoom, and **Follow me** to centre on yourself again. Hunt radius and chase distance can be changed under the map. Dungeons have no map yet.
+
 ## Wide window
 
 Click **Wide** at the top of the panel for a wider window: a status strip with HP, MP and EXP bars and what the bot is doing, the pages as a list on the left, session numbers and supplies always on the right, and the activity log along the bottom. The pages hold the same settings as in the compact window, in two columns. **Compact** switches back; the compact window is the default. The choice is remembered, and screens narrower than 900 pixels always get the compact window.

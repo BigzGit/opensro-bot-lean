@@ -196,9 +196,11 @@ const UI = {
     this.nav = el('nav'); this.nav.setAttribute('aria-label', 'Bot settings');
     // Page icons are the game's own action-bar icons; they show only in the wide window's page list.
     const navIcons = { Combat: 'auto_attack', Loot: 'autoget', Supplies: 'recovery', Alchemy: 'alchemy', Wardrobe: 'shop', Settings: 'helper' };
-    for (const name of ['Combat', 'Loot', 'Supplies', 'Alchemy', 'Wardrobe', 'Settings']) {
+    for (const name of ['Map', 'Combat', 'Loot', 'Supplies', 'Alchemy', 'Wardrobe', 'Settings']) {
       const tab = this.button(name, () => { this.current = name; this.draw(); });
-      Icons.paint(tab, `action\\icon_cha_${navIcons[name]}.ddj`); this.nav.append(tab);
+      if (name === 'Map') this.paintPath(tab, MAP_ART + 'interface/minimap/mm_map_button.png');
+      else Icons.paint(tab, `action\\icon_cha_${navIcons[name]}.ddj`);
+      this.nav.append(tab);
     }
     this.pane = el('div', null, 'pane'); this.feedback = el('div', null, 'feedback'); this.feedback.setAttribute('role', 'status');
     this.waitNote = el('div', '', 'waiting'); this.waitNote.setAttribute('role', 'status');
@@ -222,6 +224,15 @@ const UI = {
     try { prefs = JSON.parse(W.localStorage.getItem('sroLean:ui') || '{}') || {}; } catch {}
     if (patch) { prefs = { ...prefs, ...patch }; try { W.localStorage.setItem('sroLean:ui', JSON.stringify(prefs)); } catch {} }
     return prefs;
+  },
+  // Like Icons.paint, for an image that is not under icon/ (the map button is interface art).
+  paintPath(node, path) {
+    Icons.url(path).then(url => {
+      if (!url || !node.isConnected) return;
+      const image = el('img'); image.alt = ''; image.draggable = false;
+      image.addEventListener('load', () => { node.dataset.iconLoaded = 'true'; });
+      image.src = url; node.prepend(image);
+    });
   },
   // What the bot is doing, for the status strip and the minimised icon: ok (hunting), busy or stop.
   botState() {
@@ -632,6 +643,8 @@ const UI = {
         this.number('Bolts: go to town at or below', () => ammo().bolt.low, v => ammo().bolt.low = v, 0, 9999),
         this.number('Bolts: refill to', () => ammo().bolt.target, v => ammo().bolt.target = v, 1, 10000),
         el('p', 'Bought at the repair merchant after selling pet loot and before repairing. The count includes the stack in your ammunition slot and any spare stacks in the bag. A trip also starts when the count falls to the low-stock number. If the merchant does not sell it, there is no bag space or not enough gold, that item is skipped and the rest of the trip goes on. Equipping the bought ammunition is up to you.', 'muted')));
+    } else if (this.current === 'Map') {
+      LeanMap.draw(this.pane);
     } else if (this.current === 'Alchemy') {
       Alchemy.draw();
     } else if (this.current === 'Wardrobe') {
