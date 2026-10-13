@@ -2616,6 +2616,13 @@ test('alchemy fuses stones before the elixirs, in order, and stops when a stone 
   assert.equal(g.Alchemy.run, null); assert.match(g.Alchemy.message, /No Steady stone of degree 9 in the bag/);
   assert.equal(g.commands.filter(c => c.mode === 'reinforce').length, 0);
 });
+test('the stone fusion limit is optional: off by default, and a set limit stops the run', () => {
+  const f = stoneFixture(); f.Alchemy.start(true); assert.equal(f.Alchemy.run.cfg.stoneLimit, 0);
+  f.Alchemy.run.stoneAttempts = 500; f.advance(1500); f.Controller.tick();
+  assert.ok(!/limit/.test(f.Alchemy.message), 'no limit means no stop at any count');
+  const g = stoneFixture(); g.Alchemy.cfg().stoneLimit = 3; g.Alchemy.start(true); g.Alchemy.run.stoneAttempts = 3; g.advance(1500); g.Controller.tick();
+  assert.equal(g.Alchemy.run, null); assert.match(g.Alchemy.message, /Stopped after 3 stone fusions \(your limit\)/);
+});
 test('a failed stone fusion uses the stone up and the run carries on; a refusal explains itself and stops', () => {
   const f = stoneFixture(); f.Alchemy.start(true); f.Controller.tick();
   // 0xb651 answers a failed fusion with error 0x23 and flags 0x80 on slot 0, after the stone left the bag.

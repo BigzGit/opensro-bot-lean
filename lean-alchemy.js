@@ -196,7 +196,8 @@ const Alchemy = {
     const need = this.nextStone(item, r.cfg);
     if (need?.missing) return this.stop(`No ${STONES[need.missing].label} stone of degree ${this.degree(item)} in the bag.`);
     if (need) {
-      if (r.stoneAttempts >= 30) return this.stop('Stopped after 30 stone fusions.');
+      const cap = Math.max(0, Math.floor(Number(r.cfg.stoneLimit) || 0));
+      if (cap && r.stoneAttempts >= cap) return this.stop(`Stopped after ${cap} stone fusions (your limit).`);
       const slots = [item.slot, need.item.slot];
       if (slots.some(slot => !Number.isInteger(slot) || slot < 13 || slot > 255) || new Set(slots).size !== slots.length) return this.stop('Invalid material slots.');
       if (Cmd.raw({ kind: 'alchemy-start', mode: 'magic', slots }, 'Alchemy: fuse a ' + STONES[need.kind].label + ' stone')) {
@@ -235,8 +236,9 @@ const Alchemy = {
     UI.alchemyPreview = el('div', '', 'row'); UI.alchemyNote = el('p', '', 'muted'); group.append(UI.alchemyPreview, UI.alchemyNote); UI.pane.append(group);
     const stones = UI.group('Magic stones for the weapon');
     for (const [kind, s] of Object.entries(STONES)) stones.append(UI.number(s.label + ' stones: fuse up to (0 = off)', () => c().stones[kind], n => c().stones[kind] = n, 0, STONE_MAX));
+    stones.append(UI.number('Stop after this many fusions (0 = no limit)', () => c().stoneLimit, n => c().stoneLimit = n, 0, 1000));
     stones.append(UI.row(UI.button('Fuse stones now', () => this.start(true)), UI.button('Stop', () => this.stop())),
-      el('p', 'Each stone adds 1 to that attribute on the weapon, up to 6. Luck raises the enhancement success chance, Steady stops durability damage and Immortal stops destruction when an enhancement fails; none of them stops the + from being reset (an Astral stone does that, from +4). The stone must be of the weapon\'s degree and in your bag. Start alchemy fuses the stones first, then enhances; Fuse stones now only fuses them. A fusion can fail and use up the stone. Adding a kind the weapon does not have yet needs a free magic option slot. Stops if a stone is missing, the game refuses, or after 30 fusions.', 'muted'));
+      el('p', 'Each stone adds 1 to that attribute on the weapon, up to 6. Luck raises the enhancement success chance, Steady stops durability damage and Immortal stops destruction when an enhancement fails; none of them stops the + from being reset (an Astral stone does that, from +4). The stone must be of the weapon\'s degree and in your bag. Start alchemy fuses the stones first, then enhances; Fuse stones now only fuses them. A fusion can fail and use up the stone. Adding a kind the weapon does not have yet needs a free magic option slot. Stops if a stone is missing, the game refuses, or when it reaches the fusion limit above (off by default).', 'muted'));
     UI.pane.append(stones);
     this.refresh();
   },
