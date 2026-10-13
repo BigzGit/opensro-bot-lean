@@ -122,6 +122,8 @@ The main panel's status line now says why, for example "Combat: normal attack (1
 
 When no monster is being attacked, the status line says why, counted from the monsters in view: for example "Monsters in view: 5. Skipped: 3: monster type is switched off (Combat > Hunt area > Monster classes); 2: too far (Hunt radius or Chase distance)." The reasons are: monster type switched off, level outside your minimum or maximum, name filters, too far, another player is fighting it, and recently given up. With nothing in view it says so. The same line is part of bug reports, as counts only.
 
+**Small monsters first** (always on): while fighting a stronger monster, the bot switches to a weaker one that is hitting you, kills it and goes back. It only counts monsters that hit you in the last few seconds within chase distance, only switches to a weaker class (normal, champion, elite, party, giant, titan, unique, weakest first), finishes a target that is below 25% HP, and never switches during a cast. The status line says "switched to … (hitting you); back to … after".
+
 **Avoid other players' targets** (on by default) skips a monster another player has just hit. Hits by your party members, and by their pets, do not count, so the bot joins the monsters your party is fighting.
 
 **Weapon imbue** is renewed as soon as it runs out, also in the middle of another skill's cast and before a normal attack. A skill takes the imbue when its cast ends, not when it starts, and the game accepts an imbue during a cast, so the skill being cast still gets it. An imbue's cooldown is as long as the imbue itself, so it cannot be renewed earlier; the 1.2.74 setting **Renew imbue when seconds left** was removed in 1.2.75 because of that.

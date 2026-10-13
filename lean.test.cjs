@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, SpeedScroll, AntiStuck, Items, AutoMastery, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, SpeedScroll, Log, AntiStuck, Items, AutoMastery, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -227,6 +227,53 @@ test('finish-fight setting has effect and attackers interrupt pickups', () => {
   f.Hunt.tick(); assert.equal(f.commands.at(-1).kind, 'select');
   f.Settings.profile.hunt.pickup.afterKillOnly = false; f.advance(500); f.Hunt.tick(); assert.equal(f.commands.at(-1).kind, 'pickup');
   f.World.attackers.set(30, 100500); f.advance(500); f.Hunt.tick(); assert.equal(f.Loot.active, null); assert.equal(f.commands.at(-1).kind, 'select');
+});
+// Small ones first: fighting a giant (rarity 4) while weaker monsters hit you.
+function giantFight({ giantHp = 100 } = {}) {
+  const f = fixture(); f.Hunt.start();
+  const mob = (gid, rarity, x, name) => { const e = { gid, kind: 'monster', name, rarity, regionId: 1, x, y: 0, z: 100, attackFlags: 16, appearanceState: [0] }; f.World.ents.set(gid, e); return e; };
+  mob(40, 4, 140, 'Giant'); f.World.gp.vitals = [{ gid: 40, hp: giantHp, maxHp: 100 }];
+  f.Hunt.targetGid = 40; f.Hunt.targetSince = 100000; f.World.gp.target = 40;
+  f.World.attackers.set(40, 100000);
+  const hit = gid => f.World.attackers.set(gid, f.World.simNow());
+  const selected = () => f.commands.filter(c => c.kind === 'select').map(c => c.gid);
+  return { f, mob, hit, selected };
+}
+test('a weaker monster hitting you is killed before the giant, then the bot goes back to the giant', () => {
+  const { f, mob, hit, selected } = giantFight();
+  mob(41, 0, 125, 'Small'); hit(41);
+  f.Hunt.tick(); assert.deepEqual(selected(), [41], 'switched to the small one');
+  assert.equal(f.Hunt.targetGid, 41);
+  assert.match(f.Diagnostics.main(), /switched to Small \(hitting you\); back to Giant after/);
+  assert.ok(f.Log.lines.some(l => /Switched from Giant to Small/.test(l.text)));
+  f.World.gp.target = 41; f.advance(500); hit(40); f.Hunt.tick();
+  assert.deepEqual(selected(), [41], 'no flip-flop while the giant keeps hitting');
+  f.World.ents.delete(41); f.advance(500); f.Hunt.tick();
+  assert.deepEqual(selected(), [41, 40], 'small one dead: back to the giant');
+});
+test('the small-ones-first switch keeps the giant when it is nearly dead, equal or busy casting', () => {
+  let s = giantFight({ giantHp: 20 }); s.mob(41, 0, 125, 'Small'); s.hit(41);
+  s.f.Hunt.tick(); assert.deepEqual(s.selected(), [], 'giant at 20%: finish it');
+  s = giantFight(); s.mob(42, 4, 125, 'Second giant'); s.hit(42);
+  s.f.Hunt.tick(); assert.deepEqual(s.selected(), [], 'another giant is no reason to switch');
+  s = giantFight(); s.mob(41, 0, 125, 'Small'); s.hit(41); s.f.World.isCasting = () => true;
+  s.f.Hunt.tick(); assert.deepEqual(s.selected(), [], 'never in the middle of a cast');
+  s = giantFight(); s.mob(41, 0, 125, 'Small'); s.f.World.ents.set(99, { gid: 99, kind: 'player', name: 'Mate', regionId: 1, x: 130, z: 100 });
+  s.f.World.onCast({ caster: 41, target: 99, results: [{ target: 99 }] });
+  s.f.Hunt.tick(); assert.deepEqual(s.selected(), [], 'a monster hitting a party member does not count');
+  s = giantFight(); s.mob(41, 0, 125, 'Small'); s.hit(41); s.f.advance(7000); s.f.World.attackers.set(40, s.f.World.simNow());
+  s.f.Hunt.tick(); assert.deepEqual(s.selected(), [], 'it stopped hitting you a while ago');
+  s = giantFight(); s.mob(41, 0, 900, 'Small'); s.hit(41);
+  s.f.Hunt.tick(); assert.deepEqual(s.selected(), [], 'outside chase distance');
+});
+test('the weakest attacker goes first, also when no target is held', () => {
+  let s = giantFight(); s.mob(41, 1, 125, 'Champion'); s.mob(43, 0, 135, 'Normal'); s.hit(41); s.hit(43);
+  s.f.Hunt.tick(); assert.deepEqual(s.selected(), [43], 'the normal before the champion');
+  s = giantFight(); s.mob(41, 0, 125, 'Healthy'); s.mob(43, 0, 135, 'Hurt'); s.hit(41); s.hit(43);
+  s.f.World.gp.vitals.push({ gid: 41, hp: 80, maxHp: 100 }, { gid: 43, hp: 30, maxHp: 100 });
+  s.f.Hunt.tick(); assert.deepEqual(s.selected(), [43], 'of two normals, the one closest to dead');
+  s = giantFight(); s.f.Hunt.targetGid = 0; s.f.World.gp.target = 0; s.mob(41, 0, 160, 'Small'); s.hit(41);
+  s.f.Hunt.tick(); assert.deepEqual(s.selected(), [41], 'with no target, the small attacker before the nearer giant');
 });
 test('stop and manual control prevent further automation', () => {
   const f = fixture(); f.Hunt.start(); f.drop(); f.Hunt.tick(); f.Hunt.stop();

@@ -6,6 +6,34 @@ Hunt.start = function (...args) {
   return startHunting.apply(this, args);
 };
 Hunt.lootAllowed = e => Loot.allowed(e);
+// Kill the small ones first. While fighting a stronger monster, switch to a weaker one that is hitting you, then come
+// back: the stronger one is still fighting you, so attackers-first picks it up again. Always on, by design:
+//  1. only monsters that hit you in the last few seconds (World.attackers) and are within chase distance;
+//  2. only a weaker class than the current target (two giants hitting you is no reason to switch);
+//  3. never away from a target below THREAT_FINISH_PCT HP: finish it;
+//  4. never during a cast (the caller only asks between skills);
+//  5. the weakest attacker first (lowest HP), so each kill removes its damage soonest;
+//  6. no flip-flop: the small one becomes the current target and only something weaker still could take its place.
+// With no current target the weakest attacker is picked the same way, so the giant is not selected between two kills.
+const THREAT_RANK = { normal: 1, champion: 2, elite: 4, party: 10, giant: 20, titan: 100, unique: 200 };
+const THREAT_WINDOW_MS = 6000, THREAT_FINISH_PCT = 25;
+Hunt.threat = function (current) {
+  if (World.isCasting() || !current && this.cfg().priority !== 'attackers') return null;
+  const rank = e => THREAT_RANK[monsterClass(e)] ?? 1, hp = e => World.hpPctOf(e) ?? 100;
+  if (current && (World.hpPctOf(current) ?? 100) < THREAT_FINISH_PCT) return null;
+  const sim = World.simNow() ?? 0, pose = World.pose(), chase = this.cfg().chase, limit = current ? rank(current) : Infinity;
+  let best = null;
+  for (const e of World.ents.values()) {
+    if (e === current || !isAttackableMob(e) || this.banned(this.ban, e.gid) || rank(e) >= limit) continue;
+    if (sim - (World.attackers.get(e.gid) ?? -Infinity) >= THREAT_WINDOW_MS || dist2D(pose, e) > chase) continue;
+    if (!best || rank(e) < rank(best) || rank(e) === rank(best) && (hp(e) < hp(best) || hp(e) === hp(best) && dist2D(pose, e) < dist2D(pose, best))) best = e;
+  }
+  if (!best || !current) return best;
+  const from = current.name || monsterClass(current), to = best.name || monsterClass(best);
+  this.threatNote = { gid: best.gid, text: `Combat: switched to ${to} (hitting you); back to ${from} after.` };
+  Log.info(`Switched from ${from} to ${to}, which is hitting you.`);
+  return best;
+};
 Hunt.chooseLoot = () => Loot.choose();
 Hunt.tick = function () {
   if (!this.running) return;
@@ -61,7 +89,7 @@ Hunt.tick = function () {
     this.state = 'resting'; return;
   }
   if (Combat.buffs(true)) { this.state = 'buff'; return; }
-  const target = current || this.chooseTarget();
+  const target = this.threat(current) || current || this.chooseTarget();
   if (target) { this.engage(target); return; }
   this.targetGid = 0; this.state = Loot.active?.petGid ? 'loot' : 'search';
   if (H.returnToCenter && H.center && dist2D(World.pose(), H.center) > Math.max(40, H.radius * 0.5) && now() - this.lastMoveAt > 2500) {

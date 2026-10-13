@@ -238,8 +238,11 @@ const UI = {
   // What the bot is doing, for the status strip and the minimised icon: ok (hunting), busy or stop.
   botState() {
     const dead = World.inWorld() && World.isDead(), mode = Controller.mode, error = mode === 'error';
-    const busy = !!Town.trip || !!WalkBack.active || Reconnect.active() || ['town service', 'returning', 'shopping', 'resurrect', 'buff gear', 'alchemy'].includes(mode);
-    const label = dead ? 'Dead' : error ? 'Error' : busy ? mode.charAt(0).toUpperCase() + mode.slice(1) : Hunt.running ? 'Hunting' : 'Stopped';
+    // Busy comes from the live trips, not from Controller.mode: that label lags a tick behind (it still says
+    // "returning" for up to 100 ms after Stop all ended a walk-back).
+    const busy = Town.trip ? 'Town trip' : WalkBack.active ? 'Returning' : Reconnect.active() ? 'Reconnecting' : Restock.trip ? 'Shopping'
+      : Resurrect.trip ? 'Resurrecting' : BuffGear.run ? 'Buff gear' : Alchemy.run || Alchemy.pending ? 'Alchemy' : '';
+    const label = dead ? 'Dead' : error ? 'Error' : busy || (Hunt.running ? 'Hunting' : 'Stopped');
     // `note` is what only the state can say; the icon falls back to the first wait reason, which the wide window shows below the strip.
     const note = Town.trip ? Town.status() : Reconnect.active() && Reconnect.message ? Reconnect.message
       : Restock.recording ? 'Recording route: ' + Restock.draft.route.length + ' points' : '';

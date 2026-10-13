@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.87
+// @version      1.2.88
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.87';
+const VERSION = '1.2.88';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -3756,6 +3756,34 @@ Hunt.start = function (...args) {
   return startHunting.apply(this, args);
 };
 Hunt.lootAllowed = e => Loot.allowed(e);
+// Kill the small ones first. While fighting a stronger monster, switch to a weaker one that is hitting you, then come
+// back: the stronger one is still fighting you, so attackers-first picks it up again. Always on, by design:
+//  1. only monsters that hit you in the last few seconds (World.attackers) and are within chase distance;
+//  2. only a weaker class than the current target (two giants hitting you is no reason to switch);
+//  3. never away from a target below THREAT_FINISH_PCT HP: finish it;
+//  4. never during a cast (the caller only asks between skills);
+//  5. the weakest attacker first (lowest HP), so each kill removes its damage soonest;
+//  6. no flip-flop: the small one becomes the current target and only something weaker still could take its place.
+// With no current target the weakest attacker is picked the same way, so the giant is not selected between two kills.
+const THREAT_RANK = { normal: 1, champion: 2, elite: 4, party: 10, giant: 20, titan: 100, unique: 200 };
+const THREAT_WINDOW_MS = 6000, THREAT_FINISH_PCT = 25;
+Hunt.threat = function (current) {
+  if (World.isCasting() || !current && this.cfg().priority !== 'attackers') return null;
+  const rank = e => THREAT_RANK[monsterClass(e)] ?? 1, hp = e => World.hpPctOf(e) ?? 100;
+  if (current && (World.hpPctOf(current) ?? 100) < THREAT_FINISH_PCT) return null;
+  const sim = World.simNow() ?? 0, pose = World.pose(), chase = this.cfg().chase, limit = current ? rank(current) : Infinity;
+  let best = null;
+  for (const e of World.ents.values()) {
+    if (e === current || !isAttackableMob(e) || this.banned(this.ban, e.gid) || rank(e) >= limit) continue;
+    if (sim - (World.attackers.get(e.gid) ?? -Infinity) >= THREAT_WINDOW_MS || dist2D(pose, e) > chase) continue;
+    if (!best || rank(e) < rank(best) || rank(e) === rank(best) && (hp(e) < hp(best) || hp(e) === hp(best) && dist2D(pose, e) < dist2D(pose, best))) best = e;
+  }
+  if (!best || !current) return best;
+  const from = current.name || monsterClass(current), to = best.name || monsterClass(best);
+  this.threatNote = { gid: best.gid, text: `Combat: switched to ${to} (hitting you); back to ${from} after.` };
+  Log.info(`Switched from ${from} to ${to}, which is hitting you.`);
+  return best;
+};
 Hunt.chooseLoot = () => Loot.choose();
 Hunt.tick = function () {
   if (!this.running) return;
@@ -3811,7 +3839,7 @@ Hunt.tick = function () {
     this.state = 'resting'; return;
   }
   if (Combat.buffs(true)) { this.state = 'buff'; return; }
-  const target = current || this.chooseTarget();
+  const target = this.threat(current) || current || this.chooseTarget();
   if (target) { this.engage(target); return; }
   this.targetGid = 0; this.state = Loot.active?.petGid ? 'loot' : 'search';
   if (H.returnToCenter && H.center && dist2D(World.pose(), H.center) > Math.max(40, H.radius * 0.5) && now() - this.lastMoveAt > 2500) {
@@ -6169,7 +6197,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.87", "title": "Heal and buff your party", "items": ["New Party page. Tick \"Buff and heal party members\" and the bot supports the party with your own skills: a group heal when enough members are low, a heal on the lowest member, then party buffs on whoever does not have them yet. One cast at a time, after your own potions and before attacking.", "Pick party buffs from your learned skills that can target a party member. Each goes to everyone, or only to the names you list.", "It only casts on members you can see within the support range (30 m by default) and never walks to them. A buff that does not show up on a member after two tries waits a minute.", "The top of the page lists your party with HP and MP bars, distance, and which of your buffs each member has.", "The party options (auto-recruit, matching, resurrection) moved here from Settings."], "note": "Off by default. It runs while hunting; tick \"Also while hunting is stopped\" to support a party while you stand still."}, {"version": "1.2.86", "title": "Town page and new reasons to go to town", "items": ["New Town page. It shows the trip as a row of pictures (return scroll, warehouse, potions, repair, reverse) with what each step still needs, and everything that starts a trip in one place. The scroll town cycle settings and Arrows and bolts moved here from Supplies.", "Weapon is broken: a trip starts when your equipped weapon is at 0 durability, so it gets repaired instead of hitting with bare hands. On by default.", "Gear is worn: a trip starts when the most worn piece you are wearing drops below a percentage of its own maximum durability (15% by default). Off by default.", "No XP for a while: a trip starts after a number of minutes without experience (10 by default). Off by default.", "On a timer: a trip every so many minutes (60 by default). Off by default."], "note": "All of them need the town cycle on. The XP and timer clocks run only while hunting and restart with every trip."}, {"version": "1.2.85", "title": "The map shows the ground again", "items": ["The Map page showed only a black background in the game. The game now publishes its minimap tiles in a new compressed format inside a new kind of asset pack, which the bot could not read. It reads both now, so the minimap appears under the markers.", "The same fix lets the bot read any other game picture that moves to the new packs, so icons keep working after future game updates."]}, {"version": "1.2.84", "title": "Map page", "items": ["New Map page, first in the page list. It draws the game's own minimap around you with your hunting radius (yellow circle) and chase distance (dashed ring).", "It shows you (arrow), monsters (uniques and stronger classes stand out), party members (also ones out of sight, at the map's edge), other players with their names when zoomed in, NPCs and pets.", "Click the map to mark a point, then \"Make this the hunting spot\" to hunt there. Drag to look around, + and − (or the mouse wheel) to zoom, \"Follow me\" to centre on you again.", "Hunt radius and chase distance can be changed right under the map."], "note": "Dungeons have no map yet. In the wide window the map uses the full page width."}, {"version": "1.2.83", "title": "Wide window", "items": ["New Wide button at the top of the panel. It opens a wide window: a status strip with HP, MP and EXP bars and what the bot is doing, the pages as a list with the game's own icons on the left, session numbers and supplies always on the right, and the activity log along the bottom.", "The pages are the same as before, set out in two columns, so nothing has moved inside them. Compact goes back to the usual window, which stays the default.", "The choice is remembered. Screens narrower than 900 pixels always get the compact window."], "note": "This is step 1 of the new layout shown on the site's concept page. The map, party and town pages come later."}, {"version": "1.2.82", "title": "The panel remembers where you put it", "items": ["The panel now opens where you last dragged it, also after a reload and after bringing it back from the minimised icon. Before, it went back to the top right.", "If the game window got smaller and the saved spot is off screen, the panel is moved back inside it."]}, {"version": "1.2.81", "title": "Minimise the panel to a small icon", "items": ["The × at the top right of the panel now minimises it to a small icon instead of folding it. The bot keeps running.", "The icon's dot shows what the bot is doing: green while hunting, yellow during a town trip, walk back, alchemy or reconnect, red when stopped, dead or in error. Hover it to see the current status, HP and MP.", "The icon glows when something needs you: a warning such as running out of potions or hunting stopping, a SoX pickup, or the character dying. Hovering it or opening the panel clears the glow.", "Drag the icon anywhere. It remembers its spot, and the panel stays minimised after a reload.", "Click the icon or press F7 to bring the panel back. F7 still folds the open panel, Shift+F7 still hides everything, and F8 still starts and stops.", "The window you opened or clicked last (patch notes, bug report) is now drawn above the others."]}, {"version": "1.2.80", "title": "Stone fusion no longer stops at 30", "items": ["The 30-fusion stop is now an optional setting, \"Stop after this many fusions\", under Magic stones for the weapon. 0 means no limit and is the default, so a run goes on until the weapon has the wanted counts, a stone runs out or the game refuses."]}];
+const RELEASE_NOTES = [{"version": "1.2.88", "title": "Small monsters first", "items": ["While fighting a stronger monster (a giant, say), the bot now switches to a weaker monster that is hitting you, kills it, and goes back. Before, it kept hitting the giant while the small ones wore you down.", "It only switches for monsters actually hitting you within chase distance, and only to a weaker class: two giants hitting you is no reason to switch.", "A target below 25% HP is finished first, and it never switches in the middle of a cast.", "The weakest attacker goes first (normal before champion, the most hurt one first), and it does not bounce back and forth while the giant keeps hitting.", "The status line says when it happens, for example \"switched to Mangyang (hitting you); back to Tiger Girl after\".", "The minimised icon could flash yellow for a moment after Stop all ended a walk back; it now shows the right colour straight away."], "note": "Always on; there is no switch for it."}, {"version": "1.2.87", "title": "Heal and buff your party", "items": ["New Party page. Tick \"Buff and heal party members\" and the bot supports the party with your own skills: a group heal when enough members are low, a heal on the lowest member, then party buffs on whoever does not have them yet. One cast at a time, after your own potions and before attacking.", "Pick party buffs from your learned skills that can target a party member. Each goes to everyone, or only to the names you list.", "It only casts on members you can see within the support range (30 m by default) and never walks to them. A buff that does not show up on a member after two tries waits a minute.", "The top of the page lists your party with HP and MP bars, distance, and which of your buffs each member has.", "The party options (auto-recruit, matching, resurrection) moved here from Settings."], "note": "Off by default. It runs while hunting; tick \"Also while hunting is stopped\" to support a party while you stand still."}, {"version": "1.2.86", "title": "Town page and new reasons to go to town", "items": ["New Town page. It shows the trip as a row of pictures (return scroll, warehouse, potions, repair, reverse) with what each step still needs, and everything that starts a trip in one place. The scroll town cycle settings and Arrows and bolts moved here from Supplies.", "Weapon is broken: a trip starts when your equipped weapon is at 0 durability, so it gets repaired instead of hitting with bare hands. On by default.", "Gear is worn: a trip starts when the most worn piece you are wearing drops below a percentage of its own maximum durability (15% by default). Off by default.", "No XP for a while: a trip starts after a number of minutes without experience (10 by default). Off by default.", "On a timer: a trip every so many minutes (60 by default). Off by default."], "note": "All of them need the town cycle on. The XP and timer clocks run only while hunting and restart with every trip."}, {"version": "1.2.85", "title": "The map shows the ground again", "items": ["The Map page showed only a black background in the game. The game now publishes its minimap tiles in a new compressed format inside a new kind of asset pack, which the bot could not read. It reads both now, so the minimap appears under the markers.", "The same fix lets the bot read any other game picture that moves to the new packs, so icons keep working after future game updates."]}, {"version": "1.2.84", "title": "Map page", "items": ["New Map page, first in the page list. It draws the game's own minimap around you with your hunting radius (yellow circle) and chase distance (dashed ring).", "It shows you (arrow), monsters (uniques and stronger classes stand out), party members (also ones out of sight, at the map's edge), other players with their names when zoomed in, NPCs and pets.", "Click the map to mark a point, then \"Make this the hunting spot\" to hunt there. Drag to look around, + and − (or the mouse wheel) to zoom, \"Follow me\" to centre on you again.", "Hunt radius and chase distance can be changed right under the map."], "note": "Dungeons have no map yet. In the wide window the map uses the full page width."}, {"version": "1.2.83", "title": "Wide window", "items": ["New Wide button at the top of the panel. It opens a wide window: a status strip with HP, MP and EXP bars and what the bot is doing, the pages as a list with the game's own icons on the left, session numbers and supplies always on the right, and the activity log along the bottom.", "The pages are the same as before, set out in two columns, so nothing has moved inside them. Compact goes back to the usual window, which stays the default.", "The choice is remembered. Screens narrower than 900 pixels always get the compact window."], "note": "This is step 1 of the new layout shown on the site's concept page. The map, party and town pages come later."}, {"version": "1.2.82", "title": "The panel remembers where you put it", "items": ["The panel now opens where you last dragged it, also after a reload and after bringing it back from the minimised icon. Before, it went back to the top right.", "If the game window got smaller and the saved spot is off screen, the panel is moved back inside it."]}, {"version": "1.2.81", "title": "Minimise the panel to a small icon", "items": ["The × at the top right of the panel now minimises it to a small icon instead of folding it. The bot keeps running.", "The icon's dot shows what the bot is doing: green while hunting, yellow during a town trip, walk back, alchemy or reconnect, red when stopped, dead or in error. Hover it to see the current status, HP and MP.", "The icon glows when something needs you: a warning such as running out of potions or hunting stopping, a SoX pickup, or the character dying. Hovering it or opening the panel clears the glow.", "Drag the icon anywhere. It remembers its spot, and the panel stays minimised after a reload.", "Click the icon or press F7 to bring the panel back. F7 still folds the open panel, Shift+F7 still hides everything, and F8 still starts and stops.", "The window you opened or clicked last (patch notes, bug report) is now drawn above the others."]}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -6415,6 +6443,7 @@ const Diagnostics = {
     if (Hunt.state === 'resting' || Hunt.state === 'standing') return 'Recovering HP / MP.';
     if (Hunt.state === 'player') return 'Hunting paused by nearby-player setting.';
     if (Hunt.state === 'loot') return 'Character collecting; waiting for pickup confirmation.';
+    if (Hunt.threatNote && Hunt.threatNote.gid === Hunt.targetGid) return Hunt.threatNote.text;
     if (World.isCasting()) return 'Combat: waiting for the current cast.';
     if (Hunt.state === 'fight' && Combat.fallbackNote()) return 'Combat: normal attack (' + Combat.fallbackNote() + ').';
     if (Hunt.targetGid) return 'Combat: approaching or attacking the target.';
@@ -7149,8 +7178,11 @@ const UI = {
   // What the bot is doing, for the status strip and the minimised icon: ok (hunting), busy or stop.
   botState() {
     const dead = World.inWorld() && World.isDead(), mode = Controller.mode, error = mode === 'error';
-    const busy = !!Town.trip || !!WalkBack.active || Reconnect.active() || ['town service', 'returning', 'shopping', 'resurrect', 'buff gear', 'alchemy'].includes(mode);
-    const label = dead ? 'Dead' : error ? 'Error' : busy ? mode.charAt(0).toUpperCase() + mode.slice(1) : Hunt.running ? 'Hunting' : 'Stopped';
+    // Busy comes from the live trips, not from Controller.mode: that label lags a tick behind (it still says
+    // "returning" for up to 100 ms after Stop all ended a walk-back).
+    const busy = Town.trip ? 'Town trip' : WalkBack.active ? 'Returning' : Reconnect.active() ? 'Reconnecting' : Restock.trip ? 'Shopping'
+      : Resurrect.trip ? 'Resurrecting' : BuffGear.run ? 'Buff gear' : Alchemy.run || Alchemy.pending ? 'Alchemy' : '';
+    const label = dead ? 'Dead' : error ? 'Error' : busy || (Hunt.running ? 'Hunting' : 'Stopped');
     // `note` is what only the state can say; the icon falls back to the first wait reason, which the wide window shows below the strip.
     const note = Town.trip ? Town.status() : Reconnect.active() && Reconnect.message ? Reconnect.message
       : Restock.recording ? 'Recording route: ' + Restock.draft.route.length + ' points' : '';
