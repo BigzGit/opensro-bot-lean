@@ -117,12 +117,17 @@ When the bot confirms a pickup of Star, Moon or Sun equipment, it shows the item
 
 Open **Settings → Session stats** for hunting time, XP/hour, net gold, confirmed kills, deaths, potion use, pickups and SoX found. Totals pause when hunting stops and stay across toggles. **Reset session**, reloading or changing character clears them. Stats stay local to the page.
 
+## Minimised panel
+
+The **×** at the top right of the panel minimises it to a small icon, so it stays out of the way while the bot keeps running. Its dot shows the state: green while hunting, yellow during a town trip, walk back, alchemy or reconnect, and red when stopped, dead or in error. Hover the icon for the current status, HP and MP. It glows when something needs you (a warning, a SoX pickup or a death) until you hover it or open the panel. Drag it anywhere; it keeps its spot and stays minimised after a reload. Click it or press **F7** to bring the panel back.
+
 ## Controls
 
 | Control | Action |
 | --- | --- |
 | **F8** | Start or stop the bot |
-| **F7** | Fold or unfold the panel |
+| **×** (top right) | Minimise the panel to a small icon; the bot keeps running |
+| **F7** | Fold or unfold the panel; brings a minimised panel back |
 | **Shift+F7** | Hide or show the panel; the bot keeps running |
 | **Return & hunt** | Walk to the saved hunting spot, then start hunting |
 | **Stop all** | Cancel hunting and automated trips; potion use has its own switch |

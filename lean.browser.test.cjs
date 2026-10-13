@@ -12,6 +12,11 @@ const images = ['ic_attack', 'ic_recovery', 'ic_autoget', 'ic_sit'].map((key, i)
   const raw = Buffer.from(skin[key].split(',')[1], 'base64'), compressed = zlib.gzipSync(raw);
   return { raw, compressed, path: `/assets/images/Media_extracted/icon/skill/test/skill${i}.png`, transport: `/assets/test-icons/skill${i}.png.gz` };
 });
+// The minimised window's icon (the game's own auto-attack action icon).
+{ // Distinct bytes (trailing data after IEND), so the loader does not share it with skill0.
+  const raw = Buffer.concat([images[0].raw, Buffer.from('orb')]);
+  images.push({ raw, compressed: zlib.gzipSync(raw), path: '/assets/images/Media_extracted/icon/action/icon_cha_auto_attack.png', transport: '/assets/test-icons/orb.png.gz' });
+}
 let offset = 0;
 const manifest = { groups: [], assets: images.map((image, i) => {
   const row = { path: image.path, packPath: '/assets/test-icons/icons.pack', offset, length: image.raw.length, sha256: sha(image.raw), mime: 'image/png' };
@@ -329,6 +334,44 @@ const server = http.createServer((req, res) => {
     await page.keyboard.press('Shift+F7');
     assert.equal(await page.locator('#sro-bot-lean').isVisible(), true);
     await page.getByLabel('Hunt radius (m)', { exact: true }).evaluate(e => e.blur());
+    // The × minimises to a small draggable icon; the bot keeps running and the icon shows its state.
+    const orb = page.getByRole('button', { name: 'Show bot window', exact: true });
+    await page.getByRole('button', { name: 'Minimise bot window', exact: true }).click();
+    assert.equal(await orb.isVisible(), true);
+    assert.equal(await page.getByRole('button', { name: 'Stop all', exact: true }).isVisible(), false);
+    assert.ok((await page.locator('#sro-bot-lean').boundingBox()).width <= 44);
+    await page.waitForFunction(() => document.getElementById('sro-bot-lean').shadowRoot.querySelector('.orb img')?.complete);
+    assert.equal(await orb.getAttribute('data-state'), 'stop');
+    await page.keyboard.press('F8');
+    await page.waitForFunction(() => document.getElementById('sro-bot-lean').shadowRoot.querySelector('.orb').dataset.state === 'ok');
+    assert.equal(await page.evaluate(() => SROLean.hunt.running), true);
+    await page.evaluate(() => SROLean.ui.toast('Out of HP potions.', 'warn'));
+    assert.equal(await orb.evaluate(e => e.classList.contains('alert')), true);
+    await orb.hover();
+    assert.match(await orb.innerText(), /Out of HP potions/);
+    await page.screenshot({ path: __dirname + '/lean-minimised-desktop.png' });
+    const orbStart = await orb.boundingBox();
+    await page.mouse.move(orbStart.x + 20, orbStart.y + 20); await page.mouse.down();
+    await page.mouse.move(orbStart.x + 20 - 300, orbStart.y + 20 + 200, { steps: 6 }); await page.mouse.up();
+    const orbEnd = await orb.boundingBox();
+    assert.ok(Math.abs(orbEnd.x - (orbStart.x - 300)) < 3 && Math.abs(orbEnd.y - (orbStart.y + 200)) < 3);
+    assert.equal(await orb.isVisible(), true, 'a drag does not reopen the window');
+    assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('sroLean:ui'))), { minimised: true, orb: { x: Math.round(orbEnd.x), y: Math.round(orbEnd.y) } });
+    await orb.click();
+    assert.equal(await page.getByRole('button', { name: 'Stop all', exact: true }).isVisible(), true);
+    assert.equal(await orb.isVisible(), false);
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('sroLean:ui')).minimised), false);
+    await page.getByRole('button', { name: 'Minimise bot window', exact: true }).click();
+    assert.ok(Math.abs((await orb.boundingBox()).x - orbEnd.x) < 3, 'the icon returns to where it was dragged');
+    await page.keyboard.press('Shift+F7');
+    assert.equal(await page.locator('#sro-bot-lean').isVisible(), false);
+    await page.keyboard.press('Shift+F7');
+    assert.equal(await orb.isVisible(), true);
+    await page.keyboard.press('F7');
+    assert.equal(await page.getByRole('button', { name: 'Stop all', exact: true }).isVisible(), true);
+    await page.keyboard.press('F8');
+    assert.equal(await page.evaluate(() => SROLean.hunt.running), false);
+    await page.evaluate(() => localStorage.removeItem('sroLean:ui'));
     await page.getByRole('button', { name: 'Skills', exact: true }).click();
     await page.waitForFunction(() => [...document.getElementById('sro-bot-lean').shadowRoot.querySelectorAll('.slot')].every(s => s.dataset.iconLoaded === 'true'));
     await page.screenshot({ path: __dirname + '/lean-skills-desktop.png', fullPage: true });
@@ -537,6 +580,9 @@ const server = http.createServer((req, res) => {
     const sendBounds=await page.getByRole('button',{name:'Send to developer',exact:true}).boundingBox();
     assert.ok(sendBounds.x>=0&&sendBounds.x+sendBounds.width<=390&&sendBounds.y+sendBounds.height<=844);
     await page.screenshot({path:__dirname+'/lean-report-mobile.png',fullPage:true});
+    // The once-per-version patch notes open 5 s after a load and, being newer, sit above the report; close them.
+    const notesClose = page.locator('.patch-notes header .fold');
+    if (await notesClose.isVisible()) await notesClose.click();
     await page.getByRole('button',{name:'Remove screenshot',exact:true}).click(); await imagePreview.waitFor({state:'hidden'});
     await page.getByRole('button',{name:'Send to developer',exact:true}).click();
     await page.getByText('Report sent to the developer’s Discord. Thank you.',{exact:true}).waitFor();

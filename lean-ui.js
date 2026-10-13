@@ -9,6 +9,7 @@ const UI = {
   current: 'Combat', combatTab: 'Skills', refreshers: [], lastSkillKey: '',
   toast(message, level = 'info', ms = 5000) {
     Log.add(level, message);
+    if (level === 'warn' || level === 'error' || /^SoX found/.test(message)) this.alertOrb(message);
     if (!this.feedback) return;
     this.feedback.textContent = message;
     this.feedback.style.color = level === 'warn' || level === 'error' ? '#ffc67a' : '#b5e5bd';
@@ -51,7 +52,7 @@ const UI = {
       this.reportBox.style.left = Math.max(4, (innerWidth - width) / 2) + 'px';
       this.reportBox.style.top = Math.max(4, Math.min(80, innerHeight - 320)) + 'px';
     }
-    this.reportBox.hidden = false; this.fitWindow(this.reportBox);
+    this.reportBox.hidden = false; this.fitWindow(this.reportBox); this.front(this.reportBox);
     this.reportDescription.value = Reports.draft.description;
     this.reportStatus.textContent = Reports.draft.sent ? 'Report already sent. Close this preview to prepare another.' : 'Review the report before sending. Screenshot is optional.';
   },
@@ -76,7 +77,7 @@ const UI = {
     const panel = this.root.host.getBoundingClientRect(), width = Math.min(430, innerWidth - 8);
     this.notesBox.style.left = (panel.left - width - 8 >= 0 ? panel.left - width - 8 : panel.right + 8) + 'px';
     this.notesBox.style.top = Math.max(4, panel.top) + 'px';
-    this.fitWindow(this.notesBox);
+    this.fitWindow(this.notesBox); this.front(this.notesBox);
     return true;
   },
   // A draggable in-page window in the panel's skin. Lives in the same shadow root, so typing is protected like the panel.
@@ -88,8 +89,11 @@ const UI = {
     for (const corner of ['lu', 'mu', 'ru', 'ls', 'rs', 'ld', 'md', 'rd']) win.append(el('div', null, 'frame ' + corner));
     win.append(header, body);
     this.dragBy(header, win);
+    win.addEventListener('pointerdown', () => this.front(win));
     return win;
   },
+  // The window opened or touched last is drawn above the others.
+  front(win) { win.style.zIndex = String(10 + (this.zTop = (this.zTop || 0) + 1)); },
   // Keep a floating window fully on screen after a resize or when it is re-shown.
   fitWindow(win) {
     if (!win || win.hidden) return;
@@ -168,9 +172,9 @@ const UI = {
     const style = el('style');
     style.textContent = ':host{' + Object.entries(LEAN_SKIN).map(([key, data]) => `--s-${key}:url("${data}");`).join('') + '}\n' + LEAN_CSS + '\n:host([hidden]){display:none!important}';
     const panel = el('section', null, 'panel'), header = el('header');
-    const fold = this.button('−', () => { this.body.hidden = !this.body.hidden; fold.textContent = this.body.hidden ? '+' : '−'; });
-    fold.className = 'fold'; fold.setAttribute('aria-label', 'Fold or unfold bot window');
-    header.title = 'Shift+F7 hides or shows the whole window; F7 folds it.';
+    const fold = this.button('×', () => this.minimise(true));
+    fold.className = 'fold'; fold.setAttribute('aria-label', 'Minimise bot window'); fold.title = 'Minimise (the bot keeps running)';
+    header.title = 'The × minimises the window to a small icon; F7 folds it; Shift+F7 hides or shows everything.';
     this.updateButton = this.button('Update', () => Updates.open());
     this.updateButton.className = 'update'; this.updateButton.hidden = true;
     // Updates are announced on Discord, so the invite sits next to the version.
@@ -193,11 +197,96 @@ const UI = {
     this.waitNote = el('div', '', 'waiting'); this.waitNote.setAttribute('role', 'status');
     this.body.append(this.updateNote, this.status, this.waitNote, controls, this.nav, this.pane, this.feedback);
     for (const corner of ['lu', 'mu', 'ru', 'ls', 'rs', 'ld', 'md', 'rd']) panel.append(el('div', null, 'frame ' + corner));
-    panel.append(header, this.body); this.root.append(style, panel);
+    panel.append(header, this.body); this.root.append(style, panel, this.makeOrb());
+    this.panel = panel;
     this.tip = el('div', null, 'skill-tip'); this.tip.hidden = true; this.root.append(this.tip);
     this.dragBy(header, host);
-    W.addEventListener('resize', () => { this.fitWindow(this.reportBox); this.fitWindow(this.notesBox); });
+    W.addEventListener('resize', () => { this.fitWindow(this.reportBox); this.fitWindow(this.notesBox); if (this.minimised) this.placeOrb(host.offsetLeft, host.offsetTop); });
     this.draw(); this.update();
+    if (this.uiPrefs().minimised) this.minimise(true);
+  },
+  // Minimised window: a skill-slot sized icon with a status dot. The bot keeps running.
+  // Global (not per character) and kept in this page's storage, like the window position.
+  uiPrefs(patch) {
+    let prefs = {};
+    try { prefs = JSON.parse(W.localStorage.getItem('sroLean:ui') || '{}') || {}; } catch {}
+    if (patch) { prefs = { ...prefs, ...patch }; try { W.localStorage.setItem('sroLean:ui', JSON.stringify(prefs)); } catch {} }
+    return prefs;
+  },
+  makeOrb() {
+    const orb = this.orb = el('button', null, 'orb'); orb.type = 'button'; orb.hidden = true;
+    orb.setAttribute('aria-label', 'Show bot window');
+    this.orbState = el('strong'); this.orbDetail = el('span'); this.orbVitals = el('span', '', 'muted');
+    const tip = el('div', null, 'orb-tip'); tip.append(this.orbState, this.orbDetail, this.orbVitals, el('em', 'Click to open · drag to move'));
+    orb.append(el('span', 'nb', 'orb-mark'), el('i', null, 'orb-dot'), tip);
+    Icons.paint(orb, 'action\\icon_cha_auto_attack.ddj');
+    let drag = null;
+    orb.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      drag = { x: e.clientX, y: e.clientY, left: this.root.host.offsetLeft, top: this.root.host.offsetTop, moved: false };
+      orb.setPointerCapture(e.pointerId);
+    });
+    orb.addEventListener('pointermove', e => {
+      if (!drag) return;
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
+      if (drag.moved) this.placeOrb(drag.left + dx, drag.top + dy);
+    });
+    const done = () => {
+      if (!drag) return;
+      if (drag.moved) { this.orbDragged = true; this.uiPrefs({ orb: { x: this.root.host.offsetLeft, y: this.root.host.offsetTop } }); }
+      drag = null;
+    };
+    orb.addEventListener('pointerup', done); orb.addEventListener('pointercancel', done);
+    orb.addEventListener('click', () => { if (this.orbDragged) { this.orbDragged = false; return; } this.minimise(false); });
+    orb.addEventListener('pointerenter', () => { if (this.orbAlert) setTimeout(() => { this.orbAlert = ''; this.updateOrb(); }, 2500); });
+    return orb;
+  },
+  placeOrb(x, y) {
+    const host = this.root.host;
+    host.style.right = 'auto';
+    host.style.left = clamp(x, 0, Math.max(0, innerWidth - 44)) + 'px';
+    host.style.top = clamp(y, 0, Math.max(0, innerHeight - 44)) + 'px';
+  },
+  minimise(on) {
+    const host = this.root?.host;
+    if (!host || !!this.minimised === on) return;
+    this.minimised = on;
+    if (on) {
+      const r = host.getBoundingClientRect();
+      this.panelPos = host.style.left ? { left: host.style.left, top: host.style.top } : null;
+      const saved = this.uiPrefs().orb;
+      host.classList.add('min'); this.panel.hidden = true; this.orb.hidden = false;
+      if (saved) this.placeOrb(saved.x, saved.y); else this.placeOrb(r.right - 44, r.top + 4);
+      if (this.tip) this.tip.hidden = true;
+    } else {
+      host.classList.remove('min'); this.panel.hidden = false; this.orb.hidden = true; this.orbAlert = '';
+      if (this.panelPos) { host.style.left = this.panelPos.left; host.style.top = this.panelPos.top; this.fitWindow(host); }
+      else { host.style.left = ''; host.style.top = ''; host.style.right = ''; }
+    }
+    this.uiPrefs({ minimised: on });
+    this.updateOrb();
+  },
+  // Pulse the icon for something that needs the player while the window is minimised.
+  alertOrb(text) {
+    if (!this.minimised) return;
+    this.orbAlert = text; this.updateOrb();
+  },
+  updateOrb() {
+    if (!this.orb || !this.minimised) return;
+    const dead = World.inWorld() && World.isDead();
+    if (dead && !this.orbWasDead && Hunt.running) this.alertOrb('Character died.');
+    this.orbWasDead = dead;
+    const mode = Controller.mode, busy = !!Town.trip || !!WalkBack.active || Reconnect.active() || ['town service', 'returning', 'shopping', 'resurrect', 'buff gear', 'alchemy'].includes(mode);
+    const state = dead ? 'Dead' : mode === 'error' ? 'Error' : busy ? 'Busy' : Hunt.running ? 'Hunting' : 'Stopped';
+    this.orb.dataset.state = state === 'Hunting' ? 'ok' : state === 'Busy' ? 'busy' : 'stop';
+    this.orb.classList.toggle('alert', !!this.orbAlert);
+    this.orb.classList.toggle('left', this.root.host.offsetLeft < 280);
+    this.orbState.textContent = this.orbAlert ? 'Needs you' : state === 'Busy' ? mode.charAt(0).toUpperCase() + mode.slice(1) : state;
+    const reason = Town.trip ? Town.status() : Reconnect.active() && Reconnect.message ? Reconnect.message : (this.waitNote?.textContent || '').split('\n')[0];
+    this.orbDetail.textContent = this.orbAlert || reason || (Hunt.running ? 'Hunting' : 'Press F8 to start');
+    const me = World.me();
+    this.orbVitals.textContent = World.inWorld() ? `${World.charName || ''} · HP ${Math.round(me.hpPct)}% · MP ${Math.round(me.mpPct)}%` : '';
   },
   skillOptions() {
     return [[0, 'Choose a learned skill'], ...(World.gp?.skills || []).map(id => World.skill(id)).filter(s => s && !s.groundTarget).map(s => [s.id, s.name || '#' + s.id])];
@@ -493,6 +582,7 @@ const UI = {
     Reports.render();
     const diagnosticState = Diagnostics.sample();
     if (this.waitNote) this.waitNote.textContent = Diagnostics.lines(diagnosticState);
+    this.updateOrb();
     if (this.townNote) this.townNote.textContent = Town.status();
     if (this.current === 'Settings' && AutoMastery.note) AutoMastery.note.textContent = AutoMastery.status();
     if (this.current === 'Settings' && this.stuckNote) this.stuckNote.textContent = AntiStuck.status();

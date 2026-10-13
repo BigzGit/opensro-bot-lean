@@ -59,14 +59,15 @@ function boot() {
     else if (e.code === 'F7') {
       e.preventDefault(); e.stopImmediatePropagation();
       if (e.shiftKey) UI.toggleVisibility();
+      else if (UI.minimised) UI.minimise(false);
       else UI.body.hidden = !UI.body.hidden;
     }
   }, true);
   Ticker.start(() => Controller.tick(), 100);
   setInterval(() => { Wardrobe.tick(); UI.update(); }, 500);
   W.SROLean = { version: VERSION, stats: Stats, updates: Updates, diagnostics: Diagnostics, reports: Reports, alchemy: Alchemy, buffGear: BuffGear, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, resurrect: Resurrect,
-    restock: Restock, town: Town, walkBack: WalkBack, antiStuck: AntiStuck, autoMastery: AutoMastery, reconnect: Reconnect, petPotion: PetPotion, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, stop: stopAll, log: Log };
-  Log.info('nixxane bot ready. F8 starts/stops; F7 folds; Shift+F7 hides/shows the window.');
+    restock: Restock, town: Town, walkBack: WalkBack, antiStuck: AntiStuck, autoMastery: AutoMastery, reconnect: Reconnect, petPotion: PetPotion, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, ui: UI, stop: stopAll, log: Log };
+  Log.info('nixxane bot ready. F8 starts/stops; F7 folds; the × minimises; Shift+F7 hides/shows the window.');
 }
 
 installWorkerHook();
