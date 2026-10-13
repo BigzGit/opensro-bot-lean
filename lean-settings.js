@@ -25,6 +25,7 @@ const DEFAULT_PROFILE = {
       mp: { on: true, refObjId: 0, low: 20, target: 300 },
       cure: { on: false, refObjId: 58, low: 10, target: 50 },
       vigor: { on: false, refObjId: 22, low: 10, target: 50 },
+      ammo: { arrow: { on: false, low: 200, target: 2000 }, bolt: { on: false, low: 200, target: 2000 } },
     },
   },
   hunt: {

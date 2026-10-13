@@ -1792,6 +1792,32 @@ test('town cycle does not repeat unconfirmed pet transfers and stops on full sto
   g.World.gp.storage = { npc: 60, phase: 'open', capacity: 1, items: [{ slot: 0, refObjId: 999 }] }; g.World.gp.target = 60;
   g.Town.store(); assert.match(g.Town.message, /Storage is full/); assert.equal(g.commands.some(c => c.kind === 'cos-transfer'), false);
 });
+test('town trips buy arrows and bolts at the weapon merchant, count the equipped stack and skip what cannot be bought', () => {
+  const f = townFixture(), gp = f.World.gp, c = f.Restock.cfg().ammo;
+  assert.deepEqual(JSON.parse(JSON.stringify(f.Town.ammoSupplies())), [], 'off by default');
+  c.arrow.on = true; c.arrow.low = 100; c.arrow.target = 1000; c.bolt.on = true; c.bolt.low = 100; c.bolt.target = 1200;
+  gp.inventory = gp.inventory.filter(i => i.refObjId !== 62 && i.refObjId !== 10376);
+  gp.inventory.push({ slot: 7, refObjId: 62, typeFlags: 3, quantity: 150 }); gp.inventory.push({ slot: 20, refObjId: 62, typeFlags: 3, quantity: 40 });
+  assert.equal(f.Town.ammoCount(62), 190, 'the equipped stack and the spare stack together');
+  f.pet.inventory = []; f.World.gp.inventory.find(i => i.refObjId === 15).quantity = 500;
+  assert.equal(f.Town.reason(), 'ammunition running low', 'no bolts at all');
+  gp.inventory.push({ slot: 21, refObjId: 10376, typeFlags: 3, quantity: 900 }); gp.inventory.find(i => i.slot === 20).quantity = 90; gp.inventory.find(i => i.slot === 7).quantity = 10;
+  assert.equal(f.Town.reason(), 'ammunition running low', 'arrows are down to 100');
+  gp.inventory.find(i => i.slot === 7).quantity = 300; assert.equal(f.Town.reason(), '', 'enough of both');
+  gp.inventory.find(i => i.slot === 7).quantity = 10;
+  f.Town.begin(); f.Town.enter('sell'); gp.target = 62; gp.targetCapabilities = 8;
+  gp.shop = { npc: 62, offers: [{ refObjId: 62, tab: 2, slot: 0, maxStack: 500, price: '2', previews: [{ refObjId: 62, typeFlags: 3 }] }] };
+  f.Town.tick(); assert.equal(f.Town.trip.phase, 'ammo', 'selling is finished, ammunition comes next');
+  f.Town.tick(); const buy = f.commands.at(-1);
+  assert.deepEqual(JSON.parse(JSON.stringify(buy)), { kind: 'shop-buy', tab: 2, slot: 0, quantity: 500 }, 'a full stack, limited by the stack size');
+  gp.inventory.find(i => i.slot === 20).quantity += 500; f.advance(1000); f.Town.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'shop-buy').length, 2, 'the rest is bought next');
+  assert.equal(f.commands.at(-1).quantity, 1000 - 600, 'only what is still missing');
+  gp.inventory.find(i => i.slot === 20).quantity += 400; f.advance(1000); f.Town.tick();
+  assert.match(f.Town.message, /no bolts bought, this merchant does not sell them/, 'bolts are not on offer: reported, not fatal');
+  f.Town.tick(); assert.equal(f.Town.trip.phase, 'repair', 'the trip goes on');
+  assert.equal(f.Diagnostics.main().includes('undefined'), false);
+});
 test('town cycle rejects cached shops and waits for fresh catalogue acknowledgement', () => {
   const f = townFixture(), gp = f.World.gp;
   f.Town.begin(); f.Town.enter('open-vendor'); gp.target = 61; gp.targetCapabilities = 1; gp.shop = { npc: 61, offers: [] };

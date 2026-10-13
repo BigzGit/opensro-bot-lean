@@ -419,6 +419,15 @@ const UI = {
       services.append(this.text('Keep in pet (names)', () => town().keep, v => town().keep = v),
         el('p', 'Town buys X-Large potions using the Buy HP/MP switches, low-stock thresholds and refill counts above. Keep each low-stock threshold below its refill target. Potion selections apply to walking-route restock. Returns when the character bag has at most one free slot. Free at least two slots before hunting again; existing character items stay protected. Revival uses the saved town services and a reverse scroll, without using a return scroll in town. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. F8 cancels.', 'muted'));
       this.townNote = el('p', Town.status(), 'muted'); services.append(this.townNote); this.pane.append(services);
+      const ammo = () => C().ammo;
+      this.pane.append(this.group('Arrows and bolts',
+        this.check('Buy arrows on town trips', () => ammo().arrow.on, v => ammo().arrow.on = v),
+        this.number('Arrows: go to town at or below', () => ammo().arrow.low, v => ammo().arrow.low = v, 0, 9999),
+        this.number('Arrows: refill to', () => ammo().arrow.target, v => ammo().arrow.target = v, 1, 10000),
+        this.check('Buy bolts on town trips', () => ammo().bolt.on, v => ammo().bolt.on = v),
+        this.number('Bolts: go to town at or below', () => ammo().bolt.low, v => ammo().bolt.low = v, 0, 9999),
+        this.number('Bolts: refill to', () => ammo().bolt.target, v => ammo().bolt.target = v, 1, 10000),
+        el('p', 'Bought at the repair merchant after selling pet loot and before repairing. The count includes the stack in your ammunition slot and any spare stacks in the bag. A trip also starts when the count falls to the low-stock number. If the merchant does not sell it, there is no bag space or not enough gold, that item is skipped and the rest of the trip goes on. Equipping the bought ammunition is up to you.', 'muted')));
     } else if (this.current === 'Alchemy') {
       Alchemy.draw();
     } else if (this.current === 'Wardrobe') {

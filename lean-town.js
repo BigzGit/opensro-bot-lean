@@ -65,6 +65,13 @@ const Town = {
   },
   cfg() { return Restock.cfg().town; },
   // Native X-Large HP/MP IDs 8/15, both authored with 50 potions per stack.
+  // Arrows and bolts (item 62 and 10376 on this server) are sold by the weapon merchant, so they are bought there,
+  // after selling and before repairing. They count in the bag and in the equipped ammunition slot together.
+  ammoSupplies() {
+    const a = Restock.cfg().ammo;
+    return [['arrow', 62], ['bolt', 10376]].filter(([kind]) => a?.[kind]?.on).map(([kind, refObjId]) => ({ kind, refObjId, low: a[kind].low, target: a[kind].target }));
+  },
+  ammoCount(ref) { return (World.gp?.inventory || []).filter(i => i.refObjId === ref).reduce((n, i) => n + (i.quantity ?? 1), 0); },
   supplies() { return Restock.supplies().map(s => ({ ...s, refObjId: s.kind === 'hp' ? 8 : s.kind === 'mp' ? 15 : s.refObjId })); },
   status() {
     if (this.trip || this.message.startsWith('Town cycle stopped:')) return this.message;
@@ -218,6 +225,7 @@ const Town = {
     if (World.freeBagSlots() <= 1) return 'character bag nearly full';
     if (c.petFull && pet && pet.rec.status - pet.rec.inventory.length <= c.petFree) return 'pickup pet nearly full';
     if (this.supplies().some(s => Restock.count(s.refObjId) <= s.low)) return 'potions running low';
+    if (this.ammoSupplies().some(s => this.ammoCount(s.refObjId) <= s.low)) return 'ammunition running low';
     return '';
   },
   validate() {
@@ -394,7 +402,7 @@ const Town = {
     const item = pet?.rec.inventory.find(i => this.sellable(i));
     if (!item) {
       if (this.cfg().petFull && pet && pet.rec.status - pet.rec.inventory.length <= this.cfg().petFree) return this.fail('Protected pet items still fill the bag.');
-      this.enter('repair'); return;
+      this.enter(this.ammoSupplies().length ? 'ammo' : 'repair'); return;
     }
     const quantity = item.quantity ?? 1;
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 65535) return this.fail('Invalid pet item sale quantity.');
@@ -402,6 +410,25 @@ const Town = {
       t.salePetGid = pet.rec.gid;
       t.pending = { source: item.slot, ref: item.refObjId, quantity, at: now() };
     }
+  },
+  // Tops up arrows and bolts at the weapon merchant. A shortfall here (not sold, no bag room, no gold) is reported and
+  // skipped: the rest of the trip still matters.
+  ammo() {
+    const t = this.trip, gp = World.gp, shop = Restock.activeShop();
+    if (!shop || shop.npc !== this.npc('smith')?.gid || shop.error) return this.fail(shop?.error || 'Weapon merchant selection changed.');
+    if (!this.pendingDone(p => this.ammoCount(p.ref) >= p.before + p.quantity) || !this.trip || gp.inventoryPending) return;
+    t.ammoSkipped ||= [];
+    const skip = (s, why) => { t.ammoSkipped.push(s.kind); this.message = `Ammunition: no ${s.kind}s bought, ${why}.`; Log.warn(this.message); UI.toast(this.message, 'warn', 6000); };
+    const s = this.ammoSupplies().find(s => !t.ammoSkipped.includes(s.kind) && this.ammoCount(s.refObjId) < s.target);
+    if (!s) { this.enter('repair'); return; }
+    const offer = shop.offers.find(o => o.refObjId === s.refObjId && (o.currency === undefined || o.currency === 1) &&
+      (!o.contents?.length || o.contents.length === 1 && o.contents[0].refObjId === o.refObjId && o.contents[0].quantity === 1));
+    if (!offer || !(offer.maxStack > 0)) return skip(s, 'this merchant does not sell them');
+    const before = this.ammoCount(s.refObjId), room = World.items().filter(i => i.refObjId === s.refObjId).reduce((n, i) => n + Math.max(0, offer.maxStack - (i.quantity ?? 1)), 0);
+    const quantity = Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, room + Math.max(0, World.freeBagSlots() - 1) * offer.maxStack);
+    if (quantity < 1) return skip(s, 'there is no bag space');
+    if (gp.progression?.gold === undefined || toBigInt(offer.price) * BigInt(quantity) > toBigInt(gp.progression.gold)) return skip(s, 'not enough gold');
+    if (Cmd.raw({ kind: 'shop-buy', tab: offer.tab, slot: offer.slot, quantity }, 'Town: refill ' + s.kind + 's')) t.pending = { ref: s.refObjId, before, quantity, at: now() };
   },
   buy() {
     const t = this.trip, gp = World.gp, shop = Restock.activeShop();
@@ -552,6 +579,7 @@ const Town = {
     } else if (t.phase === 'store') this.store();
     else if (t.phase === 'buy') this.buy();
     else if (t.phase === 'sell') this.sell();
+    else if (t.phase === 'ammo') this.ammo();
     else if (t.phase === 'repair') this.repair();
     else if (t.phase.startsWith('close-')) {
       if (now() - t.at > 15000) this.fail('NPC window did not close.');

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.76
+// @version      1.2.77
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.76';
+const VERSION = '1.2.77';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -208,6 +208,7 @@ const DEFAULT_PROFILE = {
       mp: { on: true, refObjId: 0, low: 20, target: 300 },
       cure: { on: false, refObjId: 58, low: 10, target: 50 },
       vigor: { on: false, refObjId: 22, low: 10, target: 50 },
+      ammo: { arrow: { on: false, low: 200, target: 2000 }, bolt: { on: false, low: 200, target: 2000 } },
     },
   },
   hunt: {
@@ -2848,6 +2849,13 @@ const Town = {
   },
   cfg() { return Restock.cfg().town; },
   // Native X-Large HP/MP IDs 8/15, both authored with 50 potions per stack.
+  // Arrows and bolts (item 62 and 10376 on this server) are sold by the weapon merchant, so they are bought there,
+  // after selling and before repairing. They count in the bag and in the equipped ammunition slot together.
+  ammoSupplies() {
+    const a = Restock.cfg().ammo;
+    return [['arrow', 62], ['bolt', 10376]].filter(([kind]) => a?.[kind]?.on).map(([kind, refObjId]) => ({ kind, refObjId, low: a[kind].low, target: a[kind].target }));
+  },
+  ammoCount(ref) { return (World.gp?.inventory || []).filter(i => i.refObjId === ref).reduce((n, i) => n + (i.quantity ?? 1), 0); },
   supplies() { return Restock.supplies().map(s => ({ ...s, refObjId: s.kind === 'hp' ? 8 : s.kind === 'mp' ? 15 : s.refObjId })); },
   status() {
     if (this.trip || this.message.startsWith('Town cycle stopped:')) return this.message;
@@ -3001,6 +3009,7 @@ const Town = {
     if (World.freeBagSlots() <= 1) return 'character bag nearly full';
     if (c.petFull && pet && pet.rec.status - pet.rec.inventory.length <= c.petFree) return 'pickup pet nearly full';
     if (this.supplies().some(s => Restock.count(s.refObjId) <= s.low)) return 'potions running low';
+    if (this.ammoSupplies().some(s => this.ammoCount(s.refObjId) <= s.low)) return 'ammunition running low';
     return '';
   },
   validate() {
@@ -3177,7 +3186,7 @@ const Town = {
     const item = pet?.rec.inventory.find(i => this.sellable(i));
     if (!item) {
       if (this.cfg().petFull && pet && pet.rec.status - pet.rec.inventory.length <= this.cfg().petFree) return this.fail('Protected pet items still fill the bag.');
-      this.enter('repair'); return;
+      this.enter(this.ammoSupplies().length ? 'ammo' : 'repair'); return;
     }
     const quantity = item.quantity ?? 1;
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 65535) return this.fail('Invalid pet item sale quantity.');
@@ -3185,6 +3194,25 @@ const Town = {
       t.salePetGid = pet.rec.gid;
       t.pending = { source: item.slot, ref: item.refObjId, quantity, at: now() };
     }
+  },
+  // Tops up arrows and bolts at the weapon merchant. A shortfall here (not sold, no bag room, no gold) is reported and
+  // skipped: the rest of the trip still matters.
+  ammo() {
+    const t = this.trip, gp = World.gp, shop = Restock.activeShop();
+    if (!shop || shop.npc !== this.npc('smith')?.gid || shop.error) return this.fail(shop?.error || 'Weapon merchant selection changed.');
+    if (!this.pendingDone(p => this.ammoCount(p.ref) >= p.before + p.quantity) || !this.trip || gp.inventoryPending) return;
+    t.ammoSkipped ||= [];
+    const skip = (s, why) => { t.ammoSkipped.push(s.kind); this.message = `Ammunition: no ${s.kind}s bought, ${why}.`; Log.warn(this.message); UI.toast(this.message, 'warn', 6000); };
+    const s = this.ammoSupplies().find(s => !t.ammoSkipped.includes(s.kind) && this.ammoCount(s.refObjId) < s.target);
+    if (!s) { this.enter('repair'); return; }
+    const offer = shop.offers.find(o => o.refObjId === s.refObjId && (o.currency === undefined || o.currency === 1) &&
+      (!o.contents?.length || o.contents.length === 1 && o.contents[0].refObjId === o.refObjId && o.contents[0].quantity === 1));
+    if (!offer || !(offer.maxStack > 0)) return skip(s, 'this merchant does not sell them');
+    const before = this.ammoCount(s.refObjId), room = World.items().filter(i => i.refObjId === s.refObjId).reduce((n, i) => n + Math.max(0, offer.maxStack - (i.quantity ?? 1)), 0);
+    const quantity = Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, room + Math.max(0, World.freeBagSlots() - 1) * offer.maxStack);
+    if (quantity < 1) return skip(s, 'there is no bag space');
+    if (gp.progression?.gold === undefined || toBigInt(offer.price) * BigInt(quantity) > toBigInt(gp.progression.gold)) return skip(s, 'not enough gold');
+    if (Cmd.raw({ kind: 'shop-buy', tab: offer.tab, slot: offer.slot, quantity }, 'Town: refill ' + s.kind + 's')) t.pending = { ref: s.refObjId, before, quantity, at: now() };
   },
   buy() {
     const t = this.trip, gp = World.gp, shop = Restock.activeShop();
@@ -3335,6 +3363,7 @@ const Town = {
     } else if (t.phase === 'store') this.store();
     else if (t.phase === 'buy') this.buy();
     else if (t.phase === 'sell') this.sell();
+    else if (t.phase === 'ammo') this.ammo();
     else if (t.phase === 'repair') this.repair();
     else if (t.phase.startsWith('close-')) {
       if (now() - t.at > 15000) this.fail('NPC window did not close.');
@@ -5884,7 +5913,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.76", "title": "Patch notes open in the game, and updates say what they bring", "items": ["After an update, a window next to the bot panel shows what changed since the version you used before, so you no longer need Discord to see what was fixed.", "Click the version number at the top of the bot panel to read the notes again.", "When a newer version is out, the top of the bot panel says what it brings, for example \"Update 1.2.77 available: …\", so you can tell whether to install it now."], "note": "The bot keeps running while the window is open; close it with Got it."}, {"version": "1.2.75", "title": "The imbue is cast during other skills and no longer wasted", "items": ["A skill takes the weapon imbue when its cast ends, and the game accepts an imbue while another skill is being cast. The bot waited for the current skill to finish first, so a skill could land without the imbue while the imbue icon was ready.", "The imbue is now cast as soon as it runs out, also in the middle of another skill's cast.", "The Renew imbue when seconds left setting from 1.2.74 is removed: an imbue's cooldown is as long as the imbue itself, so it could never renew earlier, and it only made coatings recast early and waste MP."]}];
+const RELEASE_NOTES = [{"version": "1.2.77", "title": "Arrows and bolts are bought on town trips", "items": ["New **Arrows and bolts** section in Supplies. Tick Buy arrows and/or Buy bolts and set when to go to town and what to refill to.", "They are bought at the repair merchant, after selling pet loot and before repairing. The count includes the stack in your ammunition slot and spare stacks in your bag, and a trip also starts when it falls to your low-stock number.", "If the merchant does not sell the item, there is no bag space or not enough gold, that item is skipped with a notice and the rest of the trip goes on."], "note": "Equipping the bought ammunition is still up to you. Both options are off by default."}, {"version": "1.2.76", "title": "Patch notes open in the game, and updates say what they bring", "items": ["After an update, a window next to the bot panel shows what changed since the version you used before, so you no longer need Discord to see what was fixed.", "Click the version number at the top of the bot panel to read the notes again.", "When a newer version is out, the top of the bot panel says what it brings, for example \"Update 1.2.77 available: …\", so you can tell whether to install it now."], "note": "The bot keeps running while the window is open; close it with Got it."}, {"version": "1.2.75", "title": "The imbue is cast during other skills and no longer wasted", "items": ["A skill takes the weapon imbue when its cast ends, and the game accepts an imbue while another skill is being cast. The bot waited for the current skill to finish first, so a skill could land without the imbue while the imbue icon was ready.", "The imbue is now cast as soon as it runs out, also in the middle of another skill's cast.", "The Renew imbue when seconds left setting from 1.2.74 is removed: an imbue's cooldown is as long as the imbue itself, so it could never renew earlier, and it only made coatings recast early and waste MP."]}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -6119,7 +6148,7 @@ const Diagnostics = {
     if (Town.trip) {
       if (Town.trip.phase === 'buy') return Town.trip.supplies.map(s => `Refilling ${s.kind === 'hp' ? 'HP' : s.kind === 'mp' ? 'MP' : 'abnormal pills'}: ${Restock.count(s.refObjId)} / ${s.target}`).join(' · ');
       if (World.gp?.inventoryPending) return 'Town services: waiting for inventory transaction.';
-      const phases = { recall: 'stopping combat for recall', 'recall-wait': 'waiting for recall arrival', 'reverse-wait': 'waiting for reverse arrival', 'revive-arrival': 'waiting for town revival', store: 'depositing loot', sell: 'selling pet loot', repair: 'repairing equipment', reverse: 'opening reverse return' };
+      const phases = { recall: 'stopping combat for recall', 'recall-wait': 'waiting for recall arrival', 'reverse-wait': 'waiting for reverse arrival', 'revive-arrival': 'waiting for town revival', store: 'depositing loot', sell: 'selling pet loot', ammo: 'buying ammunition', repair: 'repairing equipment', reverse: 'opening reverse return' };
       if (/^(walk|open)-/.test(Town.trip.phase) && Town.message) return Town.message;
       return 'Town services: ' + (phases[Town.trip.phase] || 'travelling between or opening services') + '.';
     }
@@ -6764,6 +6793,15 @@ const UI = {
       services.append(this.text('Keep in pet (names)', () => town().keep, v => town().keep = v),
         el('p', 'Town buys X-Large potions using the Buy HP/MP switches, low-stock thresholds and refill counts above. Keep each low-stock threshold below its refill target. Potion selections apply to walking-route restock. Returns when the character bag has at most one free slot. Free at least two slots before hunting again; existing character items stay protected. Revival uses the saved town services and a reverse scroll, without using a return scroll in town. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. F8 cancels.', 'muted'));
       this.townNote = el('p', Town.status(), 'muted'); services.append(this.townNote); this.pane.append(services);
+      const ammo = () => C().ammo;
+      this.pane.append(this.group('Arrows and bolts',
+        this.check('Buy arrows on town trips', () => ammo().arrow.on, v => ammo().arrow.on = v),
+        this.number('Arrows: go to town at or below', () => ammo().arrow.low, v => ammo().arrow.low = v, 0, 9999),
+        this.number('Arrows: refill to', () => ammo().arrow.target, v => ammo().arrow.target = v, 1, 10000),
+        this.check('Buy bolts on town trips', () => ammo().bolt.on, v => ammo().bolt.on = v),
+        this.number('Bolts: go to town at or below', () => ammo().bolt.low, v => ammo().bolt.low = v, 0, 9999),
+        this.number('Bolts: refill to', () => ammo().bolt.target, v => ammo().bolt.target = v, 1, 10000),
+        el('p', 'Bought at the repair merchant after selling pet loot and before repairing. The count includes the stack in your ammunition slot and any spare stacks in the bag. A trip also starts when the count falls to the low-stock number. If the merchant does not sell it, there is no bag space or not enough gold, that item is skipped and the rest of the trip goes on. Equipping the bought ammunition is up to you.', 'muted')));
     } else if (this.current === 'Alchemy') {
       Alchemy.draw();
     } else if (this.current === 'Wardrobe') {
