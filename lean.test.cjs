@@ -1651,7 +1651,7 @@ test('party members and their pets do not make a monster another player\'s targe
   f.Hunt.running = true; f.Hunt.state = 'search'; f.World.hitByOthers.clear(); cast(5);
   assert.equal(f.Hunt.chooseTarget()?.gid, 30, 'the monster the party is fighting can be chosen');
 });
-test('the imbue is renewed before it runs out, ahead of skills and normal attacks', () => {
+test('the imbue is renewed as it runs out, ahead of skills and normal attacks', () => {
   const setup = (change = {}) => {
     const f = combatFixture();
     f.World.rebuildCatalog([{ id: 500, group: 50, level: 1, name: 'Slash', targetRequired: true, mp: 5, cooldownGroup: 0 },
@@ -1661,15 +1661,42 @@ test('the imbue is renewed before it runs out, ahead of skills and normal attack
     Object.assign(f.Settings.profile.macro, change); return f;
   };
   const first = f => f.commands.find(c => c.kind === 'skill')?.skillId;
-  let f = setup(); f.World.buffRemaining = () => 2500; f.Combat.fight(f.World.ents.get(30));
-  assert.equal(first(f), 501, '2.5 s left is inside the default 3 s margin, so the imbue goes first');
-  f = setup(); f.World.buffRemaining = () => 3500; f.Combat.fight(f.World.ents.get(30)); assert.equal(first(f), 500, 'plenty left: the attack skill goes first');
-  f = setup({ imbueRefreshS: 1 }); f.World.buffRemaining = () => 2500; f.Combat.fight(f.World.ents.get(30)); assert.equal(first(f), 500, 'the margin is a setting');
+  let f = setup(); f.World.buffRemaining = () => 300; f.Combat.fight(f.World.ents.get(30));
+  assert.equal(first(f), 501, 'about to run out, so the imbue goes first');
+  f = setup(); f.World.buffRemaining = () => 2500; f.Combat.fight(f.World.ents.get(30)); assert.equal(first(f), 500, 'time left (its cooldown is as long): the attack skill goes first');
   f = setup(); f.World.buffRemaining = () => -1; f.Combat.fight(f.World.ents.get(30)); assert.equal(first(f), 501, 'an expired imbue is cast first');
-  f = setup(); f.Settings.profile.macro.rotations.normal = []; f.World.buffRemaining = () => 1000; f.Combat.fight(f.World.ents.get(30));
+  f = setup(); f.Settings.profile.macro.rotations.normal = []; f.World.buffRemaining = () => 300; f.Combat.fight(f.World.ents.get(30));
   assert.deepEqual(f.commands.map(c => c.kind), ['skill'], 'with no rotation skill the imbue is renewed before a normal attack'); assert.equal(first(f), 501);
   f = setup(); f.Settings.profile.macro.rotations.normal = []; f.World.buffRemaining = () => 9000; f.Combat.fight(f.World.ents.get(30));
   assert.deepEqual(f.commands.map(c => c.kind), ['attack']);
+  // No answer yet: the game still shows the old timer, so the imbue is not sent again into its cooldown.
+  f = setup(); f.World.buffRemaining = () => 300; f.Combat.fight(f.World.ents.get(30));
+  const imbues = () => f.commands.filter(c => c.skillId === 501).length;
+  f.advance(500); f.World.gp = { ...f.World.gp }; f.Combat.fight(f.World.ents.get(30));
+  assert.equal(imbues(), 1, 'an unanswered imbue is not resent while the old one still shows time left');
+  assert.equal(f.commands.at(-1).skillId, 500, 'the rotation goes on meanwhile');
+  f.advance(1500); f.World.gp = { ...f.World.gp }; f.Combat.fight(f.World.ents.get(30));
+  assert.equal(imbues(), 2, 'it is retried once the wait is over');
+});
+test('an imbue that comes back during another skill\'s cast is used at once, before that skill releases', () => {
+  const setup = (rem, sinceCast = 1000) => {
+    const f = combatFixture();
+    f.World.rebuildCatalog([{ id: 500, group: 50, level: 1, name: 'Slash', targetRequired: true, mp: 5, cooldownGroup: 0 },
+      { id: 501, group: 51, level: 1, name: 'Imbue', targetRequired: false, mp: 5, cooldownGroup: 0 }]);
+    f.World.applyGameplay({ ...f.World.gp, skills: [500, 501], target: 30,
+      casts: [{ caster: 1, skill: 500, receivedAtMs: 100000 - sinceCast }] });
+    f.Settings.profile.macro.imbue = { id: 501, group: 51 }; f.Settings.profile.macro.imbueBeforeAttack = true;
+    f.Combat.lastCastAt = 100000 - sinceCast; f.World.buffRemaining = () => rem; return f;
+  };
+  let f = setup(-1); assert.equal(f.World.isCasting(), true); f.Combat.fight(f.World.ents.get(30));
+  assert.deepEqual(f.commands.map(c => c.skillId), [501], 'the imbue ran out mid-cast: it is cast without waiting');
+  f = setup(300); f.Combat.fight(f.World.ents.get(30)); assert.deepEqual(f.commands.map(c => c.skillId), [501], 'about to run out');
+  f = setup(2500); f.Combat.fight(f.World.ents.get(30));
+  assert.equal(f.commands.length, 0, 'with time left it waits: a cooldown the game has not shown yet would only earn refusals');
+  f = setup(-1, 100); f.Combat.fight(f.World.ents.get(30)); assert.equal(f.commands.length, 0, 'not on top of the skill just sent');
+  f = setup(-1); f.Settings.profile.macro.imbueBeforeAttack = false; f.Combat.fight(f.World.ents.get(30)); assert.equal(f.commands.length, 0);
+  f = setup(-1); f.Combat.fight(f.World.ents.get(30)); f.advance(500); f.World.gp = { ...f.World.gp }; f.Combat.fight(f.World.ents.get(30));
+  assert.equal(f.commands.length, 1, 'no other skill is sent while the cast is still running');
 });
 test('the Discord invite is real and the update notice shows once per version', () => {
   const f = fixture(), invite = /^https:\/\/discord\.gg\/[\w-]+$/;

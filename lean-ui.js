@@ -319,9 +319,7 @@ const UI = {
       BuffGear.draw(this.pane);
       const buffs = this.group('Buffs'); this.skillList(buffs, M().buffs, true);
       this.pane.append(buffs);
-      const imbue = this.group('Weapon imbue'); this.imbuePicker(imbue);
-      imbue.append(this.number('Renew imbue when seconds left', () => M().imbueRefreshS, v => M().imbueRefreshS = v, 1, 30));
-      this.pane.append(imbue);
+      const imbue = this.group('Weapon imbue'); this.imbuePicker(imbue); this.pane.append(imbue);
       }
     } else if (this.current === 'Loot') {
       const L = () => H().pickup;

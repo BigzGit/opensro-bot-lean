@@ -88,21 +88,32 @@ function stopAll() {
   if (active && World.inWorld() && !World.isDead()) Cmd.move(World.pose());
 }
 
-// The imbue has to still be running when the skill lands, not just when it is sent. A cast takes a second or more,
-// so it is renewed while `imbueRefreshS` seconds are left (3 by default), before the next skill or normal attack.
+// An imbue's cooldown is as long as the imbue itself, so it can be renewed only once it has (nearly) run out.
+// The 1.2 s wait after a send also holds while the old imbue still shows time left: until the answer arrives,
+// resending into the server's cooldown only earns refusals that pause the imbue.
+const IMBUE_RENEW_MS = 400;
 Combat.imbue = function () {
   const M = Settings.profile.macro;
   if (!M.imbue) return false;
   const id = this.resolve(M.imbue);
   if (!id || this.blocked(id) || !Cmd.canCast(id) || !this.mpOk(id, World.me())) return false;
-  const rem = World.buffRemaining(id);
-  if (rem > Math.max(400, (Number(M.imbueRefreshS) || 0) * 1000)) return false;
-  if (rem < 0 && now() - (this.buffCastAt.get('imbue') || 0) < 1200) return false;
+  if (World.buffRemaining(id) > IMBUE_RENEW_MS) return false;
+  if (now() - (this.buffCastAt.get('imbue') || 0) < 1200) return false;
   if (this.cast(id, 0)) {
     this.buffCastAt.set('imbue', now());
     return true;
   }
   return false;
+};
+// A skill with a cast time reads the imbue when it releases, not when it is pressed, and the game takes an imbue
+// in the middle of another skill's cast (an instant self skill runs beside it). The imbue usually comes back
+// mid-cast, so it is cast right away: waiting for the cast to end released that skill without it.
+const fightBetweenCasts = Combat.fight;
+Combat.fight = function (target) {
+  const M = Settings.profile.macro;
+  if (target && M.imbueBeforeAttack && World.isCasting() && World.gp.target === target.gid && !World.gp.targetPending &&
+    now() - this.lastCastAt >= (M.castGapMs ?? 250) && this.imbue()) return;
+  return fightBetweenCasts.call(this, target);
 };
 // Berserk fires when the gauge is full and the target's class is ticked in Combat options.
 Combat.berserk = function (cls) {

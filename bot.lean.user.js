@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.74
+// @version      1.2.75
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -21,7 +21,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.74';
+const VERSION = '1.2.75';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -192,7 +192,7 @@ const DEFAULT_PROFILE = {
   macro: {
     rotations: { normal: [], champion: [], giant: [], party: [], elite: [], unique: [] },
     fallbackToNormal: true, normalAttack: true, buffs: [], imbue: null, buffSwap: false, buffSets: [],
-    imbueBeforeAttack: true, imbueRefreshS: 3, berserkClasses: { normal: false, champion: false, giant: true, party: false, elite: false, unique: false, titan: false },
+    imbueBeforeAttack: true, berserkClasses: { normal: false, champion: false, giant: true, party: false, elite: false, unique: false, titan: false },
     minMpPct: 0, castGapMs: 350,
   },
   potion: {
@@ -3652,21 +3652,32 @@ function stopAll() {
   if (active && World.inWorld() && !World.isDead()) Cmd.move(World.pose());
 }
 
-// The imbue has to still be running when the skill lands, not just when it is sent. A cast takes a second or more,
-// so it is renewed while `imbueRefreshS` seconds are left (3 by default), before the next skill or normal attack.
+// An imbue's cooldown is as long as the imbue itself, so it can be renewed only once it has (nearly) run out.
+// The 1.2 s wait after a send also holds while the old imbue still shows time left: until the answer arrives,
+// resending into the server's cooldown only earns refusals that pause the imbue.
+const IMBUE_RENEW_MS = 400;
 Combat.imbue = function () {
   const M = Settings.profile.macro;
   if (!M.imbue) return false;
   const id = this.resolve(M.imbue);
   if (!id || this.blocked(id) || !Cmd.canCast(id) || !this.mpOk(id, World.me())) return false;
-  const rem = World.buffRemaining(id);
-  if (rem > Math.max(400, (Number(M.imbueRefreshS) || 0) * 1000)) return false;
-  if (rem < 0 && now() - (this.buffCastAt.get('imbue') || 0) < 1200) return false;
+  if (World.buffRemaining(id) > IMBUE_RENEW_MS) return false;
+  if (now() - (this.buffCastAt.get('imbue') || 0) < 1200) return false;
   if (this.cast(id, 0)) {
     this.buffCastAt.set('imbue', now());
     return true;
   }
   return false;
+};
+// A skill with a cast time reads the imbue when it releases, not when it is pressed, and the game takes an imbue
+// in the middle of another skill's cast (an instant self skill runs beside it). The imbue usually comes back
+// mid-cast, so it is cast right away: waiting for the cast to end released that skill without it.
+const fightBetweenCasts = Combat.fight;
+Combat.fight = function (target) {
+  const M = Settings.profile.macro;
+  if (target && M.imbueBeforeAttack && World.isCasting() && World.gp.target === target.gid && !World.gp.targetPending &&
+    now() - this.lastCastAt >= (M.castGapMs ?? 250) && this.imbue()) return;
+  return fightBetweenCasts.call(this, target);
 };
 // Berserk fires when the gauge is full and the target's class is ticked in Combat options.
 Combat.berserk = function (cls) {
@@ -6619,9 +6630,7 @@ const UI = {
       BuffGear.draw(this.pane);
       const buffs = this.group('Buffs'); this.skillList(buffs, M().buffs, true);
       this.pane.append(buffs);
-      const imbue = this.group('Weapon imbue'); this.imbuePicker(imbue);
-      imbue.append(this.number('Renew imbue when seconds left', () => M().imbueRefreshS, v => M().imbueRefreshS = v, 1, 30));
-      this.pane.append(imbue);
+      const imbue = this.group('Weapon imbue'); this.imbuePicker(imbue); this.pane.append(imbue);
       }
     } else if (this.current === 'Loot') {
       const L = () => H().pickup;
