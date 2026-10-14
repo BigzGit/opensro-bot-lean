@@ -134,6 +134,10 @@ When no monster is being attacked, the status line says why, counted from the mo
 
 When the pickup pet is ready but collects nothing, the status line says why, counted from the drops in view: for example "Drops in view: 4, ready to collect: 1. Not collected: 2: not wanted by your Loot settings (1 equipment, 1 other items); 1: too far from you (Pickup radius)." The part in brackets names the item kinds that are switched off, so you can see exactly what to switch on. The reasons are: type switched off or excluded or SoX only, too far from you, outside the hunting area, belongs to another player, too far from the pet, the pet is not ready, no room in the bag, and recently failed. **Finish current fight before character pickup** only affects a character collector; a pickup pet collects during fights whatever it is set to.
 
+## Waiting for a party resurrection
+
+With **Accept resurrection from party members** on, the bot waits 20 seconds after dying before it revives itself whenever a living party member is in view (seen in the last 15 seconds counts), so the member has time to resurrect it. Without a helper in view it revives after 5 seconds. The Activity log says which when the character dies, and an open resurrection offer is always answered first.
+
 ## A character that cannot move
 
 A character that should be walking (chasing, returning or picking up) but has not moved at all for 20 seconds, with nothing being damaged, is treated as stuck, for example inside a tree. The bot first steps back to the last position it was walking from, then walks to the nearest open ground (this needs the game's collision data). If both fail it stops hunting with an alert chime and a message, instead of standing there for minutes; it never uses a return scroll by itself. The Activity log and the bug report say whether the collision data thinks the character's tile is blocked. Switch it off or change the time under **Settings → Obstacles**.

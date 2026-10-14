@@ -56,14 +56,25 @@ const Party = {
   // "On death" setting did. A revive the player or the bot does itself never resumes anything.
   huntAtDeath: null, resumeHunt: null, consentAt: -Infinity, aliveSince: 0,
   noteDeath() { if (Hunt.running && !this.huntAtDeath) this.huntAtDeath = { at: now() }; },
-  // Another online party member who is up and in view might resurrect us.
+  // Another party member who is alive (status & 15 is their health in tenths, 0 when dead) and in view might resurrect us.
   helperNearby() {
     const social = World.gp?.social;
-    return !!social?.members?.some(m => m && m.name && m.name !== social.localName && (m.status & 15) === 0 &&
+    return !!social?.members?.some(m => m && m.name && m.name !== social.localName && (m.status & 15) !== 0 &&
       [...World.ents.values()].some(e => e.kind === 'player' && e.name === m.name && e.appearanceState?.[0] !== 2));
   },
-  // With Accept resurrection on and a helper at hand, wait longer before the bot revives itself.
-  reviveDelay() { return Settings.profile.party.acceptRes && this.helperNearby() ? 20000 : 5000; },
+  helperSeenAt: -Infinity,
+  // With Accept resurrection on and a helper at hand, wait longer before the bot revives itself. A helper seen in the
+  // last 15 seconds still counts, so a moment out of view or a death far from the party does not cut the wait short.
+  helping() {
+    if (this.helperNearby()) this.helperSeenAt = now();
+    return now() - this.helperSeenAt < 15000;
+  },
+  reviveDelay() { return Settings.profile.party.acceptRes && this.helping() ? 20000 : 5000; },
+  // One plain sentence for the log when the character dies.
+  waitNote() {
+    if (!Settings.profile.party.acceptRes) return 'reviving in 5 s (Accept resurrection from party members is off).';
+    return this.reviveDelay() === 20000 ? 'waiting 20 s for a party member to resurrect before reviving.' : 'no party member in view, reviving in 5 s.';
+  },
   // Never revive while an offer is open or an acceptance was just sent.
   resBusy() { return !!World.gp?.social?.resurrection || now() - this.consentAt < 4000; },
   resumeTick() {
@@ -98,6 +109,7 @@ const Party = {
   },
   tick() {
     this.acceptResurrection();
+    if (World.inWorld() && Settings.profile.party.acceptRes) this.helping();
     const c = Settings.profile.party;
     if (!World.inWorld() || (!c.autoAcceptMatching && !c.autoRecruit)) return;
     const gp = World.gp, matching = gp?.partyMatching, request = matching?.request, social = gp?.social;

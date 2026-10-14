@@ -1527,7 +1527,7 @@ test('reconnect never fights the player: logout, disconnect, exit or a manual lo
 function deathFixture(onDeath = 'stop') {
   const f = fixture(); f.Settings.profile.party.acceptRes = true; f.Settings.profile.hunt.onDeath = onDeath;
   f.World.ents.set(77, { gid: 77, kind: 'player', name: 'Healer', appearanceState: [0] });
-  const social = (extra = {}) => ({ localName: 'Me', self: 10, leader: 10, options: 1, members: [{ id: 10, name: 'Me', status: 0 }, { id: 11, name: 'Healer', status: 0 }], ...extra });
+  const social = (extra = {}) => ({ localName: 'Me', self: 10, leader: 10, options: 1, members: [{ id: 10, name: 'Me', status: 0 }, { id: 11, name: 'Healer', status: 10 }], ...extra });
   f.World.gp.social = social(); f.Hunt.start();
   const state = { dead: false }; f.World.isDead = () => state.dead;
   return { f, state, social, die() { state.dead = true; f.World.ents.get(1).appearanceState = [2, 0, 0]; f.Controller.tick(); }, offer() { f.World.gp.social = social({ resurrection: { gid: 77 } }); }, live() { state.dead = false; f.World.ents.get(1).appearanceState = [0, 0, 0]; } };
@@ -2938,6 +2938,26 @@ test('standing still is not trapped when it is explained: fighting, searching, r
 test('without collision data the report says unknown and the nearest-open step is skipped', () => {
   const { f, tick } = trapFixture(); f.Navigation.scene = null;
   assert.equal(f.Trap.blockedAt(f.World.pose()), 'unknown'); assert.equal(f.Trap.nearestOpen(f.World.pose()), null);
+});
+test('with Accept resurrection on, a living party member in view makes the bot wait 20 s before reviving itself', () => {
+  const f = fixture(), P = f.Settings.profile.party;
+  P.acceptRes = true; f.World.gp.social = { localName: 'Me', members: [{ id: 2, name: 'Healer', status: 10 }] };
+  assert.equal(f.Party.reviveDelay(), 5000, 'nobody in view');
+  f.World.ents.set(60, { gid: 60, kind: 'player', name: 'Healer', appearanceState: [0] });
+  assert.equal(f.Party.helperNearby(), true, 'alive and in view'); assert.equal(f.Party.reviveDelay(), 20000);
+  f.World.social = null; f.World.gp.social.members[0].status = 0; f.World.ents.get(60).appearanceState = [2];
+  assert.equal(f.Party.helperNearby(), false, 'a dead helper cannot resurrect'); assert.equal(f.Party.reviveDelay(), 20000, 'seen a moment ago still counts');
+  f.advance(16000); assert.equal(f.Party.reviveDelay(), 5000, 'not seen for a while');
+  f.World.gp.social.members[0].status = 10; f.World.ents.get(60).appearanceState = [0]; f.World.ents.delete(60); assert.equal(f.Party.reviveDelay(), 5000);
+  P.acceptRes = false; f.World.ents.set(60, { gid: 60, kind: 'player', name: 'Healer', appearanceState: [0] }); assert.equal(f.Party.reviveDelay(), 5000, 'the setting is off');
+});
+test('dying says in the log whether the bot waits for a party resurrection', () => {
+  let t = deathFixture('revive'); t.die();
+  assert.ok(t.f.Log.lines.some(l => /Died: waiting 20 s for a party member to resurrect before reviving\./.test(l.text)));
+  t = deathFixture('revive'); t.f.World.ents.delete(77); t.die();
+  assert.ok(t.f.Log.lines.some(l => /Died: no party member in view, reviving in 5 s\./.test(l.text)));
+  t = deathFixture('revive'); t.f.Settings.profile.party.acceptRes = false; t.die();
+  assert.ok(t.f.Log.lines.some(l => /Died: reviving in 5 s \(Accept resurrection from party members is off\)\./.test(l.text)));
 });
 test('a failed stone fusion uses the stone up and the run carries on; a refusal explains itself and stops', () => {
   const f = stoneFixture(); f.Alchemy.start(true); f.Controller.tick();
