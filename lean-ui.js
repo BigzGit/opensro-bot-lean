@@ -775,6 +775,10 @@ const UI = {
         this.check('Stop when HP potions run out', () => H().stopNoHpPotion, v => H().stopNoHpPotion = v),
         this.check('Stop when bag is full', () => H().stopInvFull, v => H().stopInvFull = v),
         this.number('Manual control pause (s)', () => H().manualPauseS, v => H().manualPauseS = v, 1, 30)));
+      this.pane.append(this.group('Obstacles',
+        this.check('Walk around obstacles when chasing a mob', () => H().detour.enabled, v => H().detour.enabled = v),
+        this.number('Stand still for (ms) before going around', () => H().detour.stallMs, v => H().detour.stallMs = v, 1000, 10000),
+        el('p', 'When the character stands still without hurting its target and a tree or wall is in the way (needs the collision data the game loads, outdoors only), it walks around it, then attacks as normal. After three detours on one mob it drops that mob for a minute.', 'muted')));
       this.stuckNote = el('p', AntiStuck.status(), 'muted');
       this.pane.append(this.group('Anti-stuck',
         this.check('Recover when hunting makes no progress', () => H().antiStuck.enabled, v => H().antiStuck.enabled = v),

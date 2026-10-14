@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Items, AutoMastery, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Items, AutoMastery, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -2809,6 +2809,32 @@ test('the stone fusion limit is optional: off by default, and a set limit stops 
   assert.ok(!/limit/.test(f.Alchemy.message), 'no limit means no stop at any count');
   const g = stoneFixture(); g.Alchemy.cfg().stoneLimit = 3; g.Alchemy.start(true); g.Alchemy.run.stoneAttempts = 3; g.advance(1500); g.Controller.tick();
   assert.equal(g.Alchemy.run, null); assert.match(g.Alchemy.message, /Stopped after 3 stone fusions \(your limit\)/);
+});
+function chaseFixture(wall = true) {
+  const f = combatFixture(), mob = f.World.ents.get(30);
+  mob.x = 300; mob.z = 100; f.World.gp.pose = { regionId: 1, x: 100, y: 0, z: 100 }; f.Hunt.running = true;
+  if (wall) f.Navigation.install(navProduct([{ x: 0, y: 0, z: 0, yaw: 0, mesh: { vertices: [200, 0, 0, 200, 0, 500], edges: [0, 1, 0, 65535, 3, 0] } }]));
+  return { f, mob, step: ms => { f.advance(ms); f.Hunt.engage(mob); } };
+}
+test('a chase stuck behind a wall walks around it, then hands back to the normal attack', () => {
+  const { f, mob, step } = chaseFixture();
+  step(0); assert.equal(f.Chase.detour, null, 'nothing yet');
+  step(3000);
+  assert.ok(f.Chase.detour, 'stood still against the wall: a detour starts'); assert.equal(f.commands.at(-1).kind, 'move');
+  assert.ok(f.commands.at(-1).destination.z > 100, 'it heads around the end of the wall, not at the mob');
+  const before = f.commands.length; step(1000);
+  assert.ok(f.commands.slice(before).every(c => c.kind === 'move'), 'no attack walks it back into the wall meanwhile');
+  f.World.gp.pose = { regionId: 1, x: 250, y: 0, z: 550 }; step(1000);
+  assert.equal(f.Chase.detour, null, 'the straight line is clear again'); assert.notEqual(f.commands.at(-1).kind, 'move', 'the normal attack carries on');
+  const h = chaseFixture(false); h.step(0); h.step(3000); assert.equal(h.f.Chase.detour, null, 'no wall, no detour: the usual timeout handles it');
+  const g = chaseFixture(); g.f.Settings.profile.hunt.detour.enabled = false; g.step(0); g.step(3000); assert.equal(g.f.Chase.detour, null, 'switched off');
+});
+test('a mob that three detours cannot reach is dropped for a minute', () => {
+  const { f, mob, step } = chaseFixture();
+  step(0);
+  for (let i = 0; i < 3; i++) { step(3000); assert.ok(f.Chase.detour); f.Chase.detour = null; }
+  step(3000);
+  assert.equal(f.Hunt.targetGid, 0); assert.ok(f.Hunt.banned(f.Hunt.ban, 30), 'banned');
 });
 test('a failed stone fusion uses the stone up and the run carries on; a refusal explains itself and stops', () => {
   const f = stoneFixture(); f.Alchemy.start(true); f.Controller.tick();

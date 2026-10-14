@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.90
+// @version      1.2.91
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.90';
+const VERSION = '1.2.91';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -224,6 +224,7 @@ const DEFAULT_PROFILE = {
       collector: 'character', petFullSound: true, soxSound: true, include: '', exclude: '', radius: 300, afterKillOnly: true, retries: 2 },
     sit: { enabled: true, hpBelow: 35, mpBelow: 20, resumeAt: 90 },
     antiStuck: { enabled: true, minutes: 3, maxRecoveries: 3 },
+    detour: { enabled: true, stallMs: 2500 },
     onDeath: 'stop', stopNoHpPotion: false, stopInvFull: false,
     playerAlert: { enabled: false, radius: 250, pause: false }, manualPauseS: 6,
   },
@@ -4088,6 +4089,65 @@ bus.on('hunt', running => {
 });
 
 
+// Detour around an obstacle while chasing a target. The game walks a character straight at its target, so a tree or
+// a wall in between stops it dead until the no-damage timeout drops the mob. When the character has stood still for
+// a few seconds without hurting the target, and the collision data says the straight line is blocked, it walks the
+// planned route until the straight line is clear again, then the normal attack takes over.
+const Chase = {
+  s: null, detour: null, message: '', detours: 0,
+  cfg() { return Settings.profile.hunt.detour; },
+  reset() { this.s = null; this.detour = null; },
+  // True when a detour moved the character this tick, so the normal engage must not send an attack that walks back.
+  drive(target) {
+    const c = this.cfg();
+    if (!c?.enabled || !Hunt.running) { this.reset(); return false; }
+    const t = now(), pose = World.pose(), gap = dist2D(pose, target);
+    if (!Number.isFinite(gap)) { this.reset(); return false; }
+    let s = this.s;
+    if (!s || s.gid !== target.gid) { s = this.s = { gid: target.gid, at: t, pose: { ...pose }, hp: World.hpOf(target.gid), detours: 0 }; this.detour = null; }
+    const moved = dist2D(s.pose, pose) > 3, hp = World.hpOf(target.gid);
+    if (hp !== s.hp) { s.hp = hp; s.at = t; this.detour = null; return false; }
+    if (World.gp.target !== target.gid || World.isCasting()) { s.at = t; s.pose = { ...pose }; return !!this.detour && this.step(target, t); }
+    if (this.detour) return this.step(target, t);
+    if (moved) { s.pose = { ...pose }; s.at = t; return false; }
+    if (t - s.at < c.stallMs || gap <= 15) return false;
+    // Stalled and not adjacent: act only when the planner says the straight line is blocked.
+    s.at = t;
+    const route = Navigation.plan(pose, target);
+    if (!route?.length || route.length === 1 && route[0] === target) return false;
+    if (s.detours >= 3) {
+      Hunt.ban.set(target.gid, t + 60000); Hunt.targetGid = 0;
+      this.message = `Gave up on ${target.name || target.gid}: three detours did not get there.`; Log.warn(this.message);
+      this.reset(); return true;
+    }
+    s.detours++; this.detours++;
+    this.detour = { at: t, sentAt: -Infinity, pose: { ...pose }, movedAt: t };
+    this.message = `Walking around an obstacle to reach ${target.name || target.gid}.`; Log.info(this.message);
+    return this.step(target, t);
+  },
+  step(target, t) {
+    const d = this.detour, pose = World.pose();
+    const end = why => { this.detour = null; this.s.at = t; this.s.pose = { ...pose }; if (why) Log.info('Detour ended: ' + why); return false; };
+    if (t - d.at > 15000) return end('took too long');
+    if (dist2D(d.pose, pose) > 3) { d.pose = { ...pose }; d.movedAt = t; } else if (t - d.movedAt > 3000) return end('not moving');
+    const route = Navigation.plan(pose, target);
+    if (!route?.length) return end('no route');
+    if (route.length === 1 && route[0] === target) return end('straight line is clear');
+    if (t - d.sentAt >= 900) {
+      const move = Navigation.next(d, target);
+      if (move.point && Cmd.move(move.point)) d.sentAt = t; else if (move.error) return end(move.error);
+    }
+    return true;
+  },
+};
+const engageBeforeChase = Hunt.engage;
+Hunt.engage = function (target) {
+  if (Chase.drive(target)) return;
+  return engageBeforeChase.apply(this, arguments);
+};
+bus.on('hunt', () => Chase.reset());
+
+
 // Always-on reconnect. When the connection to the game is lost (a server restart, a network drop) the bot waits for the
 // game's own retries, then re-enters the world with the login the page already holds, as the Enter button would.
 // It never types or stores credentials: if the login itself is gone it says so and waits for you. Hunting that was
@@ -6227,7 +6287,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.90", "title": "The bot is now MIT licensed", "items": ["Added an MIT licence under nixxane, so anyone can use, change and build on the bot, including inside other projects. The script header now says so."]}, {"version": "1.2.89", "title": "Items page: a rule for every item", "items": ["New Items page with every item in the game, filtered like sBot: item group, race, gender, type (armour part and material, accessory, weapon kind), degree, a search box, and \"Only items with a rule\".", "Per item: Pick (always or never), Store (warehouse on town trips), Sell (from the pet at the repair merchant), Keep, or Drop (thrown away from your bag or the pet while hunting, never picked up again). Click a cell, right-click a row, or use the buttons above the table to set every item shown (they ask for a second click).", "Rules come first; items without one follow the Loot switches and town settings as before. Your own bag is never sold, and potions and scrolls the town trip needs are never stored from it.", "With ten pages, the compact window now shows its page tabs in two rows."]}, {"version": "1.2.88", "title": "Small monsters first", "items": ["While fighting a stronger monster (a giant, say), the bot now switches to a weaker monster that is hitting you, kills it, and goes back. Before, it kept hitting the giant while the small ones wore you down.", "It only switches for monsters actually hitting you within chase distance, and only to a weaker class: two giants hitting you is no reason to switch.", "A target below 25% HP is finished first, and it never switches in the middle of a cast.", "The weakest attacker goes first (normal before champion, the most hurt one first), and it does not bounce back and forth while the giant keeps hitting.", "The status line says when it happens, for example \"switched to Mangyang (hitting you); back to Tiger Girl after\".", "The minimised icon could flash yellow for a moment after Stop all ended a walk back; it now shows the right colour straight away."], "note": "Always on; there is no switch for it."}, {"version": "1.2.87", "title": "Heal and buff your party", "items": ["New Party page. Tick \"Buff and heal party members\" and the bot supports the party with your own skills: a group heal when enough members are low, a heal on the lowest member, then party buffs on whoever does not have them yet. One cast at a time, after your own potions and before attacking.", "Pick party buffs from your learned skills that can target a party member. Each goes to everyone, or only to the names you list.", "It only casts on members you can see within the support range (30 m by default) and never walks to them. A buff that does not show up on a member after two tries waits a minute.", "The top of the page lists your party with HP and MP bars, distance, and which of your buffs each member has.", "The party options (auto-recruit, matching, resurrection) moved here from Settings."], "note": "Off by default. It runs while hunting; tick \"Also while hunting is stopped\" to support a party while you stand still."}, {"version": "1.2.86", "title": "Town page and new reasons to go to town", "items": ["New Town page. It shows the trip as a row of pictures (return scroll, warehouse, potions, repair, reverse) with what each step still needs, and everything that starts a trip in one place. The scroll town cycle settings and Arrows and bolts moved here from Supplies.", "Weapon is broken: a trip starts when your equipped weapon is at 0 durability, so it gets repaired instead of hitting with bare hands. On by default.", "Gear is worn: a trip starts when the most worn piece you are wearing drops below a percentage of its own maximum durability (15% by default). Off by default.", "No XP for a while: a trip starts after a number of minutes without experience (10 by default). Off by default.", "On a timer: a trip every so many minutes (60 by default). Off by default."], "note": "All of them need the town cycle on. The XP and timer clocks run only while hunting and restart with every trip."}, {"version": "1.2.85", "title": "The map shows the ground again", "items": ["The Map page showed only a black background in the game. The game now publishes its minimap tiles in a new compressed format inside a new kind of asset pack, which the bot could not read. It reads both now, so the minimap appears under the markers.", "The same fix lets the bot read any other game picture that moves to the new packs, so icons keep working after future game updates."]}, {"version": "1.2.84", "title": "Map page", "items": ["New Map page, first in the page list. It draws the game's own minimap around you with your hunting radius (yellow circle) and chase distance (dashed ring).", "It shows you (arrow), monsters (uniques and stronger classes stand out), party members (also ones out of sight, at the map's edge), other players with their names when zoomed in, NPCs and pets.", "Click the map to mark a point, then \"Make this the hunting spot\" to hunt there. Drag to look around, + and − (or the mouse wheel) to zoom, \"Follow me\" to centre on you again.", "Hunt radius and chase distance can be changed right under the map."], "note": "Dungeons have no map yet. In the wide window the map uses the full page width."}, {"version": "1.2.83", "title": "Wide window", "items": ["New Wide button at the top of the panel. It opens a wide window: a status strip with HP, MP and EXP bars and what the bot is doing, the pages as a list with the game's own icons on the left, session numbers and supplies always on the right, and the activity log along the bottom.", "The pages are the same as before, set out in two columns, so nothing has moved inside them. Compact goes back to the usual window, which stays the default.", "The choice is remembered. Screens narrower than 900 pixels always get the compact window."], "note": "This is step 1 of the new layout shown on the site's concept page. The map, party and town pages come later."}];
+const RELEASE_NOTES = [{"version": "1.2.91", "title": "Walks around trees and walls while chasing", "items": ["A character that stood still against a tree or wall while chasing a mob used to stay there until the no-damage timeout dropped the mob. After 2.5 seconds without moving or hurting its target, the bot now checks the game's collision data and, if the straight line is blocked, walks around the obstacle, then attacks as normal.", "After three detours on the same mob it drops that mob for a minute and picks another.", "Settings → Obstacles switches it off or changes the wait. It needs the game's collision data and works outdoors only."]}, {"version": "1.2.90", "title": "The bot is now MIT licensed", "items": ["Added an MIT licence under nixxane, so anyone can use, change and build on the bot, including inside other projects. The script header now says so."]}, {"version": "1.2.89", "title": "Items page: a rule for every item", "items": ["New Items page with every item in the game, filtered like sBot: item group, race, gender, type (armour part and material, accessory, weapon kind), degree, a search box, and \"Only items with a rule\".", "Per item: Pick (always or never), Store (warehouse on town trips), Sell (from the pet at the repair merchant), Keep, or Drop (thrown away from your bag or the pet while hunting, never picked up again). Click a cell, right-click a row, or use the buttons above the table to set every item shown (they ask for a second click).", "Rules come first; items without one follow the Loot switches and town settings as before. Your own bag is never sold, and potions and scrolls the town trip needs are never stored from it.", "With ten pages, the compact window now shows its page tabs in two rows."]}, {"version": "1.2.88", "title": "Small monsters first", "items": ["While fighting a stronger monster (a giant, say), the bot now switches to a weaker monster that is hitting you, kills it, and goes back. Before, it kept hitting the giant while the small ones wore you down.", "It only switches for monsters actually hitting you within chase distance, and only to a weaker class: two giants hitting you is no reason to switch.", "A target below 25% HP is finished first, and it never switches in the middle of a cast.", "The weakest attacker goes first (normal before champion, the most hurt one first), and it does not bounce back and forth while the giant keeps hitting.", "The status line says when it happens, for example \"switched to Mangyang (hitting you); back to Tiger Girl after\".", "The minimised icon could flash yellow for a moment after Stop all ended a walk back; it now shows the right colour straight away."], "note": "Always on; there is no switch for it."}, {"version": "1.2.87", "title": "Heal and buff your party", "items": ["New Party page. Tick \"Buff and heal party members\" and the bot supports the party with your own skills: a group heal when enough members are low, a heal on the lowest member, then party buffs on whoever does not have them yet. One cast at a time, after your own potions and before attacking.", "Pick party buffs from your learned skills that can target a party member. Each goes to everyone, or only to the names you list.", "It only casts on members you can see within the support range (30 m by default) and never walks to them. A buff that does not show up on a member after two tries waits a minute.", "The top of the page lists your party with HP and MP bars, distance, and which of your buffs each member has.", "The party options (auto-recruit, matching, resurrection) moved here from Settings."], "note": "Off by default. It runs while hunting; tick \"Also while hunting is stopped\" to support a party while you stand still."}, {"version": "1.2.86", "title": "Town page and new reasons to go to town", "items": ["New Town page. It shows the trip as a row of pictures (return scroll, warehouse, potions, repair, reverse) with what each step still needs, and everything that starts a trip in one place. The scroll town cycle settings and Arrows and bolts moved here from Supplies.", "Weapon is broken: a trip starts when your equipped weapon is at 0 durability, so it gets repaired instead of hitting with bare hands. On by default.", "Gear is worn: a trip starts when the most worn piece you are wearing drops below a percentage of its own maximum durability (15% by default). Off by default.", "No XP for a while: a trip starts after a number of minutes without experience (10 by default). Off by default.", "On a timer: a trip every so many minutes (60 by default). Off by default."], "note": "All of them need the town cycle on. The XP and timer clocks run only while hunting and restart with every trip."}, {"version": "1.2.85", "title": "The map shows the ground again", "items": ["The Map page showed only a black background in the game. The game now publishes its minimap tiles in a new compressed format inside a new kind of asset pack, which the bot could not read. It reads both now, so the minimap appears under the markers.", "The same fix lets the bot read any other game picture that moves to the new packs, so icons keep working after future game updates."]}, {"version": "1.2.84", "title": "Map page", "items": ["New Map page, first in the page list. It draws the game's own minimap around you with your hunting radius (yellow circle) and chase distance (dashed ring).", "It shows you (arrow), monsters (uniques and stronger classes stand out), party members (also ones out of sight, at the map's edge), other players with their names when zoomed in, NPCs and pets.", "Click the map to mark a point, then \"Make this the hunting spot\" to hunt there. Drag to look around, + and − (or the mouse wheel) to zoom, \"Follow me\" to centre on you again.", "Hunt radius and chase distance can be changed right under the map."], "note": "Dungeons have no map yet. In the wide window the map uses the full page width."}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -7842,6 +7902,10 @@ const UI = {
         this.check('Stop when HP potions run out', () => H().stopNoHpPotion, v => H().stopNoHpPotion = v),
         this.check('Stop when bag is full', () => H().stopInvFull, v => H().stopInvFull = v),
         this.number('Manual control pause (s)', () => H().manualPauseS, v => H().manualPauseS = v, 1, 30)));
+      this.pane.append(this.group('Obstacles',
+        this.check('Walk around obstacles when chasing a mob', () => H().detour.enabled, v => H().detour.enabled = v),
+        this.number('Stand still for (ms) before going around', () => H().detour.stallMs, v => H().detour.stallMs = v, 1000, 10000),
+        el('p', 'When the character stands still without hurting its target and a tree or wall is in the way (needs the collision data the game loads, outdoors only), it walks around it, then attacks as normal. After three detours on one mob it drops that mob for a minute.', 'muted')));
       this.stuckNote = el('p', AntiStuck.status(), 'muted');
       this.pane.append(this.group('Anti-stuck',
         this.check('Recover when hunting makes no progress', () => H().antiStuck.enabled, v => H().antiStuck.enabled = v),
