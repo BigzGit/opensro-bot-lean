@@ -182,3 +182,7 @@ The main panel's status line and Send bug report now name what the walk is waiti
 Read the return status on the main panel. Use **Settings → Send bug report**; the diagnostics it previews include recent return states, even after toggling the bot. Reloading clears that history.
 
 After an update, reload the game and check the version shown in the panel.
+
+## License
+
+MIT, copyright nixxane. See [LICENSE](LICENSE). You may use, change and share it, including inside other projects, as long as the copyright notice stays.
