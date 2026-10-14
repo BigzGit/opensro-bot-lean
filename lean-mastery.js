@@ -34,6 +34,8 @@ const AutoMastery = {
     const add = e => { const g = e?.group ?? e?.id; if (Number.isInteger(g) && !seen.has(g)) { seen.add(g); groups.push(g); } };
     for (const key of CLASS_KEYS) (m.rotations[key] || []).forEach(add);
     (m.buffs || []).forEach(add); add(m.imbue);
+    // The whole learned skill line: every other skill group the character already has, after the ones it uses.
+    if (this.cfg().scope === 'all') for (const g of World.groups.keys()) if (!seen.has(g) && this.groupLevel(g)) { seen.add(g); groups.push(g); }
     return groups;
   },
   skillReason(row, progression) {
@@ -70,7 +72,7 @@ const AutoMastery = {
     if (!this.cfg().skills) return false;
     if (!World.groups.size) { skipped.push('skill catalogue not loaded'); return false; }
     const groups = this.wanted();
-    if (!groups.length) { skipped.push('no skills in your attack rotations, buffs or imbue yet'); return false; }
+    if (!groups.length) { skipped.push(this.cfg().scope === 'all' ? 'no learned skills found' : 'no skills in your attack rotations, buffs or imbue yet'); return false; }
     const quiet = [], name = group => World.skillName(World.bestOfGroup(group, (World.groups.get(group) || [])[0]?.id) || (World.groups.get(group) || [])[0]?.id) || 'Skill ' + group;
     const summary = () => { for (const line of quiet.slice(0, 6)) skipped.push(line); if (quiet.length > 6) skipped.push('and ' + (quiet.length - 6) + ' more skills'); };
     for (const group of groups) {
@@ -114,7 +116,7 @@ const AutoMastery = {
     // The order setting only matters when both switches are on, so say when the skills one is off.
     if (!c.skills) skipped.push('skills are not raised: "Upgrade my rotation and buff skills automatically" is off');
     this.message = c.enabled && !c.ids.length && !c.skills ? 'Choose which masteries to raise.'
-      : 'Nothing to raise (' + (skipped.join('; ') || 'selected masteries not found') + ').';
+      : 'Nothing to raise (' + (skipped.slice(0, 8).join('; ') + (skipped.length > 8 ? '; and ' + (skipped.length - 8) + ' more' : '') || 'selected masteries not found') + ').';
   },
   status() { return this.message; },
   draw(parent) {
@@ -130,6 +132,7 @@ const AutoMastery = {
     }
     box.append(UI.number('Keep this many levels below my level', () => this.cfg().gap, v => this.cfg().gap = v, 0, 50),
       UI.check('Upgrade my rotation and buff skills automatically', () => this.cfg().skills, v => { this.cfg().skills = v; this.pending = null; this.blocked.clear(); }),
+      UI.select('Skills to upgrade', [['rotation', 'Only skills in my rotations, buffs and imbue'], ['all', 'All skills I have learned']], () => this.cfg().scope === 'all' ? 'all' : 'rotation', v => { this.cfg().scope = v; this.pending = null; this.blocked.clear(); }),
       UI.number('Keep this many skill points unspent', () => this.cfg().reserve, v => this.cfg().reserve = v, 0, 100000000),
       UI.select('Order when both are ticked', [['masteries', 'Masteries first'], ['skills', 'Skills first'], ['alternate', 'Alternate']], () => this.cfg().order, v => this.cfg().order = v));
     this.note = el('p', this.message, 'muted');

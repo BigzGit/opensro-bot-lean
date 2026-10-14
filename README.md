@@ -136,7 +136,7 @@ When the pickup pet is ready but collects nothing, the status line says why, cou
 
 ## Auto skill upgrades: which skills
 
-**Upgrade my rotation and buff skills automatically** (Settings → Auto mastery and skills) raises the next level of skills you have **already learned** and that are in your attack rotations, buffs or weapon imbue on the Combat tab. A skill that is in none of those lists is never raised, and new skills are never learned. The status line under the switches names each skill it is not raising and why (not learned yet, already at its highest level, mastery or strength too low, prerequisite missing, not enough skill points). The order dropdown only matters when both the mastery and the skill switches are ticked.
+**Upgrade my rotation and buff skills automatically** (Settings → Auto mastery and skills) raises the next level of skills you have **already learned** and that are in your attack rotations, buffs or weapon imbue on the Combat tab. A skill that is in none of those lists is never raised, and new skills are never learned. The status line under the switches names each skill it is not raising and why (not learned yet, already at its highest level, mastery or strength too low, prerequisite missing, not enough skill points). **Skills to upgrade** can be switched from the default (only those lists) to **All skills I have learned**: the skills you use are raised first, then every other skill line you already have, still only the next level of skills you already know. The order dropdown only matters when both the mastery and the skill switches are ticked.
 
 ## Waiting for a party resurrection
 

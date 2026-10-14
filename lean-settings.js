@@ -4,7 +4,7 @@ const CLASS_KEYS = ['normal', 'champion', 'giant', 'party', 'elite', 'unique'];
 const DEFAULT_PROFILE = {
   items: { rules: {} },
   alchemy: { target: 3, limit: 20, elixir: 0, powder: false, stones: { luck: 0, steady: 0, immortal: 0 }, stoneLimit: 0 },
-  mastery: { enabled: false, ids: [], gap: 0, skills: false, reserve: 0, order: 'masteries' },
+  mastery: { enabled: false, ids: [], gap: 0, skills: false, scope: 'rotation', reserve: 0, order: 'masteries' },
   party: { autoAcceptMatching: false, autoRecruit: false, autoRes: false, acceptRes: false, resRadius: 300, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true,
     support: { enabled: false, whileStopped: false, range: 30, heal: { id: 0, group: 0, pct: 60, self: false }, group: { id: 0, group: 0, pct: 60, count: 2 }, buffs: [] } },
   wardrobe: { on: true, phantom: true, realAnim: true, hideAvatars: false,

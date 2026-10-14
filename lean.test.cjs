@@ -1297,6 +1297,18 @@ test('the auto mastery status says why skills are not raised: switch off, nothin
   f = skillFixture({}, []); f.Controller.tick(); assert.match(f.AutoMastery.status(), /Skill 100: not learned yet|: not learned yet/);
   f = skillFixture({}, [1001, 1002, 1003]); f.Controller.tick(); assert.match(f.AutoMastery.status(), /already at its highest level \(3\)/);
 });
+test('Skills to upgrade can cover every learned skill line, with the ones in use first', () => {
+  const learned = [1001, 2001], extra = f => f.World.rebuildCatalog([...f.World.catalog.values(), { id: 2002, group: 200, level: 2, trainable: true, spCost: 10, masteries: [], prerequisites: [], reqStr: 0, reqInt: 0 }]);
+  let f = skillFixture({}, learned); extra(f); f.Settings.profile.macro.rotations.normal = [];
+  f.Controller.tick(); assert.deepEqual(skillTrains(f), [], 'rotation only: a skill in no list is left alone');
+  f = skillFixture({}, [2001]); extra(f); f.Settings.profile.macro.rotations.normal = []; f.Settings.profile.mastery.scope = 'all';
+  f.Controller.tick(); assert.deepEqual(skillTrains(f), [2002], 'all learned skills: a line that is in no rotation is raised');
+  f = skillFixture({}, learned); extra(f); f.Settings.profile.mastery.scope = 'all';
+  f.Controller.tick(); assert.deepEqual(skillTrains(f), [1002], 'the skill in the rotation goes first');
+  f.World.applyGameplay({ ...f.World.gp, skills: [1001, 1002, 2001], progression: { ...f.World.gp.progression, skillPoints: 500 } }); f.advance(3000); f.Controller.tick(); f.advance(3000); f.Controller.tick();
+  assert.ok(skillTrains(f).includes(1003) || skillTrains(f).includes(2002), 'then the rest');
+  assert.equal(skillFixture().Settings.profile.mastery.scope, 'rotation', 'off by default');
+});
 test('auto skill upper learns the next level of skills in the rotation, one confirmed level at a time', () => {
   const f = skillFixture();
   f.Controller.tick(); assert.deepEqual(skillTrains(f), [1002]);
