@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, ItemRules, Items, AutoMastery, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, ItemRules, Items, AutoMastery, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -2894,6 +2894,50 @@ test('a mob that three detours cannot reach is dropped for a minute', () => {
   for (let i = 0; i < 3; i++) { step(3000); assert.ok(f.Chase.detour); f.Chase.detour = null; }
   step(3000);
   assert.equal(f.Hunt.targetGid, 0); assert.ok(f.Hunt.banned(f.Hunt.ban, 30), 'banned');
+});
+function trapFixture(blockedTile = true) {
+  const f = combatFixture(); f.Hunt.running = true; f.Hunt.state = 'return';
+  const blocked = new Uint8Array(9216); if (blockedTile) blocked[5 * 96 + 5] = 1;
+  f.Navigation.install(navProduct([], blocked)); f.World.gp.pose = { regionId: 1, x: 110, y: 0, z: 110 };
+  const at = (x, z) => { f.World.gp.pose = { regionId: 1, x, y: 0, z }; };
+  const tick = ms => { f.advance(ms); return f.Trap.tick(); };
+  // The character walked in from the west: those spots are its breadcrumbs.
+  for (const x of [40, 60, 80, 100]) { at(x, 110); tick(1100); }
+  at(110, 110); tick(1100);
+  return { f, at, tick };
+}
+test('a character that cannot move steps back, then walks to open ground, then stops hunting with an alert', () => {
+  const { f, tick } = trapFixture();
+  assert.equal(f.Trap.blockedAt(f.World.pose()), 'yes');
+  for (let i = 0; i < 3; i++) assert.equal(tick(5000), false, 'only 20 s of standing still counts');
+  assert.equal(tick(4000), false); assert.equal(tick(2000), true); assert.equal(f.Trap.stage, 1);
+  const first = f.commands.at(-1); assert.equal(first.kind, 'move'); assert.ok(first.destination.x < 90, 'back to where it just was');
+  assert.equal(f.Trap.tile, 'yes'); assert.ok(f.Log.lines.some(l => /Collision data says its tile is blocked: yes/.test(l.text)));
+  assert.equal(tick(3000), true); assert.equal(f.Trap.stage, 1); tick(3500);
+  assert.equal(f.Trap.stage, 2);
+  tick(100); const second = f.commands.at(-1); assert.equal(second.kind, 'move');
+  assert.equal(f.Trap.blockedAt(second.destination), 'no', 'the nearest open ground'); assert.ok(Math.hypot(second.destination.x - 110, second.destination.z - 110) < 40);
+  tick(6500); assert.equal(f.Trap.stage, 3);
+  tick(100); assert.equal(f.Hunt.running, false); assert.match(f.Log.lines.at(-1).text + f.Trap.message, /Trapped/);
+});
+test('a character that gets free after the step back carries on and drops the mob that held it', () => {
+  const { f, at, tick } = trapFixture();
+  f.Hunt.targetGid = 30; for (let i = 0; i < 4; i++) tick(5000); tick(2000);
+  assert.equal(f.Trap.stage, 1); at(60, 110); tick(1000);
+  assert.equal(f.Trap.stage, 0); assert.equal(f.Hunt.running, true); assert.equal(f.Hunt.targetGid, 0); assert.ok(f.Hunt.banned(f.Hunt.ban, 30));
+});
+test('standing still is not trapped when it is explained: fighting, searching, resting, casting or a town trip', () => {
+  for (const mutate of [f => { f.Hunt.state = 'search'; }, f => { f.World.isSitting = () => true; }, f => { f.World.isCasting = () => true; },
+    f => { f.Town.trip = { phase: 'recall' }; }, f => { f.Hunt.targetGid = 30; f.World.hitByUs.set(30, f.World.simNow()); },
+    f => { f.Settings.profile.hunt.trap.enabled = false; }]) {
+    const { f, tick } = trapFixture(false); mutate(f);
+    for (let i = 0; i < 8; i++) { tick(5000); if (f.Hunt.targetGid) f.World.hitByUs.set(30, f.World.simNow()); }
+    assert.equal(f.Trap.stage, 0); assert.equal(f.Hunt.running, true);
+  }
+});
+test('without collision data the report says unknown and the nearest-open step is skipped', () => {
+  const { f, tick } = trapFixture(); f.Navigation.scene = null;
+  assert.equal(f.Trap.blockedAt(f.World.pose()), 'unknown'); assert.equal(f.Trap.nearestOpen(f.World.pose()), null);
 });
 test('a failed stone fusion uses the stone up and the run carries on; a refusal explains itself and stops', () => {
   const f = stoneFixture(); f.Alchemy.start(true); f.Controller.tick();

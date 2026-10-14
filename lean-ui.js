@@ -784,7 +784,9 @@ const UI = {
       this.pane.append(this.group('Obstacles',
         this.check('Walk around obstacles when chasing a mob', () => H().detour.enabled, v => H().detour.enabled = v),
         this.number('Stand still for (ms) before going around', () => H().detour.stallMs, v => H().detour.stallMs = v, 1000, 10000),
-        el('p', 'When the character stands still without hurting its target and a tree or wall is in the way (needs the collision data the game loads, outdoors only), it walks around it, then attacks as normal. After three detours on one mob it drops that mob for a minute.', 'muted')));
+        this.check('Detect a character that cannot move', () => H().trap.enabled, v => H().trap.enabled = v),
+        this.number('Cannot move for (seconds)', () => H().trap.seconds, v => H().trap.seconds = v, 10, 120),
+        el('p', 'When the character stands still without hurting its target and a tree or wall is in the way (needs the collision data the game loads, outdoors only), it walks around it, then attacks as normal. After three detours on one mob it drops that mob for a minute. A character that should be walking but has not moved at all for the set time (for example stuck inside a tree) first steps back to where it just was, then walks to the nearest open ground; if that fails, hunting stops with an alert so it does not stand there for minutes.', 'muted')));
       this.stuckNote = el('p', AntiStuck.status(), 'muted');
       this.pane.append(this.group('Anti-stuck',
         this.check('Recover when hunting makes no progress', () => H().antiStuck.enabled, v => H().antiStuck.enabled = v),

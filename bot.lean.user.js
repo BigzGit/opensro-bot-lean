@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.94
+// @version      1.2.95
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.94';
+const VERSION = '1.2.95';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -225,6 +225,7 @@ const DEFAULT_PROFILE = {
     sit: { enabled: true, hpBelow: 35, mpBelow: 20, resumeAt: 90 },
     antiStuck: { enabled: true, minutes: 3, maxRecoveries: 3 },
     detour: { enabled: true, stallMs: 2500 },
+    trap: { enabled: true, seconds: 20 },
     onDeath: 'stop', stopNoHpPotion: false, stopInvFull: false,
     playerAlert: { enabled: false, radius: 250, pause: false }, manualPauseS: 6,
   },
@@ -4164,6 +4165,112 @@ Hunt.engage = function (target) {
 bus.on('hunt', () => Chase.reset());
 
 
+// A character that cannot move: it should be walking (chasing, returning, picking up) but its position has not changed
+// and nothing is being damaged. Seen in the live game as a character stuck inside a tree that even a manual click
+// could not free. The route planner cannot help from inside an obstacle, so this tries two cheap things once each,
+// a step back to where the character just was and a walk to the nearest open tile, and then stops hunting loudly
+// instead of standing there for minutes. It also records what the collision data says about the character's tile.
+const Trap = {
+  crumbs: [], idle: null, stage: 0, at: 0, from: null, tile: 'unknown', message: '', lastBreadcrumbAt: 0,
+  cfg() { return Settings.profile.hunt.trap; },
+  // Only intents that need the character to walk: not searching, resting, casting or standing in a fight it is winning.
+  walking() { return ['fight', 'return', 'loot'].includes(Hunt.state) && !World.isCasting() && !World.isSitting(); },
+  busy() { return !!(Town.trip || WalkBack.active || Resurrect.trip || Restock.trip || Alchemy.run || World.gp?.storage || Restock.activeShop()); },
+  reset(clearCrumbs = false) { this.idle = null; this.stage = 0; this.from = null; if (clearCrumbs) this.crumbs = []; },
+  // What the collision data says about a position's tile: 'yes' (blocked), 'no' (open) or 'unknown' (no data).
+  blockedAt(pose) {
+    if (!Navigation.scene || (pose.regionId & DUNGEON)) return 'unknown';
+    const local = Navigation.local(pose);
+    return local ? (Navigation.open(local.x, local.z) ? 'no' : 'yes') : 'unknown';
+  },
+  // The nearest open tile centre within 240 units, as a pose, or null.
+  nearestOpen(pose) {
+    const start = Navigation.scene && Navigation.local(pose);
+    if (!start) return null;
+    const tx = Math.floor(start.x / 20), tz = Math.floor(start.z / 20);
+    let best = null, bestDistance = Infinity;
+    for (let r = 1; r <= 12; r++) {
+      for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) {
+        if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+        const x = (tx + dx) * 20 + 10, z = (tz + dz) * 20 + 10;
+        if (!Navigation.open(x, z)) continue;
+        const d = Math.hypot(x - start.x, z - start.z);
+        if (d < bestDistance) { best = { x, z }; bestDistance = d; }
+      }
+      if (best) break;
+    }
+    return best && Navigation.pose(best, pose.y);
+  },
+  // The newest remembered position that is far enough behind to be clear of whatever holds the character.
+  stepBack(pose) {
+    for (let i = this.crumbs.length - 1; i >= 0; i--) {
+      const d = dist2D(pose, this.crumbs[i]);
+      if (d >= 30 && d <= 600) return this.crumbs[i];
+    }
+    return null;
+  },
+  status() {
+    return this.stage ? this.message : '';
+  },
+  // True while an escape attempt owns movement this tick.
+  tick() {
+    const c = this.cfg(), t = now();
+    if (!c?.enabled || !Hunt.running || !World.inWorld() || World.isDead() || this.busy()) { this.reset(); return false; }
+    const pose = World.pose();
+    if (!pose) return false;
+    if (this.stage === 0 && (!this.crumbs.length || dist2D(this.crumbs.at(-1), pose) >= 8) && t - this.lastBreadcrumbAt >= 1000) {
+      this.crumbs.push({ ...pose }); this.lastBreadcrumbAt = t;
+      if (this.crumbs.length > 16) this.crumbs.shift();
+    }
+    const gid = Hunt.targetGid, sim = World.simNow() ?? 0;
+    const damaging = gid && sim - (World.hitByUs.get(gid) ?? -Infinity) < 8000;
+    if (this.stage) {
+      // An attempt is running. Moving away from where it got stuck, or hitting something, means it worked.
+      if (dist2D(this.from, pose) > 15 || damaging) { this.free(); return false; }
+    } else {
+      // Not stuck unless it should be walking, is not hurting its target and has not moved for the set time.
+      if (!this.walking() || damaging || !this.idle || dist2D(this.idle.pose, pose) > 3) { this.idle = { pose: { ...pose }, since: t }; return false; }
+      if (t - this.idle.since < c.seconds * 1000) return false;
+      this.tile = this.blockedAt(pose); this.from = { ...pose }; this.stage = 1; this.at = 0;
+      Log.warn(`Character cannot move: no change for ${c.seconds} s. Collision data says its tile is blocked: ${this.tile}.`);
+    }
+    if (this.stage === 1) {
+      if (!this.at) {
+        this.at = t; const crumb = this.stepBack(pose);
+        this.message = crumb ? 'Cannot move: stepping back to where it just was.' : 'Cannot move: no earlier position to step back to.';
+        if (crumb) { Cmd.move(crumb); Log.info(this.message); }
+      } else if (t - this.at >= 6000) { this.stage = 2; this.at = 0; }
+      return true;
+    }
+    if (this.stage === 2) {
+      if (!this.at) {
+        this.at = t; const open = this.nearestOpen(pose);
+        this.message = open ? 'Cannot move: walking to the nearest open ground.' : 'Cannot move: no open ground found nearby.';
+        if (open) { Cmd.move(open); Log.info(this.message); }
+      } else if (t - this.at >= 6000) { this.stage = 3; }
+      return true;
+    }
+    this.message = `Trapped: the character could not move for ${c.seconds} s and two escape attempts failed. Free it by hand (return scroll), then start again.`;
+    Log.warn(this.message);
+    Sound.play('pet-full');
+    Hunt.stop('character cannot move (trapped)');
+    this.reset(true);
+    return true;
+  },
+  free() {
+    Log.info('Free again after the escape attempt.');
+    if (Hunt.targetGid) { Hunt.ban.set(Hunt.targetGid, now() + 60000); Hunt.targetGid = 0; }
+    this.reset();
+  },
+};
+const huntTickBeforeTrap = Hunt.tick;
+Hunt.tick = function () {
+  if (Trap.tick()) return;
+  return huntTickBeforeTrap.apply(this, arguments);
+};
+bus.on('hunt', () => Trap.reset(true));
+
+
 // Always-on reconnect. When the connection to the game is lost (a server restart, a network drop) the bot waits for the
 // game's own retries, then re-enters the world with the login the page already holds, as the Enter button would.
 // It never types or stores credentials: if the login itself is gone it says so and waits for you. Hunting that was
@@ -6303,7 +6410,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.94", "title": "Says why it went to town", "items": ["Every town trip now writes its reason to the Activity log, for example Town trip started: potions running low, and the town status line shows it during the trip. Reasons are bag nearly full, pet nearly full, potions or ammunition low, weapon broken, gear worn, no XP for a while, every set number of minutes, returning after a death, or started by you.", "The Activity log is in the Wide window: press Wide in the title bar.", "The bug report shows the reason of the current or last trip and how long ago it started, without item names."]}, {"version": "1.2.93", "title": "Find the exact item that drops, and see its number in the pickup line", "items": ["A Pick always rule on the Items page takes an item whatever the Loot switches say, so you never need to switch on a whole kind like potions to get one item. The rule is for that exact item, and each size or degree is its own item.", "New on the Items page: Only items on the ground now, which lists just the items in view, so you can set the rule on exactly what is dropping.", "The pickup status line now shows the item numbers behind each skipped kind, for example 12 potions #19 #20, to compare with the number shown when you point at an item in the Items table."]}, {"version": "1.2.92", "title": "The pet and the character can each pick up their own items", "items": ["Loot has a new section, Who picks up what: every kind of drop is set to Leave on the ground, Pickup pet or Character. The pet can collect elixirs and equipment while the character takes the potions and pills it wants on itself.", "The status line for a pet that is not picking up now names the item kinds that are switched off, for example 52 not wanted (30 equipment, 22 other items), instead of a general list of possible reasons.", "The old Collector setting is now Default collector and still decides for anything you do not set yourself."]}, {"version": "1.2.91", "title": "Walks around trees and walls while chasing", "items": ["A character that stood still against a tree or wall while chasing a mob used to stay there until the no-damage timeout dropped the mob. After 2.5 seconds without moving or hurting its target, the bot now checks the game's collision data and, if the straight line is blocked, walks around the obstacle, then attacks as normal.", "After three detours on the same mob it drops that mob for a minute and picks another.", "Settings → Obstacles switches it off or changes the wait. It needs the game's collision data and works outdoors only."]}, {"version": "1.2.90", "title": "The bot is now MIT licensed", "items": ["Added an MIT licence under nixxane, so anyone can use, change and build on the bot, including inside other projects. The script header now says so."]}, {"version": "1.2.89", "title": "Items page: a rule for every item", "items": ["New Items page with every item in the game, filtered like sBot: item group, race, gender, type (armour part and material, accessory, weapon kind), degree, a search box, and \"Only items with a rule\".", "Per item: Pick (always or never), Store (warehouse on town trips), Sell (from the pet at the repair merchant), Keep, or Drop (thrown away from your bag or the pet while hunting, never picked up again). Click a cell, right-click a row, or use the buttons above the table to set every item shown (they ask for a second click).", "Rules come first; items without one follow the Loot switches and town settings as before. Your own bag is never sold, and potions and scrolls the town trip needs are never stored from it.", "With ten pages, the compact window now shows its page tabs in two rows."]}, {"version": "1.2.88", "title": "Small monsters first", "items": ["While fighting a stronger monster (a giant, say), the bot now switches to a weaker monster that is hitting you, kills it, and goes back. Before, it kept hitting the giant while the small ones wore you down.", "It only switches for monsters actually hitting you within chase distance, and only to a weaker class: two giants hitting you is no reason to switch.", "A target below 25% HP is finished first, and it never switches in the middle of a cast.", "The weakest attacker goes first (normal before champion, the most hurt one first), and it does not bounce back and forth while the giant keeps hitting.", "The status line says when it happens, for example \"switched to Mangyang (hitting you); back to Tiger Girl after\".", "The minimised icon could flash yellow for a moment after Stop all ended a walk back; it now shows the right colour straight away."], "note": "Always on; there is no switch for it."}, {"version": "1.2.87", "title": "Heal and buff your party", "items": ["New Party page. Tick \"Buff and heal party members\" and the bot supports the party with your own skills: a group heal when enough members are low, a heal on the lowest member, then party buffs on whoever does not have them yet. One cast at a time, after your own potions and before attacking.", "Pick party buffs from your learned skills that can target a party member. Each goes to everyone, or only to the names you list.", "It only casts on members you can see within the support range (30 m by default) and never walks to them. A buff that does not show up on a member after two tries waits a minute.", "The top of the page lists your party with HP and MP bars, distance, and which of your buffs each member has.", "The party options (auto-recruit, matching, resurrection) moved here from Settings."], "note": "Off by default. It runs while hunting; tick \"Also while hunting is stopped\" to support a party while you stand still."}];
+const RELEASE_NOTES = [{"version": "1.2.95", "title": "Notices a character that cannot move", "items": ["A character that should be walking (chasing, returning or picking up) but has not moved at all for 20 seconds, with nothing being damaged, is now treated as stuck, for example inside a tree. It first steps back to where it just was, then walks to the nearest open ground.", "If both fail, hunting stops with an alert chime and a clear message, instead of the character standing there for minutes. It does not use a return scroll on its own.", "When it happens the Activity log says whether the collision data thinks the character's tile is blocked, and the bug report shows the same, to help find why characters get stuck in trees.", "Settings → Obstacles switches it off or changes the 20 seconds. Tested on the simulated game only; not yet seen on the live server."]}, {"version": "1.2.94", "title": "Says why it went to town", "items": ["Every town trip now writes its reason to the Activity log, for example Town trip started: potions running low, and the town status line shows it during the trip. Reasons are bag nearly full, pet nearly full, potions or ammunition low, weapon broken, gear worn, no XP for a while, every set number of minutes, returning after a death, or started by you.", "The Activity log is in the Wide window: press Wide in the title bar.", "The bug report shows the reason of the current or last trip and how long ago it started, without item names."]}, {"version": "1.2.93", "title": "Find the exact item that drops, and see its number in the pickup line", "items": ["A Pick always rule on the Items page takes an item whatever the Loot switches say, so you never need to switch on a whole kind like potions to get one item. The rule is for that exact item, and each size or degree is its own item.", "New on the Items page: Only items on the ground now, which lists just the items in view, so you can set the rule on exactly what is dropping.", "The pickup status line now shows the item numbers behind each skipped kind, for example 12 potions #19 #20, to compare with the number shown when you point at an item in the Items table."]}, {"version": "1.2.92", "title": "The pet and the character can each pick up their own items", "items": ["Loot has a new section, Who picks up what: every kind of drop is set to Leave on the ground, Pickup pet or Character. The pet can collect elixirs and equipment while the character takes the potions and pills it wants on itself.", "The status line for a pet that is not picking up now names the item kinds that are switched off, for example 52 not wanted (30 equipment, 22 other items), instead of a general list of possible reasons.", "The old Collector setting is now Default collector and still decides for anything you do not set yourself."]}, {"version": "1.2.91", "title": "Walks around trees and walls while chasing", "items": ["A character that stood still against a tree or wall while chasing a mob used to stay there until the no-damage timeout dropped the mob. After 2.5 seconds without moving or hurting its target, the bot now checks the game's collision data and, if the straight line is blocked, walks around the obstacle, then attacks as normal.", "After three detours on the same mob it drops that mob for a minute and picks another.", "Settings → Obstacles switches it off or changes the wait. It needs the game's collision data and works outdoors only."]}, {"version": "1.2.90", "title": "The bot is now MIT licensed", "items": ["Added an MIT licence under nixxane, so anyone can use, change and build on the bot, including inside other projects. The script header now says so."]}, {"version": "1.2.89", "title": "Items page: a rule for every item", "items": ["New Items page with every item in the game, filtered like sBot: item group, race, gender, type (armour part and material, accessory, weapon kind), degree, a search box, and \"Only items with a rule\".", "Per item: Pick (always or never), Store (warehouse on town trips), Sell (from the pet at the repair merchant), Keep, or Drop (thrown away from your bag or the pet while hunting, never picked up again). Click a cell, right-click a row, or use the buttons above the table to set every item shown (they ask for a second click).", "Rules come first; items without one follow the Loot switches and town settings as before. Your own bag is never sold, and potions and scrolls the town trip needs are never stored from it.", "With ten pages, the compact window now shows its page tabs in two rows."]}, {"version": "1.2.88", "title": "Small monsters first", "items": ["While fighting a stronger monster (a giant, say), the bot now switches to a weaker monster that is hitting you, kills it, and goes back. Before, it kept hitting the giant while the small ones wore you down.", "It only switches for monsters actually hitting you within chase distance, and only to a weaker class: two giants hitting you is no reason to switch.", "A target below 25% HP is finished first, and it never switches in the middle of a cast.", "The weakest attacker goes first (normal before champion, the most hurt one first), and it does not bounce back and forth while the giant keeps hitting.", "The status line says when it happens, for example \"switched to Mangyang (hitting you); back to Tiger Girl after\".", "The minimised icon could flash yellow for a moment after Stop all ended a walk back; it now shows the right colour straight away."], "note": "Always on; there is no switch for it."}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -6598,7 +6705,7 @@ const Diagnostics = {
         hpTarget: this.number(Restock.cfg().hp.target), mpTarget: this.number(Restock.cfg().mp.target),
         buyCure: !!Restock.cfg().cure.on, cureTarget: this.number(Restock.cfg().cure.target), cureLow: this.number(Restock.cfg().cure.low),
         hpLow: this.number(Restock.cfg().hp.low), mpLow: this.number(Restock.cfg().mp.low),
-        collectDrops: !!c.hunt.pickup.enabled, petCollector: Loot.petMode(), characterCollects: Loot.categories.some(k => c.hunt.pickup[k] && Loot.collectorFor(k) === 'character'), pickupRadius: this.number(c.hunt.pickup.radius / 10),
+        collectDrops: !!c.hunt.pickup.enabled, petCollector: Loot.petMode(), trapStage: Trap.stage, trapTile: Trap.stage ? Trap.tile : '', characterCollects: Loot.categories.some(k => c.hunt.pickup[k] && Loot.collectorFor(k) === 'character'), pickupRadius: this.number(c.hunt.pickup.radius / 10),
         finishFight: !!c.hunt.pickup.afterKillOnly, speedScroll: !!c.potion.speedScroll }
     };
   },
@@ -7935,7 +8042,9 @@ const UI = {
       this.pane.append(this.group('Obstacles',
         this.check('Walk around obstacles when chasing a mob', () => H().detour.enabled, v => H().detour.enabled = v),
         this.number('Stand still for (ms) before going around', () => H().detour.stallMs, v => H().detour.stallMs = v, 1000, 10000),
-        el('p', 'When the character stands still without hurting its target and a tree or wall is in the way (needs the collision data the game loads, outdoors only), it walks around it, then attacks as normal. After three detours on one mob it drops that mob for a minute.', 'muted')));
+        this.check('Detect a character that cannot move', () => H().trap.enabled, v => H().trap.enabled = v),
+        this.number('Cannot move for (seconds)', () => H().trap.seconds, v => H().trap.seconds = v, 10, 120),
+        el('p', 'When the character stands still without hurting its target and a tree or wall is in the way (needs the collision data the game loads, outdoors only), it walks around it, then attacks as normal. After three detours on one mob it drops that mob for a minute. A character that should be walking but has not moved at all for the set time (for example stuck inside a tree) first steps back to where it just was, then walks to the nearest open ground; if that fails, hunting stops with an alert so it does not stand there for minutes.', 'muted')));
       this.stuckNote = el('p', AntiStuck.status(), 'muted');
       this.pane.append(this.group('Anti-stuck',
         this.check('Recover when hunting makes no progress', () => H().antiStuck.enabled, v => H().antiStuck.enabled = v),
