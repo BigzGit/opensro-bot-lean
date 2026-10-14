@@ -134,6 +134,10 @@ When no monster is being attacked, the status line says why, counted from the mo
 
 When the pickup pet is ready but collects nothing, the status line says why, counted from the drops in view: for example "Drops in view: 4, ready to collect: 1. Not collected: 2: not wanted by your Loot settings (1 equipment, 1 other items); 1: too far from you (Pickup radius)." The part in brackets names the item kinds that are switched off, so you can see exactly what to switch on. The reasons are: type switched off or excluded or SoX only, too far from you, outside the hunting area, belongs to another player, too far from the pet, the pet is not ready, no room in the bag, and recently failed. **Finish current fight before character pickup** only affects a character collector; a pickup pet collects during fights whatever it is set to.
 
+## Picking up one item without its whole kind
+
+On the **Items** page, **Pick always** takes one exact item whatever the Loot switches say, so you do not have to switch on potions, equipment and so on just to get one item. A rule is for that exact item: each size or degree is its own item. Tick **Only items on the ground now** to list just the drops in view and set the rule on exactly what is dropping. When something is skipped, the pickup status line shows the item numbers behind it (for example "12 potions #19 #20"); the Items table shows the same number when you point at an item.
+
 ## Who picks up what
 
 In **Loot → Who picks up what**, every kind of drop (gold, potions, equipment, elixirs, lucky powders, magic stones, attribute stones, other alchemy items, other items) is set to **Leave on the ground**, **Pickup pet** or **Character**, so the pet and the character can work side by side. The pet collects during fights and fills its own bag; the character walks to the item and uses your bag, so give it only the kinds you want on you, for example potions or pills. **Default collector** decides for kinds you have not set yourself and for names under **Always include**. One pickup runs at a time; the pet's drops go first. **Finish the current fight before picking up** applies to the character only.

@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Items, AutoMastery, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, ItemRules, Items, AutoMastery, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -47,6 +47,23 @@ test('pet disables only native auto-grab bit and waits for server confirmation',
   pet.commandMode = 0x147; assert.equal(f.Loot.preparePet(), true);
   assert.equal(f.Loot.begin(d), true); assert.equal(f.commands.at(-1).kind, 'cos-pickup');
 });
+test('an Items rule to always pick an item works with its kind switched off, and leaves the other items of that kind alone', () => {
+  const f = fixture(), P = f.Settings.profile.hunt.pickup;
+  f.Loot.preset('elixirs'); P.potions = false;
+  const vigor = f.drop(20, 6380); vigor.refObjId = 22; vigor.name = 'Vigor potion'; const trash = f.drop(21, 2284); trash.refObjId = 23; trash.name = 'Small potion';
+  assert.equal(f.Loot.allowed(vigor), false, 'no rule yet'); assert.equal(f.Loot.allowed(trash), false);
+  f.ItemRules.set([22], { pick: 'yes' });
+  assert.equal(f.Loot.allowed(vigor), true, 'the rule picks it up'); assert.equal(f.Loot.allowed(trash), false, 'the rest stay on the ground');
+  assert.equal(f.Loot.whyNot(vigor), ''); assert.equal(f.Loot.whyNot(trash), 'filter');
+  assert.equal(f.Loot.choose().gid, 20);
+});
+test('the Items list can show only what is on the ground, so a rule lands on the exact item that drops', () => {
+  const f = fixture(); f.Items.data.set(22, { name: 'Vigor Potion', code: 'ITEM_ETC_ALL_POTION_02' }); f.Items.data.set(23, { name: 'Other Potion', code: 'ITEM_ETC_ALL_POTION_03' });
+  const drop = f.drop(20, 6380); drop.refObjId = 22;
+  assert.deepEqual([...f.ItemRules.list({ nearby: true }).map(i => i.id)], [22]); assert.deepEqual([...f.ItemRules.list({}).map(i => i.id)], [22, 23]);
+  f.Loot.preset('elixirs'); f.ItemRules.set([22], { pick: 'yes' });
+  assert.equal(f.Loot.allowed(drop), true, 'one rule is enough with the kind switched off');
+});
 test('the pet and the character each collect their own kinds, one pickup at a time', () => {
   const f = fixture(), pet = pickupPet(f), P = f.Settings.profile.hunt.pickup;
   P.potions = true; P.by = { potions: 'character' };
@@ -78,7 +95,7 @@ test('the not-collected line says which kinds are not wanted', () => {
   const f = fixture(), pet = pickupPet(f, 7), P = f.Settings.profile.hunt.pickup; f.Hunt.running = true; f.Loot.preset('elixirs'); P.potions = false;
   f.drop(20, 2284); f.drop(21, 2284); const sword = f.drop(22, 748); P.exclude = 'sword'; sword.name = 'Iron Sword';
   const text = f.Diagnostics.pet();
-  assert.match(text, /not wanted by your Loot settings \(2 potions, 1 excluded by name\)/);
+  assert.match(text, /not wanted by your Loot settings \(2 potions #101, 1 excluded by name #101\)/);
 });
 test('pet collects only elixirs into its own inventory and confirms its gain', () => {
   const f = fixture(), pet = pickupPet(f), d = f.drop(20, 3436);
@@ -1823,7 +1840,7 @@ test('the pet status says why drops in view are not collected', () => {
   const off = f.drop(42, 2284); off.x = 112; f.Settings.profile.hunt.pickup.potions = false;
   const foreign = f.drop(43, 3436); foreign.x = 114; foreign.groundItem.ownerJid = 999;
   const text = f.Diagnostics.pet();
-  assert.match(text, /Drops in view: 4, ready to collect: 1\./); assert.match(text, /1: not wanted by your Loot settings \(1 potions\)/);
+  assert.match(text, /Drops in view: 4, ready to collect: 1\./); assert.match(text, /1: not wanted by your Loot settings \(1 potions #101\)/);
   assert.match(text, /1: too far from you/); assert.match(text, /1: it belongs to another player/);
   assert.equal(f.Loot.whyNot(near), ''); assert.equal(f.Loot.choose()?.gid, 40, 'whyNot agrees with the drop choose() takes');
   f.Settings.profile.hunt.pickup.finishFight = true; f.Settings.profile.hunt.pickup.afterKillOnly = true;

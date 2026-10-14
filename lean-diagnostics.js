@@ -66,11 +66,11 @@ const Diagnostics = {
       if (e.kind !== 'ground-item') continue;
       seen++;
       const reason = Loot.whyNot(e);
-      if (reason) { why[reason]++; if (reason === 'filter') { const k = Loot.filterWhy(e); unwanted[k] = (unwanted[k] || 0) + 1; } } else ready++;
+      if (reason) { why[reason]++; if (reason === 'filter') { const k = Loot.filterWhy(e), u = unwanted[k] ||= { n: 0, ids: new Set() }; u.n++; u.ids.add(e.refObjId); } } else ready++;
     }
     if (!seen) return 'No drops in view.';
     const parts = [
-      [why.filter, 'not wanted by your Loot settings (' + Object.entries(unwanted).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} ${Loot.filterLabel(k)}`).join(', ') + ')'],
+      [why.filter, 'not wanted by your Loot settings (' + Object.entries(unwanted).sort((a, b) => b[1].n - a[1].n).map(([k, u]) => `${u.n} ${Loot.filterLabel(k)}` + (u.ids.size <= 3 ? ' #' + [...u.ids].join(' #') : '')).join(', ') + ')'],
       [why.far, 'too far from you (Pickup radius)'],
       [why.area, 'outside the hunting area'],
       [why.owner, 'it belongs to another player'],

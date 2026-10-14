@@ -50,11 +50,14 @@ const ItemRules = {
     this.infos.set(id, info);
     return info;
   },
-  // Every catalogue item that passes the filters, in id order. f: { query, group, race, gender, degrees: Set, kind, custom }.
+  // Every catalogue item that passes the filters, in id order. f: { query, group, race, gender, degrees: Set, kind, custom, nearby }.
   list(f) {
     const query = (f.query || '').toLowerCase().trim(), rules = this.cfg().rules, out = [];
+    // Item numbers of the drops in view: the exact items to give a rule, whatever the item is called in the catalogue.
+    const ground = f.nearby ? new Set([...World.ents.values()].filter(e => e.kind === 'ground-item').map(e => e.refObjId)) : null;
     for (const id of Items.data.keys()) {
       if (f.custom && !rules[id]) continue;
+      if (ground && !ground.has(id)) continue;
       const i = this.info(id);
       if (f.group && f.group !== 'all' && (f.group === 'equipment' ? !['weapon', 'armour', 'accessory'].includes(i.group) : i.group !== f.group)) continue;
       if (f.race && i.race !== f.race) continue;
