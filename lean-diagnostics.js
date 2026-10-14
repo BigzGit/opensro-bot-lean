@@ -96,6 +96,11 @@ const Diagnostics = {
   },
   // What the town trip is doing right now, in plain words (no names): the phase text it shows on the panel.
   townDetail() { return Town.trip ? String(Town.message || '').slice(0, 200) : ''; },
+  // Why the current or last town trip started, with no item names, and how long ago.
+  townReason() {
+    const t = Town.trip ? { why: Town.trip.why, at: Town.trip.started } : Town.lastTrip;
+    return t ? String(t.why || '').replace(/\s*\(.*\)/, '') + ' (' + Math.round((now() - t.at) / 1000) + ' s ago)' : '';
+  },
   // Why no monster is being attacked, counted from the monsters in view with the same checks the hunt uses.
   // Counts only, no names. Short plain sentences, because the panel and bug reports are read by many languages.
   noTarget() {
@@ -157,7 +162,7 @@ const Diagnostics = {
   snapshot() {
     const gp = World.gp, c = Settings.profile, pet = Loot.pet(), social = gp?.social, matching = gp?.partyMatching;
     return {
-      action: this.main(), partyStatus: this.party(), petStatus: this.pet(), townStatus: this.town(), townDetail: this.townDetail(),
+      action: this.main(), partyStatus: this.party(), petStatus: this.pet(), townStatus: this.town(), townDetail: this.townDetail(), townReason: this.townReason(),
       navigationReady: !!Navigation.scene, navigationError: String(Navigation.error || '').slice(0, 80),
       buffGearActive: !!BuffGear.run, buffGearRestoring: !!BuffGear.run?.restoring, buffGearMovePending: !!BuffGear.run?.pending, buffGearRecovery: !!BuffGear.recovery,
       alchemyActive: !!Alchemy.run, alchemyPending: !!Alchemy.pending, alchemyAttempts: this.number(Alchemy.result?.attempts),

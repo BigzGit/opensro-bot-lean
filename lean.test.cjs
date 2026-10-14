@@ -2029,6 +2029,15 @@ test('town trips start for a broken weapon, worn gear, no XP and a timer, each w
   f.Town.cancel(); assert.equal(f.Town.reason(), '', 'so the next one is a full interval away');
   f.Hunt.stop(); f.Town.watch(); assert.deepEqual([f.Town.lastXpAt, f.Town.cycleFrom], [0, 0], 'the clocks only run while hunting');
 });
+test('a town trip says why it started, in the log, the status line and the diagnostics', () => {
+  const f = townFixture(); f.Town.reason = () => 'gear durability low (Iron Sword at 12%)';
+  f.Town.begin();
+  assert.ok(f.Log.lines.some(l => /Town trip started: gear durability low \(Iron Sword at 12%\)\./.test(l.text)));
+  assert.match(f.Town.status(), /\(reason: gear durability low/);
+  const text = f.Diagnostics.townReason(); assert.match(text, /^gear durability low \(\d+ s ago\)$/, 'no item names in the report');
+  f.Town.trip = null; f.Town.reason = () => ''; f.Town.begin();
+  assert.ok(f.Log.lines.some(l => /Town trip started: started by you\./.test(l.text)));
+});
 test('town trips buy arrows and bolts at the weapon merchant, count the equipped stack and skip what cannot be bought', () => {
   const f = townFixture(), gp = f.World.gp, c = f.Restock.cfg().ammo;
   assert.deepEqual(JSON.parse(JSON.stringify(f.Town.ammoSupplies())), [], 'off by default');

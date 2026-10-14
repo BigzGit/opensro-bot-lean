@@ -77,7 +77,8 @@ const Town = {
   ammoCount(ref) { return (World.gp?.inventory || []).filter(i => i.refObjId === ref).reduce((n, i) => n + (i.quantity ?? 1), 0); },
   supplies() { return Restock.supplies().map(s => ({ ...s, refObjId: s.kind === 'hp' ? 8 : s.kind === 'mp' ? 15 : s.refObjId })); },
   status() {
-    if (this.trip || this.message.startsWith('Town cycle stopped:')) return this.message;
+    if (this.trip) return this.message + (this.trip.why ? ` (reason: ${this.trip.why})` : '');
+    if (this.message.startsWith('Town cycle stopped:')) return this.message;
     if (!this.cfg().enabled) return 'Town cycle off. The pet-full chime is an alert; enable the scroll town cycle to return automatically.';
     if (!World.inWorld()) return 'Town cycle: waiting for game world.';
     const blocked = this.blocked();
@@ -318,7 +319,11 @@ const Town = {
     Restock.trip = null;
     Resurrect.cancelTrip('', true); Resurrect.holdUntil = 0; Loot.suspend();
     this.restartClocks();
-    this.trip = { phase: 'recall', at: now(), started: now(), origin: { ...origin }, revival,
+    // Say why, once: the trigger is only visible before departure, and people ask why the bot went to town.
+    const why = revival ? 'returning after a death' : this.reason() || 'started by you';
+    this.lastTrip = { why, at: now() };
+    Log.info('Town trip started: ' + why + '.');
+    this.trip = { phase: 'recall', at: now(), started: now(), origin: { ...origin }, revival, why,
       huntArea: revival && Hunt.cfg().center ? { center: { ...Hunt.cfg().center }, radius: Hunt.cfg().radius } : null,
       manualAt: Manual.lastAt, character: World.charName, petRef: Loot.pet()?.rec.refObjId,
       config: JSON.stringify(this.cfg()), supplies: this.supplies() };
