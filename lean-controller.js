@@ -61,19 +61,14 @@ Hunt.tick = function () {
   if (H.stopInvFull && World.freeBagSlots() === 0) return this.stop('inventory full');
   Loot.preparePet();
   const attacked = this.underAttack(), current = this.currentTarget();
-  if (Loot.petMode()) {
-    // Pet movement does not own the character's combat tick.
-    if (Loot.active) Loot.tick();
-    if (!Loot.active && H.pickup.enabled) {
-      const drop = Loot.choose();
-      if (drop) Loot.begin(drop);
-    }
-  } else {
-    if (attacked) Loot.suspend();
-    // Character pickup owns movement until done or interrupted by an attacker.
-    if (!attacked && Loot.active && Loot.tick()) return;
-    if (H.pickup.enabled && !attacked && (!current || !H.pickup.afterKillOnly) && !World.isSitting()) {
-      const drop = Loot.choose();
+  // One pickup at a time. A pet's request does not own the character's combat tick; a character pickup owns
+  // movement until it is done or an attacker interrupts it. The pet's drops go first, then the character's.
+  if (attacked && Loot.active && !Loot.active.petGid) Loot.suspend();
+  if (Loot.active) { if (Loot.active.petGid) Loot.tick(); else if (Loot.tick()) return; }
+  if (!Loot.active && H.pickup.enabled) {
+    if (Loot.petMode()) { const drop = Loot.choose('pet'); if (drop) Loot.begin(drop); }
+    if (!Loot.active && !attacked && (!current || !H.pickup.afterKillOnly) && !World.isSitting()) {
+      const drop = Loot.choose('character');
       if (drop && Loot.begin(drop)) { this.state = 'loot'; return; }
     }
   }

@@ -59,18 +59,18 @@ const Diagnostics = {
   },
   // Why nothing is being collected, counted from the drops in view. Counts only, no item names.
   noLoot() {
-    const why = { failed: 0, far: 0, area: 0, owner: 0, filter: 0, pet: 0, petFar: 0, full: 0 };
+    const why = { failed: 0, far: 0, area: 0, owner: 0, filter: 0, pet: 0, petFar: 0, full: 0 }, unwanted = {};
     let seen = 0, ready = 0;
     if (!World.pose()) return '';
     for (const e of World.ents.values()) {
       if (e.kind !== 'ground-item') continue;
       seen++;
       const reason = Loot.whyNot(e);
-      if (reason) why[reason]++; else ready++;
+      if (reason) { why[reason]++; if (reason === 'filter') { const k = Loot.filterWhy(e); unwanted[k] = (unwanted[k] || 0) + 1; } } else ready++;
     }
     if (!seen) return 'No drops in view.';
     const parts = [
-      [why.filter, 'its type is switched off in Loot, or it is excluded by name, or SoX only is on'],
+      [why.filter, 'not wanted by your Loot settings (' + Object.entries(unwanted).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} ${Loot.filterLabel(k)}`).join(', ') + ')'],
       [why.far, 'too far from you (Pickup radius)'],
       [why.area, 'outside the hunting area'],
       [why.owner, 'it belongs to another player'],
@@ -192,7 +192,7 @@ const Diagnostics = {
         hpTarget: this.number(Restock.cfg().hp.target), mpTarget: this.number(Restock.cfg().mp.target),
         buyCure: !!Restock.cfg().cure.on, cureTarget: this.number(Restock.cfg().cure.target), cureLow: this.number(Restock.cfg().cure.low),
         hpLow: this.number(Restock.cfg().hp.low), mpLow: this.number(Restock.cfg().mp.low),
-        collectDrops: !!c.hunt.pickup.enabled, petCollector: Loot.petMode(), pickupRadius: this.number(c.hunt.pickup.radius / 10),
+        collectDrops: !!c.hunt.pickup.enabled, petCollector: Loot.petMode(), characterCollects: Loot.categories.some(k => c.hunt.pickup[k] && Loot.collectorFor(k) === 'character'), pickupRadius: this.number(c.hunt.pickup.radius / 10),
         finishFight: !!c.hunt.pickup.afterKillOnly, speedScroll: !!c.potion.speedScroll }
     };
   },

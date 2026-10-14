@@ -47,6 +47,39 @@ test('pet disables only native auto-grab bit and waits for server confirmation',
   pet.commandMode = 0x147; assert.equal(f.Loot.preparePet(), true);
   assert.equal(f.Loot.begin(d), true); assert.equal(f.commands.at(-1).kind, 'cos-pickup');
 });
+test('the pet and the character each collect their own kinds, one pickup at a time', () => {
+  const f = fixture(), pet = pickupPet(f), P = f.Settings.profile.hunt.pickup;
+  P.potions = true; P.by = { potions: 'character' };
+  const elixir = f.drop(20, 3436), potion = f.drop(22, 2284), other = f.drop(23, 748); other.x = 300;
+  assert.equal(f.Loot.collector(elixir), 'pet'); assert.equal(f.Loot.collector(potion), 'character');
+  assert.equal(f.Loot.choose('pet').gid, 20); assert.equal(f.Loot.choose('character').gid, 22);
+  assert.equal(f.Loot.allowed(potion), true, 'the character needs no pet for its own kinds');
+  f.Hunt.start(); f.Hunt.tick();
+  assert.equal(f.Loot.active.petGid, 50, 'the pet takes its drop first'); assert.equal(f.commands.at(-1).kind, 'cos-pickup');
+  f.Hunt.tick(); assert.equal(f.Loot.active.gid, 20, 'still the pet: one pickup at a time');
+  f.World.gp.cosRecords[0].inventory.push({ slot: 0, refObjId: 101, quantity: 1 }); f.World.ents.delete(20);
+  f.advance(500); f.Hunt.tick(); f.advance(2000); f.Hunt.tick();
+  assert.equal(f.Loot.active?.petGid, 0, 'then the character walks to its own drop'); assert.equal(f.Loot.active.gid, 22);
+  assert.equal(f.commands.some(c => c.kind === 'pickup' && c.gid === 22), true);
+});
+test('character-only kinds keep working when the pet is missing, and pet kinds wait for it', () => {
+  const f = fixture(), pet = pickupPet(f), P = f.Settings.profile.hunt.pickup;
+  P.potions = true; P.by = { potions: 'character' };
+  const elixir = f.drop(20, 3436), potion = f.drop(22, 2284);
+  pet.dead = true;
+  assert.equal(f.Loot.allowed(elixir), false); assert.equal(f.Loot.allowed(potion), true);
+  assert.equal(f.Loot.choose().gid, 22); assert.equal(f.Loot.whyNot(elixir), 'pet');
+  P.by = { elixirs: 'character' }; P.collector = 'character';
+  assert.equal(f.Loot.petMode(), false, 'no pet duties when nothing is given to it');
+  P.by = { elixirs: 'pet' }; assert.equal(f.Loot.petMode(), true, 'one kind given to the pet is enough');
+  P.by = { elixirs: 'bogus' }; P.collector = 'character'; assert.equal(f.Loot.collectorFor('elixirs'), 'character', 'unknown values fall back');
+});
+test('the not-collected line says which kinds are not wanted', () => {
+  const f = fixture(), pet = pickupPet(f, 7), P = f.Settings.profile.hunt.pickup; f.Hunt.running = true; f.Loot.preset('elixirs'); P.potions = false;
+  f.drop(20, 2284); f.drop(21, 2284); const sword = f.drop(22, 748); P.exclude = 'sword'; sword.name = 'Iron Sword';
+  const text = f.Diagnostics.pet();
+  assert.match(text, /not wanted by your Loot settings \(2 potions, 1 excluded by name\)/);
+});
 test('pet collects only elixirs into its own inventory and confirms its gain', () => {
   const f = fixture(), pet = pickupPet(f), d = f.drop(20, 3436);
   f.drop(21, 5484); f.drop(22, 2284); f.drop(23, 748);
@@ -1790,7 +1823,7 @@ test('the pet status says why drops in view are not collected', () => {
   const off = f.drop(42, 2284); off.x = 112; f.Settings.profile.hunt.pickup.potions = false;
   const foreign = f.drop(43, 3436); foreign.x = 114; foreign.groundItem.ownerJid = 999;
   const text = f.Diagnostics.pet();
-  assert.match(text, /Drops in view: 4, ready to collect: 1\./); assert.match(text, /1: its type is switched off/);
+  assert.match(text, /Drops in view: 4, ready to collect: 1\./); assert.match(text, /1: not wanted by your Loot settings \(1 potions\)/);
   assert.match(text, /1: too far from you/); assert.match(text, /1: it belongs to another player/);
   assert.equal(f.Loot.whyNot(near), ''); assert.equal(f.Loot.choose()?.gid, 40, 'whyNot agrees with the drop choose() takes');
   f.Settings.profile.hunt.pickup.finishFight = true; f.Settings.profile.hunt.pickup.afterKillOnly = true;

@@ -29,7 +29,11 @@ const Loot = {
     }
     return null;
   },
-  petMode() { return Hunt.cfg().pickup.collector === 'pet'; },
+  // Who collects a kind of drop: its own choice (pickup.by), else the default collector. A pet is in use when it is the
+  // default or when any wanted kind is given to it; the character can collect other kinds meanwhile.
+  collectorFor(category) { const P = Hunt.cfg().pickup, by = P.by?.[category]; return by === 'pet' || by === 'character' ? by : P.collector === 'pet' ? 'pet' : 'character'; },
+  collector(e) { return this.collectorFor(this.category(e.groundItem?.typeFlags ?? e.tidWord ?? 0)); },
+  petMode() { const P = Hunt.cfg().pickup; return P.collector === 'pet' || this.categories.some(k => P[k] && P.by?.[k] === 'pet'); },
   preparePet() {
     if (!this.petMode() || !Hunt.cfg().pickup.enabled || World.isDead()) return false;
     const pet = this.pet();
@@ -88,7 +92,7 @@ const Loot = {
     Settings.saveProfile();
   },
   count(ref, petGid = 0) { return this.items(petGid).filter(i => i.refObjId === ref).reduce((n, i) => n + (i.quantity ?? 1), 0); },
-  bagSignature() { const pet = this.petMode() && this.pet(); return `${pet ? pet.rec.gid : 0}:` + this.items(pet ? pet.rec.gid : 0).map(i => `${i.slot}:${i.refObjId}:${i.quantity ?? 1}`).join('|'); },
+  bagSignature(e) { const pet = (e ? this.collector(e) === 'pet' : this.petMode()) && this.pet(); return `${pet ? pet.rec.gid : 0}:` + this.items(pet ? pet.rec.gid : 0).map(i => `${i.slot}:${i.refObjId}:${i.quantity ?? 1}`).join('|'); },
   owned(e) {
     const gi = e.groundItem;
     if (!gi) return false;
@@ -122,8 +126,8 @@ const Loot = {
       if (P.soxOnly && ItemType.isEquipment(tf)) { if (!this.sox(e)) return false; }
       else if (!included && !P[this.category(tf)]) return false;
     }
-    const pet = this.petMode() ? this.pet() : null;
-    if (this.petMode() && (!pet || !Number.isInteger(pet.rec.commandMode) || (pet.rec.commandMode & 128) || dist2D(pet.ent, e) > 500)) return false;
+    const byPet = this.collector(e) === 'pet', pet = byPet ? this.pet() : null;
+    if (byPet && (!pet || !Number.isInteger(pet.rec.commandMode) || (pet.rec.commandMode & 128) || dist2D(pet.ent, e) > 500)) return false;
     if (gold || (pet ? pet.rec.status > pet.rec.inventory.length : World.freeBagSlots() > 0)) return true;
     // Ground drops omit quantity/stack ceiling. Permit an existing stack to merge;
     // a server capacity refusal suppresses this drop until inventory changes.
@@ -134,7 +138,7 @@ const Loot = {
   // The first reason a drop in view is not collected, or '' when it is eligible. Follows choose() and allowed().
   whyNot(e) {
     const H = Hunt.cfg(), P = H.pickup, skip = this.skips.get(e.gid);
-    if (skip && (skip.bag !== null ? skip.bag === this.bagSignature() : skip.until > now())) return 'failed';
+    if (skip && (skip.bag !== null ? skip.bag === this.bagSignature(e) : skip.until > now())) return 'failed';
     if (!(dist2D(World.pose(), e) <= P.radius)) return 'far';
     if (H.center && dist2D(H.center, e) > H.radius + P.radius) return 'area';
     if (!this.owned(e)) return 'owner';
@@ -144,45 +148,57 @@ const Loot = {
     const filtered = rule?.pick !== 'yes' && (splitList(P.exclude).some(s => name.includes(s)) ||
       (P.soxOnly && ItemType.isEquipment(tf) ? !this.sox(e) : !included && !P[this.category(tf)]));
     if (filtered) return 'filter';
-    if (this.petMode()) {
+    if (this.collector(e) === 'pet') {
       const pet = this.pet();
       if (!pet || !Number.isInteger(pet.rec.commandMode) || (pet.rec.commandMode & 128)) return 'pet';
       if (dist2D(pet.ent, e) > 500) return 'petFar';
     }
     return this.allowed(e) ? '' : 'full';
   },
+  // Which switch kept a drop out, for the status line: 'name' (excluded name), 'sox' (SoX only) or its item kind.
+  filterWhy(e) {
+    const P = Hunt.cfg().pickup, tf = e.groundItem.typeFlags ?? e.tidWord ?? 0, name = (e.name || '').toLowerCase();
+    if (splitList(P.exclude).some(s => name.includes(s))) return 'name';
+    return P.soxOnly && ItemType.isEquipment(tf) ? 'sox' : this.category(tf);
+  },
+  filterLabel(key) {
+    return { name: 'excluded by name', sox: 'not Star/Moon/Sun gear (SoX only)', gold: 'gold', potions: 'potions', equipment: 'equipment', elixirs: 'elixirs',
+      powders: 'lucky powders', magicStones: 'magic stones', attrStones: 'attribute stones', alchemy: 'other alchemy items', others: 'other items' }[key] || key;
+  },
   skip(e, reason, inventoryBound = false) {
     const n = Math.min(6, (this.failureCounts.get(e.gid) || 0) + 1);
     this.failureCounts.set(e.gid, n);
-    this.skips.set(e.gid, { until: now() + Math.min(60000, 5000 * 2 ** (n - 1)), bag: inventoryBound ? this.bagSignature() : null });
+    this.skips.set(e.gid, { until: now() + Math.min(60000, 5000 * 2 ** (n - 1)), bag: inventoryBound ? this.bagSignature(e) : null });
     Log.warn(`Loot skipped (${e.name || e.gid}): ${reason}`);
     this.active = null;
     Hunt.lootGid = 0;
   },
-  choose() {
+  // The nearest drop worth taking; `by` ('pet' or 'character') limits it to that collector's drops.
+  choose(by = null) {
     const H = Hunt.cfg(), P = H.pickup, pose = World.pose();
     if (!P.enabled || !pose) return null;
-    const origin = this.petMode() ? this.pet()?.ent : pose;
-    if (!origin) return null;
     let chosen = null, best = Infinity;
     for (const e of World.ents.values()) {
       if (e.kind !== 'ground-item') continue;
       const skip = this.skips.get(e.gid);
       if (skip) {
-        if (skip.bag !== null ? skip.bag === this.bagSignature() : skip.until > now()) continue;
+        if (skip.bag !== null ? skip.bag === this.bagSignature(e) : skip.until > now()) continue;
         this.skips.delete(e.gid);
       }
       const d = dist2D(pose, e);
       if (!Number.isFinite(d) || d > P.radius || H.center && dist2D(H.center, e) > H.radius + P.radius || !this.allowed(e)) continue;
-      const travel = dist2D(origin, e);
+      const who = this.collector(e);
+      if (by && who !== by) continue;
+      const travel = dist2D(who === 'pet' ? this.pet()?.ent : pose, e);
       if (travel < best) { chosen = e; best = travel; }
     }
     return chosen;
   },
   begin(e) {
-    if (!this.allowed(e) || World.gp?.inventoryPending || !this.petMode() && World.isCasting()) return false;
-    const petGid = this.petMode() ? this.pet()?.rec.gid : 0;
-    if (this.petMode() && (!petGid || this.pressed()) || !this.pickup(e.gid, petGid)) return false;
+    const byPet = this.collector(e) === 'pet';
+    if (!this.allowed(e) || World.gp?.inventoryPending || !byPet && World.isCasting()) return false;
+    const petGid = byPet ? this.pet()?.rec.gid : 0;
+    if (byPet && (!petGid || this.pressed()) || !this.pickup(e.gid, petGid)) return false;
     const gold = ItemType.isGold(e.groundItem.typeFlags);
     this.active = { gid: e.gid, ref: e.refObjId, name: e.name, gold, petGid,
       before: gold ? toBigInt(World.gp?.progression?.gold) : this.count(e.refObjId, petGid),
@@ -197,9 +213,9 @@ const Loot = {
   tick() {
     const a = this.active;
     if (!a) return false;
-    if (!!a.petGid !== this.petMode() || a.petGid && this.pet()?.rec.gid !== a.petGid) { this.suspend(); return false; }
-    if (!a.petGid) Hunt.state = 'loot';
     const e = World.ents.get(a.gid);
+    if (!!a.petGid !== (e ? this.collector(e) === 'pet' : !!a.petGid) || a.petGid && this.pet()?.rec.gid !== a.petGid) { this.suspend(); return false; }
+    if (!a.petGid) Hunt.state = 'loot';
     if (this.gained(a)) {
       Stats.pickup(a);
       // If inventory updates precede despawn, don't request this same drop again.

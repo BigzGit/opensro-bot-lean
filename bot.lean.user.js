@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.91
+// @version      1.2.92
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.91';
+const VERSION = '1.2.92';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -221,7 +221,7 @@ const DEFAULT_PROFILE = {
     levelMin: 0, levelMax: 0, include: '', exclude: '', priority: 'attackers', avoidKs: true,
     targetTimeoutS: 25,
     pickup: { enabled: true, soxOnly: false, gold: true, potions: true, equipment: true, elixirs: true, powders: true, magicStones: true, attrStones: true, alchemy: true, others: true,
-      collector: 'character', petFullSound: true, soxSound: true, include: '', exclude: '', radius: 300, afterKillOnly: true, retries: 2 },
+      collector: 'character', by: {}, petFullSound: true, soxSound: true, include: '', exclude: '', radius: 300, afterKillOnly: true, retries: 2 },
     sit: { enabled: true, hpBelow: 35, mpBelow: 20, resumeAt: 90 },
     antiStuck: { enabled: true, minutes: 3, maxRecoveries: 3 },
     detour: { enabled: true, stallMs: 2500 },
@@ -2053,7 +2053,11 @@ const Loot = {
     }
     return null;
   },
-  petMode() { return Hunt.cfg().pickup.collector === 'pet'; },
+  // Who collects a kind of drop: its own choice (pickup.by), else the default collector. A pet is in use when it is the
+  // default or when any wanted kind is given to it; the character can collect other kinds meanwhile.
+  collectorFor(category) { const P = Hunt.cfg().pickup, by = P.by?.[category]; return by === 'pet' || by === 'character' ? by : P.collector === 'pet' ? 'pet' : 'character'; },
+  collector(e) { return this.collectorFor(this.category(e.groundItem?.typeFlags ?? e.tidWord ?? 0)); },
+  petMode() { const P = Hunt.cfg().pickup; return P.collector === 'pet' || this.categories.some(k => P[k] && P.by?.[k] === 'pet'); },
   preparePet() {
     if (!this.petMode() || !Hunt.cfg().pickup.enabled || World.isDead()) return false;
     const pet = this.pet();
@@ -2112,7 +2116,7 @@ const Loot = {
     Settings.saveProfile();
   },
   count(ref, petGid = 0) { return this.items(petGid).filter(i => i.refObjId === ref).reduce((n, i) => n + (i.quantity ?? 1), 0); },
-  bagSignature() { const pet = this.petMode() && this.pet(); return `${pet ? pet.rec.gid : 0}:` + this.items(pet ? pet.rec.gid : 0).map(i => `${i.slot}:${i.refObjId}:${i.quantity ?? 1}`).join('|'); },
+  bagSignature(e) { const pet = (e ? this.collector(e) === 'pet' : this.petMode()) && this.pet(); return `${pet ? pet.rec.gid : 0}:` + this.items(pet ? pet.rec.gid : 0).map(i => `${i.slot}:${i.refObjId}:${i.quantity ?? 1}`).join('|'); },
   owned(e) {
     const gi = e.groundItem;
     if (!gi) return false;
@@ -2146,8 +2150,8 @@ const Loot = {
       if (P.soxOnly && ItemType.isEquipment(tf)) { if (!this.sox(e)) return false; }
       else if (!included && !P[this.category(tf)]) return false;
     }
-    const pet = this.petMode() ? this.pet() : null;
-    if (this.petMode() && (!pet || !Number.isInteger(pet.rec.commandMode) || (pet.rec.commandMode & 128) || dist2D(pet.ent, e) > 500)) return false;
+    const byPet = this.collector(e) === 'pet', pet = byPet ? this.pet() : null;
+    if (byPet && (!pet || !Number.isInteger(pet.rec.commandMode) || (pet.rec.commandMode & 128) || dist2D(pet.ent, e) > 500)) return false;
     if (gold || (pet ? pet.rec.status > pet.rec.inventory.length : World.freeBagSlots() > 0)) return true;
     // Ground drops omit quantity/stack ceiling. Permit an existing stack to merge;
     // a server capacity refusal suppresses this drop until inventory changes.
@@ -2158,7 +2162,7 @@ const Loot = {
   // The first reason a drop in view is not collected, or '' when it is eligible. Follows choose() and allowed().
   whyNot(e) {
     const H = Hunt.cfg(), P = H.pickup, skip = this.skips.get(e.gid);
-    if (skip && (skip.bag !== null ? skip.bag === this.bagSignature() : skip.until > now())) return 'failed';
+    if (skip && (skip.bag !== null ? skip.bag === this.bagSignature(e) : skip.until > now())) return 'failed';
     if (!(dist2D(World.pose(), e) <= P.radius)) return 'far';
     if (H.center && dist2D(H.center, e) > H.radius + P.radius) return 'area';
     if (!this.owned(e)) return 'owner';
@@ -2168,45 +2172,57 @@ const Loot = {
     const filtered = rule?.pick !== 'yes' && (splitList(P.exclude).some(s => name.includes(s)) ||
       (P.soxOnly && ItemType.isEquipment(tf) ? !this.sox(e) : !included && !P[this.category(tf)]));
     if (filtered) return 'filter';
-    if (this.petMode()) {
+    if (this.collector(e) === 'pet') {
       const pet = this.pet();
       if (!pet || !Number.isInteger(pet.rec.commandMode) || (pet.rec.commandMode & 128)) return 'pet';
       if (dist2D(pet.ent, e) > 500) return 'petFar';
     }
     return this.allowed(e) ? '' : 'full';
   },
+  // Which switch kept a drop out, for the status line: 'name' (excluded name), 'sox' (SoX only) or its item kind.
+  filterWhy(e) {
+    const P = Hunt.cfg().pickup, tf = e.groundItem.typeFlags ?? e.tidWord ?? 0, name = (e.name || '').toLowerCase();
+    if (splitList(P.exclude).some(s => name.includes(s))) return 'name';
+    return P.soxOnly && ItemType.isEquipment(tf) ? 'sox' : this.category(tf);
+  },
+  filterLabel(key) {
+    return { name: 'excluded by name', sox: 'not Star/Moon/Sun gear (SoX only)', gold: 'gold', potions: 'potions', equipment: 'equipment', elixirs: 'elixirs',
+      powders: 'lucky powders', magicStones: 'magic stones', attrStones: 'attribute stones', alchemy: 'other alchemy items', others: 'other items' }[key] || key;
+  },
   skip(e, reason, inventoryBound = false) {
     const n = Math.min(6, (this.failureCounts.get(e.gid) || 0) + 1);
     this.failureCounts.set(e.gid, n);
-    this.skips.set(e.gid, { until: now() + Math.min(60000, 5000 * 2 ** (n - 1)), bag: inventoryBound ? this.bagSignature() : null });
+    this.skips.set(e.gid, { until: now() + Math.min(60000, 5000 * 2 ** (n - 1)), bag: inventoryBound ? this.bagSignature(e) : null });
     Log.warn(`Loot skipped (${e.name || e.gid}): ${reason}`);
     this.active = null;
     Hunt.lootGid = 0;
   },
-  choose() {
+  // The nearest drop worth taking; `by` ('pet' or 'character') limits it to that collector's drops.
+  choose(by = null) {
     const H = Hunt.cfg(), P = H.pickup, pose = World.pose();
     if (!P.enabled || !pose) return null;
-    const origin = this.petMode() ? this.pet()?.ent : pose;
-    if (!origin) return null;
     let chosen = null, best = Infinity;
     for (const e of World.ents.values()) {
       if (e.kind !== 'ground-item') continue;
       const skip = this.skips.get(e.gid);
       if (skip) {
-        if (skip.bag !== null ? skip.bag === this.bagSignature() : skip.until > now()) continue;
+        if (skip.bag !== null ? skip.bag === this.bagSignature(e) : skip.until > now()) continue;
         this.skips.delete(e.gid);
       }
       const d = dist2D(pose, e);
       if (!Number.isFinite(d) || d > P.radius || H.center && dist2D(H.center, e) > H.radius + P.radius || !this.allowed(e)) continue;
-      const travel = dist2D(origin, e);
+      const who = this.collector(e);
+      if (by && who !== by) continue;
+      const travel = dist2D(who === 'pet' ? this.pet()?.ent : pose, e);
       if (travel < best) { chosen = e; best = travel; }
     }
     return chosen;
   },
   begin(e) {
-    if (!this.allowed(e) || World.gp?.inventoryPending || !this.petMode() && World.isCasting()) return false;
-    const petGid = this.petMode() ? this.pet()?.rec.gid : 0;
-    if (this.petMode() && (!petGid || this.pressed()) || !this.pickup(e.gid, petGid)) return false;
+    const byPet = this.collector(e) === 'pet';
+    if (!this.allowed(e) || World.gp?.inventoryPending || !byPet && World.isCasting()) return false;
+    const petGid = byPet ? this.pet()?.rec.gid : 0;
+    if (byPet && (!petGid || this.pressed()) || !this.pickup(e.gid, petGid)) return false;
     const gold = ItemType.isGold(e.groundItem.typeFlags);
     this.active = { gid: e.gid, ref: e.refObjId, name: e.name, gold, petGid,
       before: gold ? toBigInt(World.gp?.progression?.gold) : this.count(e.refObjId, petGid),
@@ -2221,9 +2237,9 @@ const Loot = {
   tick() {
     const a = this.active;
     if (!a) return false;
-    if (!!a.petGid !== this.petMode() || a.petGid && this.pet()?.rec.gid !== a.petGid) { this.suspend(); return false; }
-    if (!a.petGid) Hunt.state = 'loot';
     const e = World.ents.get(a.gid);
+    if (!!a.petGid !== (e ? this.collector(e) === 'pet' : !!a.petGid) || a.petGid && this.pet()?.rec.gid !== a.petGid) { this.suspend(); return false; }
+    if (!a.petGid) Hunt.state = 'loot';
     if (this.gained(a)) {
       Stats.pickup(a);
       // If inventory updates precede despawn, don't request this same drop again.
@@ -3841,19 +3857,14 @@ Hunt.tick = function () {
   if (H.stopInvFull && World.freeBagSlots() === 0) return this.stop('inventory full');
   Loot.preparePet();
   const attacked = this.underAttack(), current = this.currentTarget();
-  if (Loot.petMode()) {
-    // Pet movement does not own the character's combat tick.
-    if (Loot.active) Loot.tick();
-    if (!Loot.active && H.pickup.enabled) {
-      const drop = Loot.choose();
-      if (drop) Loot.begin(drop);
-    }
-  } else {
-    if (attacked) Loot.suspend();
-    // Character pickup owns movement until done or interrupted by an attacker.
-    if (!attacked && Loot.active && Loot.tick()) return;
-    if (H.pickup.enabled && !attacked && (!current || !H.pickup.afterKillOnly) && !World.isSitting()) {
-      const drop = Loot.choose();
+  // One pickup at a time. A pet's request does not own the character's combat tick; a character pickup owns
+  // movement until it is done or an attacker interrupts it. The pet's drops go first, then the character's.
+  if (attacked && Loot.active && !Loot.active.petGid) Loot.suspend();
+  if (Loot.active) { if (Loot.active.petGid) Loot.tick(); else if (Loot.tick()) return; }
+  if (!Loot.active && H.pickup.enabled) {
+    if (Loot.petMode()) { const drop = Loot.choose('pet'); if (drop) Loot.begin(drop); }
+    if (!Loot.active && !attacked && (!current || !H.pickup.afterKillOnly) && !World.isSitting()) {
+      const drop = Loot.choose('character');
       if (drop && Loot.begin(drop)) { this.state = 'loot'; return; }
     }
   }
@@ -6287,7 +6298,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.91", "title": "Walks around trees and walls while chasing", "items": ["A character that stood still against a tree or wall while chasing a mob used to stay there until the no-damage timeout dropped the mob. After 2.5 seconds without moving or hurting its target, the bot now checks the game's collision data and, if the straight line is blocked, walks around the obstacle, then attacks as normal.", "After three detours on the same mob it drops that mob for a minute and picks another.", "Settings → Obstacles switches it off or changes the wait. It needs the game's collision data and works outdoors only."]}, {"version": "1.2.90", "title": "The bot is now MIT licensed", "items": ["Added an MIT licence under nixxane, so anyone can use, change and build on the bot, including inside other projects. The script header now says so."]}, {"version": "1.2.89", "title": "Items page: a rule for every item", "items": ["New Items page with every item in the game, filtered like sBot: item group, race, gender, type (armour part and material, accessory, weapon kind), degree, a search box, and \"Only items with a rule\".", "Per item: Pick (always or never), Store (warehouse on town trips), Sell (from the pet at the repair merchant), Keep, or Drop (thrown away from your bag or the pet while hunting, never picked up again). Click a cell, right-click a row, or use the buttons above the table to set every item shown (they ask for a second click).", "Rules come first; items without one follow the Loot switches and town settings as before. Your own bag is never sold, and potions and scrolls the town trip needs are never stored from it.", "With ten pages, the compact window now shows its page tabs in two rows."]}, {"version": "1.2.88", "title": "Small monsters first", "items": ["While fighting a stronger monster (a giant, say), the bot now switches to a weaker monster that is hitting you, kills it, and goes back. Before, it kept hitting the giant while the small ones wore you down.", "It only switches for monsters actually hitting you within chase distance, and only to a weaker class: two giants hitting you is no reason to switch.", "A target below 25% HP is finished first, and it never switches in the middle of a cast.", "The weakest attacker goes first (normal before champion, the most hurt one first), and it does not bounce back and forth while the giant keeps hitting.", "The status line says when it happens, for example \"switched to Mangyang (hitting you); back to Tiger Girl after\".", "The minimised icon could flash yellow for a moment after Stop all ended a walk back; it now shows the right colour straight away."], "note": "Always on; there is no switch for it."}, {"version": "1.2.87", "title": "Heal and buff your party", "items": ["New Party page. Tick \"Buff and heal party members\" and the bot supports the party with your own skills: a group heal when enough members are low, a heal on the lowest member, then party buffs on whoever does not have them yet. One cast at a time, after your own potions and before attacking.", "Pick party buffs from your learned skills that can target a party member. Each goes to everyone, or only to the names you list.", "It only casts on members you can see within the support range (30 m by default) and never walks to them. A buff that does not show up on a member after two tries waits a minute.", "The top of the page lists your party with HP and MP bars, distance, and which of your buffs each member has.", "The party options (auto-recruit, matching, resurrection) moved here from Settings."], "note": "Off by default. It runs while hunting; tick \"Also while hunting is stopped\" to support a party while you stand still."}, {"version": "1.2.86", "title": "Town page and new reasons to go to town", "items": ["New Town page. It shows the trip as a row of pictures (return scroll, warehouse, potions, repair, reverse) with what each step still needs, and everything that starts a trip in one place. The scroll town cycle settings and Arrows and bolts moved here from Supplies.", "Weapon is broken: a trip starts when your equipped weapon is at 0 durability, so it gets repaired instead of hitting with bare hands. On by default.", "Gear is worn: a trip starts when the most worn piece you are wearing drops below a percentage of its own maximum durability (15% by default). Off by default.", "No XP for a while: a trip starts after a number of minutes without experience (10 by default). Off by default.", "On a timer: a trip every so many minutes (60 by default). Off by default."], "note": "All of them need the town cycle on. The XP and timer clocks run only while hunting and restart with every trip."}, {"version": "1.2.85", "title": "The map shows the ground again", "items": ["The Map page showed only a black background in the game. The game now publishes its minimap tiles in a new compressed format inside a new kind of asset pack, which the bot could not read. It reads both now, so the minimap appears under the markers.", "The same fix lets the bot read any other game picture that moves to the new packs, so icons keep working after future game updates."]}, {"version": "1.2.84", "title": "Map page", "items": ["New Map page, first in the page list. It draws the game's own minimap around you with your hunting radius (yellow circle) and chase distance (dashed ring).", "It shows you (arrow), monsters (uniques and stronger classes stand out), party members (also ones out of sight, at the map's edge), other players with their names when zoomed in, NPCs and pets.", "Click the map to mark a point, then \"Make this the hunting spot\" to hunt there. Drag to look around, + and − (or the mouse wheel) to zoom, \"Follow me\" to centre on you again.", "Hunt radius and chase distance can be changed right under the map."], "note": "Dungeons have no map yet. In the wide window the map uses the full page width."}];
+const RELEASE_NOTES = [{"version": "1.2.92", "title": "The pet and the character can each pick up their own items", "items": ["Loot has a new section, Who picks up what: every kind of drop is set to Leave on the ground, Pickup pet or Character. The pet can collect elixirs and equipment while the character takes the potions and pills it wants on itself.", "The status line for a pet that is not picking up now names the item kinds that are switched off, for example 52 not wanted (30 equipment, 22 other items), instead of a general list of possible reasons.", "The old Collector setting is now Default collector and still decides for anything you do not set yourself."]}, {"version": "1.2.91", "title": "Walks around trees and walls while chasing", "items": ["A character that stood still against a tree or wall while chasing a mob used to stay there until the no-damage timeout dropped the mob. After 2.5 seconds without moving or hurting its target, the bot now checks the game's collision data and, if the straight line is blocked, walks around the obstacle, then attacks as normal.", "After three detours on the same mob it drops that mob for a minute and picks another.", "Settings → Obstacles switches it off or changes the wait. It needs the game's collision data and works outdoors only."]}, {"version": "1.2.90", "title": "The bot is now MIT licensed", "items": ["Added an MIT licence under nixxane, so anyone can use, change and build on the bot, including inside other projects. The script header now says so."]}, {"version": "1.2.89", "title": "Items page: a rule for every item", "items": ["New Items page with every item in the game, filtered like sBot: item group, race, gender, type (armour part and material, accessory, weapon kind), degree, a search box, and \"Only items with a rule\".", "Per item: Pick (always or never), Store (warehouse on town trips), Sell (from the pet at the repair merchant), Keep, or Drop (thrown away from your bag or the pet while hunting, never picked up again). Click a cell, right-click a row, or use the buttons above the table to set every item shown (they ask for a second click).", "Rules come first; items without one follow the Loot switches and town settings as before. Your own bag is never sold, and potions and scrolls the town trip needs are never stored from it.", "With ten pages, the compact window now shows its page tabs in two rows."]}, {"version": "1.2.88", "title": "Small monsters first", "items": ["While fighting a stronger monster (a giant, say), the bot now switches to a weaker monster that is hitting you, kills it, and goes back. Before, it kept hitting the giant while the small ones wore you down.", "It only switches for monsters actually hitting you within chase distance, and only to a weaker class: two giants hitting you is no reason to switch.", "A target below 25% HP is finished first, and it never switches in the middle of a cast.", "The weakest attacker goes first (normal before champion, the most hurt one first), and it does not bounce back and forth while the giant keeps hitting.", "The status line says when it happens, for example \"switched to Mangyang (hitting you); back to Tiger Girl after\".", "The minimised icon could flash yellow for a moment after Stop all ended a walk back; it now shows the right colour straight away."], "note": "Always on; there is no switch for it."}, {"version": "1.2.87", "title": "Heal and buff your party", "items": ["New Party page. Tick \"Buff and heal party members\" and the bot supports the party with your own skills: a group heal when enough members are low, a heal on the lowest member, then party buffs on whoever does not have them yet. One cast at a time, after your own potions and before attacking.", "Pick party buffs from your learned skills that can target a party member. Each goes to everyone, or only to the names you list.", "It only casts on members you can see within the support range (30 m by default) and never walks to them. A buff that does not show up on a member after two tries waits a minute.", "The top of the page lists your party with HP and MP bars, distance, and which of your buffs each member has.", "The party options (auto-recruit, matching, resurrection) moved here from Settings."], "note": "Off by default. It runs while hunting; tick \"Also while hunting is stopped\" to support a party while you stand still."}, {"version": "1.2.86", "title": "Town page and new reasons to go to town", "items": ["New Town page. It shows the trip as a row of pictures (return scroll, warehouse, potions, repair, reverse) with what each step still needs, and everything that starts a trip in one place. The scroll town cycle settings and Arrows and bolts moved here from Supplies.", "Weapon is broken: a trip starts when your equipped weapon is at 0 durability, so it gets repaired instead of hitting with bare hands. On by default.", "Gear is worn: a trip starts when the most worn piece you are wearing drops below a percentage of its own maximum durability (15% by default). Off by default.", "No XP for a while: a trip starts after a number of minutes without experience (10 by default). Off by default.", "On a timer: a trip every so many minutes (60 by default). Off by default."], "note": "All of them need the town cycle on. The XP and timer clocks run only while hunting and restart with every trip."}, {"version": "1.2.85", "title": "The map shows the ground again", "items": ["The Map page showed only a black background in the game. The game now publishes its minimap tiles in a new compressed format inside a new kind of asset pack, which the bot could not read. It reads both now, so the minimap appears under the markers.", "The same fix lets the bot read any other game picture that moves to the new packs, so icons keep working after future game updates."]}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -6444,18 +6455,18 @@ const Diagnostics = {
   },
   // Why nothing is being collected, counted from the drops in view. Counts only, no item names.
   noLoot() {
-    const why = { failed: 0, far: 0, area: 0, owner: 0, filter: 0, pet: 0, petFar: 0, full: 0 };
+    const why = { failed: 0, far: 0, area: 0, owner: 0, filter: 0, pet: 0, petFar: 0, full: 0 }, unwanted = {};
     let seen = 0, ready = 0;
     if (!World.pose()) return '';
     for (const e of World.ents.values()) {
       if (e.kind !== 'ground-item') continue;
       seen++;
       const reason = Loot.whyNot(e);
-      if (reason) why[reason]++; else ready++;
+      if (reason) { why[reason]++; if (reason === 'filter') { const k = Loot.filterWhy(e); unwanted[k] = (unwanted[k] || 0) + 1; } } else ready++;
     }
     if (!seen) return 'No drops in view.';
     const parts = [
-      [why.filter, 'its type is switched off in Loot, or it is excluded by name, or SoX only is on'],
+      [why.filter, 'not wanted by your Loot settings (' + Object.entries(unwanted).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} ${Loot.filterLabel(k)}`).join(', ') + ')'],
       [why.far, 'too far from you (Pickup radius)'],
       [why.area, 'outside the hunting area'],
       [why.owner, 'it belongs to another player'],
@@ -6577,7 +6588,7 @@ const Diagnostics = {
         hpTarget: this.number(Restock.cfg().hp.target), mpTarget: this.number(Restock.cfg().mp.target),
         buyCure: !!Restock.cfg().cure.on, cureTarget: this.number(Restock.cfg().cure.target), cureLow: this.number(Restock.cfg().cure.low),
         hpLow: this.number(Restock.cfg().hp.low), mpLow: this.number(Restock.cfg().mp.low),
-        collectDrops: !!c.hunt.pickup.enabled, petCollector: Loot.petMode(), pickupRadius: this.number(c.hunt.pickup.radius / 10),
+        collectDrops: !!c.hunt.pickup.enabled, petCollector: Loot.petMode(), characterCollects: Loot.categories.some(k => c.hunt.pickup[k] && Loot.collectorFor(k) === 'character'), pickupRadius: this.number(c.hunt.pickup.radius / 10),
         finishFight: !!c.hunt.pickup.afterKillOnly, speedScroll: !!c.potion.speedScroll }
     };
   },
@@ -7698,19 +7709,25 @@ const UI = {
     } else if (this.current === 'Loot') {
       const L = () => H().pickup;
       const options = this.group('Collection');
-      options.append(this.select('Collector', [['character', 'Character'], ['pet', 'Pickup pet']], () => L().collector, v => { L().collector = v; Loot.reset(); }),
-);
+      options.append(this.select('Default collector', [['character', 'Character'], ['pet', 'Pickup pet']], () => L().collector, v => { L().collector = v; Loot.reset(); }));
       options.append(this.check('Chime when pet bag is full', () => L().petFullSound, v => { L().petFullSound = v; Loot.fullAlert = null; }), this.button('Test pet chime', () => Sound.test()),
         this.check('Chime and notice when a SoX item is picked up', () => L().soxSound, v => L().soxSound = v), this.button('Test SoX chime', () => Sound.test('sox')));
       this.petNote = el('p', '', 'muted'); options.append(this.petNote);
       options.append(this.row(...[['Elixirs only','elixirs'],['Elixirs + gold','elixirs-gold'],['All items','all']].map(([label,mode]) => this.button(label, () => { Loot.preset(mode); this.draw(); }))));
-      for (const [key, label] of [['enabled', 'Collect drops'], ['soxOnly', 'Equipment: only SoX (Star / Moon / Sun)'], ['gold', 'Gold'], ['potions', 'Potions and cure pills'], ['equipment', 'Equipment'], ['elixirs', 'Elixirs'], ['powders', 'Lucky powders'], ['magicStones', 'Magic stones (stored in the warehouse)'], ['attrStones', 'Attribute stones (stored in the warehouse)'], ['alchemy', 'Other alchemy items'], ['others', 'Other items'], ['afterKillOnly', 'Finish current fight before character pickup']]) options.append(this.check(label, () => L()[key], v => L()[key] = v));
+      for (const [key, label] of [['enabled', 'Collect drops'], ['soxOnly', 'Equipment: only SoX (Star / Moon / Sun)'], ['afterKillOnly', 'Character: finish the current fight before picking up']]) options.append(this.check(label, () => L()[key], v => L()[key] = v));
+      const kinds = this.group('Who picks up what');
+      for (const [key, label] of [['gold', 'Gold'], ['potions', 'Potions and cure pills'], ['equipment', 'Equipment'], ['elixirs', 'Elixirs'], ['powders', 'Lucky powders'], ['magicStones', 'Magic stones (stored in the warehouse)'], ['attrStones', 'Attribute stones (stored in the warehouse)'], ['alchemy', 'Other alchemy items'], ['others', 'Other items']])
+        kinds.append(this.select(label, [['off', 'Leave on the ground'], ['pet', 'Pickup pet'], ['character', 'Character']],
+          () => L()[key] ? Loot.collectorFor(key) : 'off',
+          v => { if (v === 'off') L()[key] = false; else { L()[key] = true; (L().by ||= {})[key] = v; } Loot.reset(); }));
+      kinds.append(el('p', 'Each kind of drop is either left alone, taken by your pickup pet, or taken by the character. The pet collects while you fight and fills its own bag; the character walks to the item and uses your bag, so give it only the few kinds you want on you (for example potions or pills). The default collector decides for kinds you have not set yourself and for names under Always include.', 'muted'));
       options.append(this.number('Pickup radius (m)', () => L().radius / 10, v => L().radius = v * 10, 3, 100),
         this.number('Retries after first attempt', () => L().retries, v => L().retries = v, 0, 3),
         this.text('Always include names', () => L().include, v => L().include = v),
         this.text('Exclude names', () => L().exclude, v => L().exclude = v),
-        el('p', 'Pets collect during combat regardless of the finish-fight setting. Inventory transactions and potion priority can briefly delay pet requests. Equipment: only SoX takes Star, Moon and Sun gear and leaves plain equipment, even when Equipment or an Always include name matches it; other items follow their own switches. It needs the item catalogue, which loads automatically. Presets clear Always include names; exclusions still apply. Other items excludes the separate categories above. Ownership and bag capacity always apply. Failed pickups use a backoff.', 'muted'));
+        el('p', 'Pets collect during combat regardless of the finish-fight setting, which applies to the character only. Inventory transactions and potion priority can briefly delay pet requests. Equipment: only SoX takes Star, Moon and Sun gear and leaves plain equipment, even when Equipment or an Always include name matches it; other items follow their own switches. It needs the item catalogue, which loads automatically. Presets clear Always include names; exclusions still apply. Other items excludes the separate categories above. Ownership and bag capacity always apply. Failed pickups use a backoff.', 'muted'));
       this.pane.append(options);
+      this.pane.append(kinds);
     } else if (this.current === 'Supplies') {
       const pots = this.group('Automatic potion use', this.check('Use potions automatically', () => P().enabled, v => P().enabled = v));
       this.speedNote = el('p', '', 'muted');
