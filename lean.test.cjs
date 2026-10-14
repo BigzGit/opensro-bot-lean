@@ -1288,6 +1288,15 @@ function skillFixture(extra = {}, learned = [1001]) {
   return f;
 }
 const skillTrains = f => f.commands.filter(c => c.kind === 'skill-train').map(c => c.id);
+test('the auto mastery status says why skills are not raised: switch off, nothing in the rotation, not learned, already highest', () => {
+  let f = skillFixture(); f.Settings.profile.mastery.enabled = true; f.Settings.profile.mastery.order = 'skills'; f.Settings.profile.mastery.skills = false; f.Settings.profile.mastery.ids = [257]; f.Settings.profile.mastery.gap = 50;
+  f.Controller.tick(); assert.deepEqual(skillTrains(f), []);
+  assert.match(f.AutoMastery.status(), /skills are not raised: "Upgrade my rotation and buff skills automatically" is off/, 'Skills first alone does nothing');
+  f = skillFixture(); f.Settings.profile.macro.rotations.normal = []; f.Controller.tick();
+  assert.match(f.AutoMastery.status(), /no skills in your attack rotations, buffs or imbue yet/);
+  f = skillFixture({}, []); f.Controller.tick(); assert.match(f.AutoMastery.status(), /Skill 100: not learned yet|: not learned yet/);
+  f = skillFixture({}, [1001, 1002, 1003]); f.Controller.tick(); assert.match(f.AutoMastery.status(), /already at its highest level \(3\)/);
+});
 test('auto skill upper learns the next level of skills in the rotation, one confirmed level at a time', () => {
   const f = skillFixture();
   f.Controller.tick(); assert.deepEqual(skillTrains(f), [1002]);

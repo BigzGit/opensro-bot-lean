@@ -69,17 +69,22 @@ const AutoMastery = {
   skillStep(progression, skipped) {
     if (!this.cfg().skills) return false;
     if (!World.groups.size) { skipped.push('skill catalogue not loaded'); return false; }
-    for (const group of this.wanted()) {
+    const groups = this.wanted();
+    if (!groups.length) { skipped.push('no skills in your attack rotations, buffs or imbue yet'); return false; }
+    const quiet = [], name = group => World.skillName(World.bestOfGroup(group, (World.groups.get(group) || [])[0]?.id) || (World.groups.get(group) || [])[0]?.id) || 'Skill ' + group;
+    const summary = () => { for (const line of quiet.slice(0, 6)) skipped.push(line); if (quiet.length > 6) skipped.push('and ' + (quiet.length - 6) + ' more skills'); };
+    for (const group of groups) {
       const current = this.groupLevel(group);
-      if (!current) continue;
+      if (!current) { quiet.push(name(group) + ': not learned yet'); continue; }
       const row = (World.groups.get(group) || []).find(s => s.level === current + 1);
-      if (!row) continue;
-      const label = (World.skillName(World.bestOfGroup(group, row.id) || row.id) || 'Skill') + ' level ' + row.level;
+      if (!row) { quiet.push(name(group) + ': already at its highest level (' + current + ')'); continue; }
+      const label = name(group) + ' level ' + row.level;
       if ((this.blocked.get('s' + row.id) ?? 0) > now()) { skipped.push(label + ': recently refused'); continue; }
       const why = this.skillReason(row, progression);
       if (why) { skipped.push(label + ': ' + why); continue; }
       return this.send('skill-train', row.id, 'Learning ' + label, { name: label });
     }
+    summary();
     return false;
   },
   tick() {
@@ -106,6 +111,8 @@ const AutoMastery = {
     if (now() - this.lastAt < 1500 || !Cmd.spaced('mastery-train') || !Cmd.spaced('skill-train')) return;
     const skipped = [], order = c.order === 'skills' ? ['skills', 'masteries'] : c.order === 'alternate' ? (this.turn === 'skills' ? ['skills', 'masteries'] : ['masteries', 'skills']) : ['masteries', 'skills'];
     for (const step of order) if (step === 'masteries' ? this.masteryStep(progression, skipped) : this.skillStep(progression, skipped)) return;
+    // The order setting only matters when both switches are on, so say when the skills one is off.
+    if (!c.skills) skipped.push('skills are not raised: "Upgrade my rotation and buff skills automatically" is off');
     this.message = c.enabled && !c.ids.length && !c.skills ? 'Choose which masteries to raise.'
       : 'Nothing to raise (' + (skipped.join('; ') || 'selected masteries not found') + ').';
   },
@@ -124,7 +131,7 @@ const AutoMastery = {
     box.append(UI.number('Keep this many levels below my level', () => this.cfg().gap, v => this.cfg().gap = v, 0, 50),
       UI.check('Upgrade my rotation and buff skills automatically', () => this.cfg().skills, v => { this.cfg().skills = v; this.pending = null; this.blocked.clear(); }),
       UI.number('Keep this many skill points unspent', () => this.cfg().reserve, v => this.cfg().reserve = v, 0, 100000000),
-      UI.select('Spend skill points on', [['masteries', 'Masteries first'], ['skills', 'Skills first'], ['alternate', 'Alternate']], () => this.cfg().order, v => this.cfg().order = v));
+      UI.select('Order when both are ticked', [['masteries', 'Masteries first'], ['skills', 'Skills first'], ['alternate', 'Alternate']], () => this.cfg().order, v => this.cfg().order = v));
     this.note = el('p', this.message, 'muted');
     box.append(this.note, el('p', 'Trains one level at a time and waits for each to be confirmed. Masteries are raised in the order you tick them until they reach your character level (or 120) minus the gap; level 0 is free, otherwise the price is the table cost of the current level. Skills are the next level of the attack, buff and imbue skills you already use, using the game\'s own requirements (mastery level, prerequisite skills, STR and INT, skill points). The reserve is never spent. Works while hunting is stopped and does nothing while you are dead. If the server refuses a level (for example its mastery total limit) the bot waits a minute before trying again. Off by default and saved per character.', 'muted'));
     parent.append(box);

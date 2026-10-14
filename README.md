@@ -134,6 +134,10 @@ When no monster is being attacked, the status line says why, counted from the mo
 
 When the pickup pet is ready but collects nothing, the status line says why, counted from the drops in view: for example "Drops in view: 4, ready to collect: 1. Not collected: 2: not wanted by your Loot settings (1 equipment, 1 other items); 1: too far from you (Pickup radius)." The part in brackets names the item kinds that are switched off, so you can see exactly what to switch on. The reasons are: type switched off or excluded or SoX only, too far from you, outside the hunting area, belongs to another player, too far from the pet, the pet is not ready, no room in the bag, and recently failed. **Finish current fight before character pickup** only affects a character collector; a pickup pet collects during fights whatever it is set to.
 
+## Auto skill upgrades: which skills
+
+**Upgrade my rotation and buff skills automatically** (Settings → Auto mastery and skills) raises the next level of skills you have **already learned** and that are in your attack rotations, buffs or weapon imbue on the Combat tab. A skill that is in none of those lists is never raised, and new skills are never learned. The status line under the switches names each skill it is not raising and why (not learned yet, already at its highest level, mastery or strength too low, prerequisite missing, not enough skill points). The order dropdown only matters when both the mastery and the skill switches are ticked.
+
 ## Waiting for a party resurrection
 
 With **Accept resurrection from party members** on, the bot waits 20 seconds after dying before it revives itself whenever a living party member is in view (seen in the last 15 seconds counts), so the member has time to resurrect it. Without a helper in view it revives after 5 seconds. The Activity log says which when the character dies, and an open resurrection offer is always answered first.
