@@ -3583,7 +3583,7 @@ test('session XP keeps unresolved level transitions bounded and marked partial',
 async function updateTests() {
   async function check(name, fn) { await fn(); passed++; console.log('PASS ' + name); }
   const sha = 'a'.repeat(40), base = 'https://raw.githubusercontent.com/nixxane/opensro-bot-lean/' + sha + '/bot.lean.';
-  function updater(f, version = '1.2.100') {
+  function updater(f, version = '9.9.9') {
     const calls = [];
     f.win.fetch = async (url, options) => {
       calls.push({ url, options });
@@ -3594,16 +3594,16 @@ async function updateTests() {
   }
   await check('updates compare numeric version components and ignore malformed versions', async () => {
     const f = fixture();
-    for (const v of ['1.2.100', '1.3.0', '2.0.0']) assert.equal(f.Updates.newer(v), true);
+    for (const v of ['9.9.9', '1.3.0', '2.0.0']) assert.equal(f.Updates.newer(v), true);
     for (const v of ['1.2.9', '1.2.36', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
   });
   await check('updates pin metadata and user-initiated installer to the same trusted commit', async () => {
     const f = fixture(), calls = updater(f); f.UI.updateButton = {};
     await f.Updates.check();
     assert.equal(calls.length, 3); assert.equal(calls[1].url, base + 'meta.js');
-    assert.equal(calls[2].url, 'https://raw.githubusercontent.com/nixxane/opensro-bot-lean/' + sha + '/notes/1.2.100.md', 'the headline comes from the same commit');
+    assert.equal(calls[2].url, 'https://raw.githubusercontent.com/nixxane/opensro-bot-lean/' + sha + '/notes/9.9.9.md', 'the headline comes from the same commit');
     assert.equal(calls[0].options.credentials, 'omit'); assert.equal(calls[0].options.cache, 'no-store');
-    assert.equal(f.UI.updateButton.hidden, false); assert.equal(f.UI.updateButton.textContent, 'Update 1.2.100');
+    assert.equal(f.UI.updateButton.hidden, false); assert.equal(f.UI.updateButton.textContent, 'Update 9.9.9');
     let opened; f.win.open = (...args) => { opened = args; };
     assert.equal(opened, undefined); f.Updates.open();
     assert.deepEqual(opened, [base + 'user.js', '_blank', 'noopener,noreferrer']);
@@ -3617,7 +3617,7 @@ async function updateTests() {
       f.win.fetch = async url => {
         calls.push(url);
         if (url.includes('api.github.com')) return { ok: true, json: async () => ({ sha }) };
-        if (url.endsWith('meta.js')) return { ok: true, text: async () => '// @version      1.2.100' + String.fromCharCode(10) };
+        if (url.endsWith('meta.js')) return { ok: true, text: async () => '// @version      9.9.9' + String.fromCharCode(10) };
         if (notes === null) throw Error('offline');
         return { ok, text: async () => notes };
       };
@@ -3626,8 +3626,8 @@ async function updateTests() {
     const nl = String.fromCharCode(10);
     let { f, calls } = await run('# Faster looting' + nl + '- item' + nl);
     assert.equal(f.Updates.latest.title, 'Faster looting');
-    assert.equal(f.UI.updateNote.hidden, false); assert.equal(f.UI.updateNote.textContent, 'Update 1.2.100 available: Faster looting');
-    assert.match(f.UI.updateButton.title, /^1\.2\.100: Faster looting · Open Tampermonkey/);
+    assert.equal(f.UI.updateNote.hidden, false); assert.equal(f.UI.updateNote.textContent, 'Update 9.9.9 available: Faster looting');
+    assert.match(f.UI.updateButton.title, /^9.9.9: Faster looting · Open Tampermonkey/);
     await f.Updates.check(); assert.equal(calls.filter(u => u.includes('/notes/')).length, 1, 'the headline is read once per version');
     const hostile = '# A' + String.fromCharCode(0, 27, 133) + 'B <img src=x onerror=alert(1)> ' + 'x'.repeat(300);
     ({ f } = await run(hostile));
@@ -3635,7 +3635,7 @@ async function updateTests() {
     ({ f } = await run('# One' + String.fromCharCode(8232) + 'Two')); assert.equal(f.Updates.latest.title, 'One', 'a line separator ends the headline');
     for (const [notes, ok] of [['no title line', true], ['# Gone', false], [null, true]]) {
       ({ f } = await run(notes, ok));
-      assert.equal(f.Updates.latest.version, '1.2.100', 'the update is still offered'); assert.equal(f.Updates.latest.title, '');
+      assert.equal(f.Updates.latest.version, '9.9.9', 'the update is still offered'); assert.equal(f.Updates.latest.title, '');
       assert.equal(f.UI.updateNote.hidden, true); assert.match(f.UI.updateButton.title, /^Open Tampermonkey/);
     }
   });
