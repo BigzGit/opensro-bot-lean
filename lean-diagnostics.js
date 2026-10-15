@@ -132,6 +132,8 @@ const Diagnostics = {
     return `Monsters in view: ${seen}. Skipped: ${parts.join('; ') || 'none'}.`;
   },
   main() {
+    if (Trap.run) return Trap.message;
+    if (Chase.owns()) return Chase.message || 'Checking obstacle approach.';
     if (BuffGear.run) return BuffGear.run.restoring ? 'Buff gear: restoring combat equipment.' : 'Buff gear: swapping or casting.';
     if (BuffGear.recovery) return 'Buff gear: manual equipment review needed.';
     if (Alchemy.pending) return Alchemy.run ? 'Alchemy: waiting for the server result.' : 'Alchemy stopped; outstanding result unconfirmed.';

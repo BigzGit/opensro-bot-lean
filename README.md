@@ -214,3 +214,7 @@ After an update, reload the game and check the version shown in the panel.
 ## License
 
 MIT, copyright nixxane. See [LICENSE](LICENSE). You may use, change and share it, including inside other projects, as long as the copyright notice stays.
+
+## Obstacle pursuit and escape recovery
+
+Version 1.2.101 checks blocked approaches before repeating attacks, keeps detour movement exclusive, and abandons unreachable enemies with bounded retries. Escape requires collision-checked destinations and fresh movement confirmation. Under Settings, optional recovery recall and detailed local diagnostics both default off. Recovery recall completes town services and stops in town instead of reversing into the trap. See [OBSTACLE-RECOVERY.md](OBSTACLE-RECOVERY.md) for behavior, limits and validation commands.

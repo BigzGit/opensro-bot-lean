@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.100
+// @version      1.2.101
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.100';
+const VERSION = '1.2.101';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -228,7 +228,7 @@ const DEFAULT_PROFILE = {
     sit: { enabled: true, hpBelow: 35, mpBelow: 20, resumeAt: 90 },
     antiStuck: { enabled: true, minutes: 3, maxRecoveries: 3 },
     detour: { enabled: true, stallMs: 2500 },
-    trap: { enabled: true, seconds: 20 },
+    trap: { enabled: true, seconds: 20, recall: false, diagnostics: false },
     onDeath: 'stop', stopNoHpPotion: false, stopInvFull: false,
     playerAlert: { enabled: false, radius: 250, pause: false }, manualPauseS: 6,
   },
@@ -1886,9 +1886,16 @@ const Navigation = {
     const t = n ? clamp(((p.x - a.x) * dx + (p.z - a.z) * dz) / n, 0, 1) : 0;
     return Math.hypot(p.x - a.x - t * dx, p.z - a.z - t * dz);
   },
-  clear(a, b) {
+  clear(a, b, departing = false) {
     const length = Math.hypot(b.x - a.x, b.z - a.z), steps = Math.max(1, Math.ceil(length / 8));
-    for (let i = 1; i <= steps; i++) if (!this.open(a.x + (b.x - a.x) * i / steps, a.z + (b.z - a.z) * i / steps)) return false;
+    let reachedOpen = this.open(a.x, a.z);
+    for (let i = 1; i <= steps; i++) {
+      const x = a.x + (b.x - a.x) * i / steps, z = a.z + (b.z - a.z) * i / steps;
+      if (!this.covered(x, z)) return false;
+      if (this.open(x, z)) reachedOpen = true;
+      else if (!departing || reachedOpen) return false;
+    }
+    if (!reachedOpen) return false;
     const minX = Math.floor((Math.min(a.x, b.x) - 2) / 80), maxX = Math.floor((Math.max(a.x, b.x) + 2) / 80);
     const minZ = Math.floor((Math.min(a.z, b.z) - 2) / 80), maxZ = Math.floor((Math.max(a.z, b.z) + 2) / 80);
     const cross = (p, q, r) => (q.x - p.x) * (r.z - p.z) - (q.z - p.z) * (r.x - p.x);
@@ -1905,7 +1912,7 @@ const Navigation = {
     }
     return true;
   },
-  plan(from, to, arrivalRadius = 0) {
+  plan(from, to, arrivalRadius = 0, options = {}) {
     if (!this.scene || (from.regionId | to.regionId) & DUNGEON) return null;
     const start = this.local(from), goal = this.local(to);
     if (!start || !goal || !this.open(start.x, start.z)) return null;
@@ -1921,7 +1928,8 @@ const Navigation = {
       return top;
     };
     push(first); let best = first, reached = false;
-    for (let n = 0; heap.length && n < 60000; n++) {
+    let visited = 0;
+    for (; heap.length && visited < (options.maxNodes ?? 60000); visited++) {
       const p = pop(), k = key(p); if (closed.has(k)) continue; closed.add(k);
       if (h(p) < h(best)) best = p;
       const a = p === first ? start : center(p);
@@ -1934,6 +1942,7 @@ const Navigation = {
         q.f = q.g + h(q); scores.set(qk, q.g); push(q);
       }
     }
+    if (options.result) { options.result.limited = !reached && heap.length > 0; options.result.visited = visited; }
     const goalCovered = this.scene.grids.has(Math.floor(goal.x / SECTOR) + ',' + Math.floor(goal.z / SECTOR));
     if (!reached && (goalCovered || h(first) - h(best) < 2)) return [];
     const path = []; for (let p = best; p && p !== first; p = p.parent) path.push(center(p)); path.reverse();
@@ -1941,7 +1950,7 @@ const Navigation = {
     // Smooth only segments whose terrain and object collision checks both pass.
     const result = []; let anchor = start;
     for (let i = 0; i < path.length;) {
-      let j = i; while (j + 1 < path.length && Math.hypot(path[j + 1].x - anchor.x, path[j + 1].z - anchor.z) < 600 && this.clear(anchor, path[j + 1])) j++;
+      let j = i; while (j + 1 < path.length && Math.hypot(path[j + 1].x - anchor.x, path[j + 1].z - anchor.z) < (options.maxChord ?? 600) && this.clear(anchor, path[j + 1])) j++;
       result.push(this.pose(path[j], from.y)); anchor = path[j]; i = j + 1;
     }
     return result;
@@ -1964,6 +1973,163 @@ const Navigation = {
   },
 };
 Hook.observers.push(command => Navigation.capture(command));
+
+
+/*
+===========================================================================
+lean-pursuit-navigation.js - bounded, explicit pursuit and escape queries
+
+Uses admitted game collision products. A query never changes a player pose;
+the native movement command and its observed result remain authoritative.
+===========================================================================
+*/
+const PURSUIT_NAV = { nodes: 6000, chord: 120, step: 60, arrive: 7, height: 20, candidates: 4 };
+
+/*
+================
+Navigation.covered
+================
+*/
+Navigation.covered = function( x, z ) {
+	return !!this.scene?.grids.has( Math.floor( x / SECTOR ) + "," + Math.floor( z / SECTOR ) );
+};
+
+/*
+================
+Navigation.pointStatus
+
+Terrain openness alone is not object clearance. Closed object interiors still
+require a reachable chord; this query deliberately makes no ownership claim.
+================
+*/
+Navigation.pointStatus = function( pose ) {
+	if ( !pose || !this.scene || pose.regionId & DUNGEON ) return "unknown";
+	const p = this.local( pose );
+	if ( !p || !this.covered( p.x, p.z ) ) return "unknown";
+	return this.open( p.x, p.z ) && this.clear( p, p ) ? "open" : "blocked";
+};
+
+/*
+================
+Navigation.setClipQuery
+
+Optional synchronous, read-only client adapter. A missing/unknown reply never
+authorizes movement. The default implementation uses the existing bundle.
+================
+*/
+Navigation.setClipQuery = function( query = null ) {
+	if ( query !== null && typeof query !== "function" ) throw Error( "Invalid clip query" );
+	this.clipQuery = query;
+};
+
+/*
+================
+Navigation.segment
+================
+*/
+Navigation.segment = function( from, to, departing = false ) {
+	if (
+		!from || !to || !Number.isFinite( dist2D( from, to ) ) ||
+		Math.abs( (from.y ?? 0) - (to.y ?? 0) ) > PURSUIT_NAV.height
+	) return false;
+	if ( this.pointStatus( to ) !== "open" ) return false;
+	const a = this.local( from ), b = this.local( to );
+	if ( !a || !b || !this.clear( a, b, departing ) ) return false;
+	if ( !this.clipQuery ) return true;
+	try {
+		const clipped = this.clipQuery( {
+			from: { ...from },
+			to: { ...to },
+			epoch: World.epoch,
+			revision: this.revision
+		} );
+		return !!clipped && clipped.epoch === World.epoch && clipped.revision === this.revision &&
+			Number.isFinite( clipped.pose?.y ) && Math.abs( clipped.pose.y - (to.y ?? 0) ) <= 2 &&
+			dist2D( clipped.pose, to ) <= 2;
+	} catch {
+		return false;
+	}
+};
+
+/*
+================
+Navigation.query
+
+The legacy plan/next interface stays intact for town and recorded routes.
+Pursuit must distinguish an unavailable map from a proven failed search.
+================
+*/
+Navigation.query = function( from, to, maxNodes = PURSUIT_NAV.nodes ) {
+	const start = this.pointStatus( from ), end = this.pointStatus( to );
+	if ( start === "unknown" || end === "unknown" ) return { status: "unknown", route: [] };
+	if ( start === "blocked" ) return { status: "invalid-start", route: [] };
+	if ( this.segment( from, to ) ) return { status: "direct", route: [ to ] };
+	const result = {};
+	const route = this.plan( from, to, 0, { maxNodes, maxChord: PURSUIT_NAV.chord, result } );
+	if ( !route?.length ) {
+		return { status: result.limited ? "search-limit" : "unreachable", route: [], visited: result.visited };
+	}
+	let previous = from;
+	for ( const point of route ) {
+		if ( !this.segment( previous, point ) ) return { status: "unreachable", route: [], visited: result.visited };
+		previous = point;
+	}
+	return { status: "route", route, visited: result.visited };
+};
+
+/*
+================
+Navigation.attackRoute
+
+Only consider nearby stand-off goals when their final approach is clear.
+Walking obstruction is never treated as projectile line-of-sight.
+================
+*/
+Navigation.attackRoute = function( from, target, radius, failed = [] ) {
+	const direct = this.query( from, target );
+	if ( ![ "route", "unreachable" ].includes( direct.status ) || radius <= PURSUIT_NAV.arrive ) return direct;
+	const delta = regionDelta( target, from );
+	if ( !delta ) return direct;
+	const angle = Math.atan2( delta[1], delta[0] ), local = this.local( target );
+	let budget = PURSUIT_NAV.nodes - (direct.visited || 0);
+	for ( let i = 0; i < PURSUIT_NAV.candidates && budget > 0; i++ ) {
+		const theta = angle + [ 0, Math.PI / 2, -Math.PI / 2, Math.PI ][i];
+		const goal = this.pose(
+			{ x: local.x + Math.cos( theta ) * radius, z: local.z + Math.sin( theta ) * radius },
+			from.y
+		);
+		if ( failed.some( p => dist2D( p, goal ) < PURSUIT_NAV.step ) || !this.segment( goal, target ) ) continue;
+		const route = this.query( from, goal, budget );
+		budget -= route.visited || 0;
+		if ( route.status === "route" || route.status === "direct" ) return route;
+	}
+	return direct;
+};
+
+/*
+================
+Navigation.escapeCandidates
+
+Never cross object walls to get out of a blocked terrain start. Native terrain
+departure permits a contiguous blocked prefix, but not reentry or missing data.
+================
+*/
+Navigation.escapeCandidates = function( from ) {
+	if ( !this.scene || !from || from.regionId & DUNGEON ) return [];
+	const p = this.local( from ), out = [];
+	for ( const radius of [ 20, 40, 80, 120 ] ) {
+		for ( let i = 0; i < 8; i++ ) {
+			const theta = i * Math.PI / 4;
+			const to = this.pose(
+				{ x: p.x + Math.cos( theta ) * radius, z: p.z + Math.sin( theta ) * radius },
+				from.y
+			);
+			if ( this.segment( from, to, true ) ) out.push( to );
+		}
+		if ( out.length >= PURSUIT_NAV.candidates ) break;
+	}
+	return out.sort( ( a, b ) => dist2D( from, a ) - dist2D( from, b ) ).slice( 0, PURSUIT_NAV.candidates );
+};
 
 
 // Independent return command using the saved hunt centre and native movement.
@@ -3479,6 +3645,11 @@ const Town = {
       if (now() - t.at > 15000) this.fail('NPC window did not close.');
       else this.close({ 'close-storage': 'walk-vendor', 'close-vendor': 'walk-smith', 'close-smith': 'walk-gate' }[t.phase]);
     } else if (t.phase === 'reverse') {
+      if (t.recovery) {
+        this.trip = null;
+        Hunt.stop('Recovery town services completed. Check the hunting spot before returning.');
+        return true;
+      }
       if (gp.inventoryPending || World.isCasting()) return true;
       if (t.supplies.some(s => Restock.count(s.refObjId) < s.target) || this.damaged().length || !this.scroll(0x09ec) || !this.scroll(0x19ec)) { this.fail('Final supply, repair or travel-scroll check failed.'); return true; }
       if (World.freeBagSlots() <= 1) { this.fail('Returned to town; free at least two character bag slots before hunting again.'); return true; }
@@ -4028,6 +4199,8 @@ const Controller = {
       ItemRules.dropTick();
       Loot.checkPetFull();
       if (Town.tick()) { this.mode = 'town service'; return; }
+      if (Trap.tick()) { this.mode = 'escape'; return; }
+      if (Chase.tick()) { this.mode = 'obstacle pursuit'; return; }
       if (BuffGear.tick()) { this.mode = 'buff gear'; return; }
       if (SpeedScroll.tick()) { this.mode = 'speed scroll'; return; }
       if (!WalkBack.active && !Restock.trip && !Restock.recording && !Controller.resumeAfterRevive &&
@@ -4126,169 +4299,785 @@ bus.on('hunt', running => {
 });
 
 
-// Detour around an obstacle while chasing a target. The game walks a character straight at its target, so a tree or
-// a wall in between stops it dead until the no-damage timeout drops the mob. When the character has stood still for
-// a few seconds without hurting the target, and the collision data says the straight line is blocked, it walks the
-// planned route until the straight line is clear again, then the normal attack takes over.
+/*
+===========================================================================
+lean-chase.js - exclusive ownership of blocked combat approaches
+
+Failed routes retain movement until stopped. HP changes and jitter cannot
+renew an episode budget; only observed local impacts establish damage.
+===========================================================================
+*/
+const CHASE_LIMIT = {
+	send: 900,
+	stalled: 3000,
+	episode: 15000,
+	unknown: 5000,
+	verify: 500,
+	ban: 60000,
+	memory: 15000,
+	progress: 8,
+	targetMove: 40,
+	replans: 2
+};
+
+/*
+================
+Chase
+================
+*/
 const Chase = {
-  s: null, detour: null, message: '', detours: 0,
-  cfg() { return Settings.profile.hunt.detour; },
-  reset() { this.s = null; this.detour = null; },
-  // True when a detour moved the character this tick, so the normal engage must not send an attack that walks back.
-  drive(target) {
-    const c = this.cfg();
-    if (!c?.enabled || !Hunt.running) { this.reset(); return false; }
-    const t = now(), pose = World.pose(), gap = dist2D(pose, target);
-    if (!Number.isFinite(gap)) { this.reset(); return false; }
-    let s = this.s;
-    if (!s || s.gid !== target.gid) { s = this.s = { gid: target.gid, at: t, pose: { ...pose }, hp: World.hpOf(target.gid), detours: 0 }; this.detour = null; }
-    const moved = dist2D(s.pose, pose) > 3, hp = World.hpOf(target.gid);
-    if (hp !== s.hp) { s.hp = hp; s.at = t; this.detour = null; return false; }
-    if (World.gp.target !== target.gid || World.isCasting()) { s.at = t; s.pose = { ...pose }; return !!this.detour && this.step(target, t); }
-    if (this.detour) return this.step(target, t);
-    if (moved) { s.pose = { ...pose }; s.at = t; return false; }
-    if (t - s.at < c.stallMs || gap <= 15) return false;
-    // Stalled and not adjacent: act only when the planner says the straight line is blocked.
-    s.at = t;
-    const route = Navigation.plan(pose, target);
-    if (!route?.length || route.length === 1 && route[0] === target) return false;
-    if (s.detours >= 3) {
-      Hunt.ban.set(target.gid, t + 60000); Hunt.targetGid = 0;
-      this.message = `Gave up on ${target.name || target.gid}: three detours did not get there.`; Log.warn(this.message);
-      this.reset(); return true;
-    }
-    s.detours++; this.detours++;
-    this.detour = { at: t, sentAt: -Infinity, pose: { ...pose }, movedAt: t };
-    this.message = `Walking around an obstacle to reach ${target.name || target.gid}.`; Log.info(this.message);
-    return this.step(target, t);
-  },
-  step(target, t) {
-    const d = this.detour, pose = World.pose();
-    const end = why => { this.detour = null; this.s.at = t; this.s.pose = { ...pose }; if (why) Log.info('Detour ended: ' + why); return false; };
-    if (t - d.at > 15000) return end('took too long');
-    if (dist2D(d.pose, pose) > 3) { d.pose = { ...pose }; d.movedAt = t; } else if (t - d.movedAt > 3000) return end('not moving');
-    const route = Navigation.plan(pose, target);
-    if (!route?.length) return end('no route');
-    if (route.length === 1 && route[0] === target) return end('straight line is clear');
-    if (t - d.sentAt >= 900) {
-      const move = Navigation.next(d, target);
-      if (move.point && Cmd.move(move.point)) d.sentAt = t; else if (move.error) return end(move.error);
-    }
-    return true;
-  },
+	s: null,
+	detour: null,
+	message: "",
+	detours: 0,
+	failures: [],
+	hits: new Map(),
+	seenHits: new Set(),
+	castIds: new WeakMap(),
+	nextCastId: 0,
+	/*
+  ================
+  cfg
+  ================
+  */
+	cfg() {
+		return Settings.profile.hunt.detour;
+	},
+	/*
+  ================
+  reset
+  ================
+  */
+	reset( clear = false ) {
+		this.s = this.detour = null;
+		if ( clear ) {
+			this.failures = [];
+			this.hits.clear();
+			this.seenHits.clear();
+		}
+	},
+	/*
+  ================
+  owns
+  ================
+  */
+	owns() {
+		return !!this.s && this.s.phase !== "attack";
+	},
+	/*
+  ================
+  hit
+  ================
+  */
+	hit( gid, since = now() - 8000 ) {
+		return (this.hits.get( gid ) ?? -Infinity) >= since;
+	},
+	/*
+  ================
+  observe
+
+  Repeated cast publications are not new hits. Party damage cannot cancel a
+  detour; a local cast send without positive result impacts proves nothing.
+  ================
+  */
+	observe( cast ) {
+		if ( cast.caster !== World.localGid() ) return;
+		if ( !this.castIds.has( cast ) ) this.castIds.set( cast, ++this.nextCastId );
+		const token = cast.token ?? cast.startedAtMs ?? this.castIds.get( cast );
+		for ( const result of cast.results || [] ) {
+			for ( const [index, impact] of (result.impacts || []).entries() ) {
+				if ( !(impact.damage > 0) ) continue;
+				const key = `${token}:${cast.skill}:${result.target}:${impact.stage ?? index}:${impact.damage}`;
+				if ( this.seenHits.has( key ) ) continue;
+				this.seenHits.add( key );
+				this.hits.set( result.target, now() );
+			}
+		}
+		while ( this.seenHits.size > 512 ) this.seenHits.delete( this.seenHits.values().next().value );
+		while ( this.hits.size > 256 ) this.hits.delete( this.hits.keys().next().value );
+	},
+	/*
+  ================
+  radius
+
+  Unknown weapon reach is not guessed. Authored skills can supply a conservative
+  stand-off goal; successful ranged offense is preserved independently.
+  ================
+  */
+	radius( target ) {
+		const ranges = Combat.rotation( monsterClass( target ) ).map( e => World.skill( Combat.resolve( e ) ) )
+			.filter( s => s?.targetRequired && !s.groundTarget && s.range > 0 ).map( s => s.range );
+		return Math.min( 120, ranges.length ? Math.max( 7, Math.min( ...ranges ) - 5 ) : 7 );
+	},
+	/*
+  ================
+  canProbe
+
+  Authored range permits one bounded ranged trial, not a new line-of-sight rule.
+  ================
+  */
+	canProbe( target ) {
+		const distance = dist2D( World.pose(), target );
+		return Combat.rotation( monsterClass( target ) ).some( e => {
+			const s = World.skill( Combat.resolve( e ) );
+			return s?.targetRequired && !s.groundTarget && s.range >= 60 && s.range >= distance;
+		} );
+	},
+	/*
+  ================
+  remember
+  ================
+  */
+	remember( target ) {
+		this.failures.push( {
+			gid: target.gid,
+			from: { ...this.s.origin },
+			target: { ...target },
+			at: now(),
+			revision: Navigation.revision,
+			epoch: World.epoch
+		} );
+		if ( this.failures.length > 32 ) this.failures.shift();
+	},
+	/*
+  ================
+  repeated
+
+  A short-lived failure describes one approach, never a permanent area ban.
+  ================
+  */
+	repeated( target, from ) {
+		this.failures = this.failures.filter( f =>
+			now() - f.at < CHASE_LIMIT.memory &&
+			f.epoch === World.epoch && f.revision === Navigation.revision
+		);
+		return this.failures.some( f => dist2D( f.from, from ) < 40 && dist2D( f.target, target ) < 40 );
+	},
+	/*
+  ================
+  abandon
+  ================
+  */
+	abandon( target, reason ) {
+		this.remember( target );
+		this.s.phase = "abandon";
+		this.s.reason = reason;
+		this.s.abandonAt = now();
+		this.s.halted = false;
+		this.s.released = false;
+		this.message = "Blocked target: " + reason + "; stopping its approach.";
+		return true;
+	},
+	/*
+  ================
+  settle
+
+  A refused or cast-held halt retains ownership rather than resuming attacks.
+  ================
+  */
+	settle() {
+		const s = this.s;
+		if ( World.isCasting() || World.gp?.targetPending ) return false;
+		if ( !s.halted ) {
+			if ( Cmd.move( World.pose() ) ) s.halted = true;
+			return false;
+		}
+		return !World.gp?.pendingMoves;
+	},
+	/*
+  ================
+  drive
+  ================
+  */
+	drive( target ) {
+		if ( !this.cfg()?.enabled || !Hunt.running || !World.inWorld() || World.isDead() ) {
+			this.reset();
+			return false;
+		}
+		const pose = World.pose(), t = now();
+		if ( !pose || !Number.isFinite( dist2D( pose, target ) ) ) return false;
+		// The admitted bot planner is outdoor-only. Do not disable otherwise valid
+		// dungeon combat merely because no outdoor collision scene can cover it.
+		if ( pose.regionId & DUNGEON ) {
+			this.reset();
+			return false;
+		}
+		let s = this.s;
+		if ( !s || s.gid !== target.gid ) {
+			s = this.s = {
+				gid: target.gid,
+				phase: "evaluate",
+				at: t,
+				origin: { ...pose },
+				target: { ...target },
+				progressAt: t,
+				best: Infinity,
+				revision: Navigation.revision,
+				epoch: World.epoch,
+				replans: 0,
+				halted: false,
+				route: [],
+				index: 0,
+				sentAt: -Infinity,
+				verifyAt: null
+			};
+			this.detour = null;
+		}
+		if ( s.epoch !== World.epoch ) {
+			this.reset();
+			return true;
+		}
+		if ( s.phase === "probe" ) {
+			if ( this.hit( target.gid, s.probeAt ) ) {
+				s.phase = "attack";
+				s.at = t;
+				s.checkedAt = t;
+				return false;
+			}
+			if ( t - s.probeAt < 2000 ) return true;
+			s.phase = "evaluate";
+		}
+		if ( s.phase === "abandon" ) {
+			if ( t - s.abandonAt > CHASE_LIMIT.episode ) {
+				Hunt.stop( "Blocked approach could not be stopped safely." );
+				return true;
+			}
+			if ( !this.settle() ) return true;
+			if ( World.gp.target === target.gid ) {
+				if ( !s.released && Cmd.release() ) {
+					s.released = true;
+					s.releaseAt = t;
+				} else if ( s.released && t - s.releaseAt > CHASE_LIMIT.unknown ) {
+					Hunt.stop( "Blocked target release was not confirmed." );
+				}
+				return true;
+			}
+			Hunt.ban.set( target.gid, t + CHASE_LIMIT.ban );
+			Hunt.targetGid = 0;
+			this.message = "Dropped blocked target: " + s.reason;
+			Log.warn( this.message );
+			this.reset();
+			return true;
+		}
+		if ( s.phase === "attack" && this.hit( target.gid ) && !this.detour ) {
+			s.at = t;
+			return false;
+		}
+		if ( t - s.at > CHASE_LIMIT.episode ) return this.abandon( target, "approach timed out" );
+		if ( s.phase === "attack" && t - s.checkedAt < this.cfg().stallMs ) return false;
+		if ( [ "evaluate", "unknown", "attack" ].includes( s.phase ) ) {
+			const query = Navigation.attackRoute( pose, target, this.radius( target ) );
+			s.checkedAt = t;
+			if ( query.status === "unknown" ) {
+				if ( s.phase !== "unknown" ) {
+					s.phase = "unknown";
+					s.unknownAt = t;
+				}
+				this.message = "Waiting for collision coverage before approaching the target.";
+				this.settle();
+				if ( t - s.unknownAt >= CHASE_LIMIT.unknown ) {
+					Hunt.stop( "Collision data unavailable; reload before hunting." );
+				}
+				return true;
+			}
+			if ( query.status === "invalid-start" ) {
+				if ( !Trap.cfg()?.enabled ) return this.abandon( target, "blocked start; escape recovery is disabled" );
+				Trap.request( "Current position is blocked." );
+				return true;
+			}
+			if ( query.status === "direct" ) {
+				if ( s.phase === "attack" && World.gp.target === target.gid && !World.isCasting() ) {
+					const distance = dist2D( pose, target );
+					if ( distance < s.best - CHASE_LIMIT.progress ) {
+						s.best = distance;
+						s.at = t;
+					} else if ( t - s.at >= Math.max( this.cfg().stallMs * 2, CHASE_LIMIT.stalled ) ) {
+						return this.abandon( target, "native approach made no progress" );
+					}
+				}
+				s.phase = "attack";
+				s.halted = false;
+				return false;
+			}
+			if ( !s.probed && this.canProbe( target ) ) {
+				if ( World.gp.target !== target.gid || World.gp.targetPending ) {
+					Cmd.select( target.gid );
+					return true;
+				}
+				if ( World.isCasting() ) return true;
+				s.probed = true;
+				s.probeAt = t;
+				s.phase = "probe";
+				return false;
+			}
+			if ( query.status !== "route" ) {
+				return this.abandon(
+					target,
+					query.status === "search-limit" ? "route search budget exhausted" : "no reachable attack position"
+				);
+			}
+			if ( this.repeated( target, pose ) ) return this.abandon( target, "this approach recently failed" );
+			s.phase = "route";
+			s.route = query.route;
+			s.index = 0;
+			s.progressAt = t;
+			s.best = Infinity;
+			s.target = { ...target };
+			s.revision = Navigation.revision;
+			this.detour = s;
+			this.detours++;
+			this.message = "Walking around the obstacle before attacking.";
+		}
+		if ( !this.settle() ) return true;
+		if ( World.isSitting() || World.gp?.inventoryPending ) return true;
+		if (
+			s.revision !== Navigation.revision || dist2D( s.target, target ) > CHASE_LIMIT.targetMove ||
+			t - s.progressAt > CHASE_LIMIT.stalled
+		) {
+			if ( ++s.replans > CHASE_LIMIT.replans ) return this.abandon( target, "detour made no progress" );
+			s.phase = "evaluate";
+			s.halted = false;
+			this.detour = null;
+			return true;
+		}
+		while ( s.index < s.route.length && dist2D( pose, s.route[s.index] ) <= PURSUIT_NAV.arrive ) {
+			s.index++;
+			s.progressAt = t;
+			s.best = Infinity;
+		}
+		if ( s.index >= s.route.length ) {
+			if ( !Navigation.segment( pose, target ) ) {
+				return this.abandon( target, "final attack approach is blocked" );
+			}
+			if ( World.gp === s.verifyState ) return true;
+			s.verifyAt ??= t;
+			s.verifyState = World.gp;
+			if ( t - s.verifyAt < CHASE_LIMIT.verify ) return true;
+			s.phase = "attack";
+			s.at = t;
+			s.checkedAt = t;
+			s.halted = false;
+			this.detour = null;
+			return true;
+		}
+		const destination = s.route[s.index], distance = dist2D( pose, destination );
+		if ( distance < s.best - CHASE_LIMIT.progress ) {
+			s.best = distance;
+			s.progressAt = t;
+		}
+		if ( !Navigation.segment( pose, destination ) ) {
+			return this.abandon( target, "next waypoint is no longer reachable" );
+		}
+		if ( t - s.sentAt >= CHASE_LIMIT.send ) {
+			const delta = regionDelta( pose, destination ), length = Math.hypot( ...delta );
+			const start = Navigation.local( pose ), scale = Math.min( 1, PURSUIT_NAV.step / length );
+			const step = Navigation.pose( { x: start.x + delta[0] * scale, z: start.z + delta[1] * scale }, pose.y );
+			if ( Navigation.segment( pose, step ) && Cmd.move( step ) ) s.sentAt = t;
+		}
+		return true;
+	},
+	/*
+  ================
+  tick
+  ================
+  */
+	tick() {
+		if ( !this.owns() ) return false;
+		if (
+			!Hunt.running || !World.inWorld() || World.isDead() ||
+			now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000 ||
+			Town.trip || WalkBack.active || Restock.trip || Restock.recording || Restock.activeShop() ||
+			World.gp?.storage
+		) {
+			this.reset();
+			return false;
+		}
+		const target = World.ents.get( this.s.gid );
+		if ( !isAttackableMob( target ) ) {
+			if ( !this.settle() ) return true;
+			this.reset();
+			return true;
+		}
+		Hunt.state = "fight";
+		Loot.preparePet();
+		if ( Loot.active?.petGid ) Loot.tick();
+		else if ( !Loot.active && Hunt.cfg().pickup.enabled && Loot.petMode() ) {
+			const drop = Loot.choose( "pet" );
+			if ( drop ) Loot.begin( drop );
+		}
+		return this.drive( target );
+	}
 };
+
+/*
+================
+engageWithObstaclePursuit
+================
+*/
 const engageBeforeChase = Hunt.engage;
-Hunt.engage = function (target) {
-  if (Chase.drive(target)) return;
-  return engageBeforeChase.apply(this, arguments);
+Hunt.engage = function( target ) {
+	if ( Chase.drive( target ) ) return;
+	return engageBeforeChase.apply( this, arguments );
 };
-bus.on('hunt', () => Chase.reset());
+bus.on( "cast", cast => Chase.observe( cast ) );
+bus.on( "hunt", () => Chase.reset() );
+for ( const event of [ "reset", "profile", "character" ] ) bus.on( event, () => Chase.reset( true ) );
+Hook.observers.push( command => {
+	if ( command?.kind === "gameplay" ) Chase.reset();
+} );
 
 
-// A character that cannot move: it should be walking (chasing, returning, picking up) but its position has not changed
-// and nothing is being damaged. Seen in the live game as a character stuck inside a tree that even a manual click
-// could not free. The route planner cannot help from inside an obstacle, so this tries two cheap things once each,
-// a step back to where the character just was and a walk to the nearest open tile, and then stops hunting loudly
-// instead of standing there for minutes. It also records what the collision data says about the character's tile.
+/*
+===========================================================================
+lean-trap.js - bounded recovery using legal, observed movement
+
+Owns escape admission, reverse breadcrumbs and a second move that confirms
+freedom. A local send or a cast timestamp is never proof of escape.
+===========================================================================
+*/
+const TRAP_LIMIT = {
+	admission: 5000,
+	motion: 6000,
+	verify: 500,
+	crumbs: 32,
+	candidates: 4,
+	arrive: 7,
+	progress: 8,
+	recallCooldown: 300000
+};
+
+/*
+================
+Trap
+================
+*/
 const Trap = {
-  crumbs: [], idle: null, stage: 0, at: 0, from: null, tile: 'unknown', message: '', lastBreadcrumbAt: 0,
-  cfg() { return Settings.profile.hunt.trap; },
-  // Only intents that need the character to walk: not searching, resting, casting or standing in a fight it is winning.
-  walking() { return ['fight', 'return', 'loot'].includes(Hunt.state) && !World.isCasting() && !World.isSitting(); },
-  busy() { return !!(Town.trip || WalkBack.active || Resurrect.trip || Restock.trip || Alchemy.run || World.gp?.storage || Restock.activeShop()); },
-  reset(clearCrumbs = false) { this.idle = null; this.stage = 0; this.from = null; if (clearCrumbs) this.crumbs = []; },
-  // What the collision data says about a position's tile: 'yes' (blocked), 'no' (open) or 'unknown' (no data).
-  blockedAt(pose) {
-    if (!Navigation.scene || (pose.regionId & DUNGEON)) return 'unknown';
-    const local = Navigation.local(pose);
-    return local ? (Navigation.open(local.x, local.z) ? 'no' : 'yes') : 'unknown';
-  },
-  // The nearest open tile centre within 240 units, as a pose, or null.
-  nearestOpen(pose) {
-    const start = Navigation.scene && Navigation.local(pose);
-    if (!start) return null;
-    const tx = Math.floor(start.x / 20), tz = Math.floor(start.z / 20);
-    let best = null, bestDistance = Infinity;
-    for (let r = 1; r <= 12; r++) {
-      for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) {
-        if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
-        const x = (tx + dx) * 20 + 10, z = (tz + dz) * 20 + 10;
-        if (!Navigation.open(x, z)) continue;
-        const d = Math.hypot(x - start.x, z - start.z);
-        if (d < bestDistance) { best = { x, z }; bestDistance = d; }
-      }
-      if (best) break;
-    }
-    return best && Navigation.pose(best, pose.y);
-  },
-  // The newest remembered position that is far enough behind to be clear of whatever holds the character.
-  stepBack(pose) {
-    for (let i = this.crumbs.length - 1; i >= 0; i--) {
-      const d = dist2D(pose, this.crumbs[i]);
-      if (d >= 30 && d <= 600) return this.crumbs[i];
-    }
-    return null;
-  },
-  status() {
-    return this.stage ? this.message : '';
-  },
-  // True while an escape attempt owns movement this tick.
-  tick() {
-    const c = this.cfg(), t = now();
-    if (!c?.enabled || !Hunt.running || !World.inWorld() || World.isDead() || this.busy()) { this.reset(); return false; }
-    const pose = World.pose();
-    if (!pose) return false;
-    if (this.stage === 0 && (!this.crumbs.length || dist2D(this.crumbs.at(-1), pose) >= 8) && t - this.lastBreadcrumbAt >= 1000) {
-      this.crumbs.push({ ...pose }); this.lastBreadcrumbAt = t;
-      if (this.crumbs.length > 16) this.crumbs.shift();
-    }
-    const gid = Hunt.targetGid, sim = World.simNow() ?? 0;
-    const damaging = gid && sim - (World.hitByUs.get(gid) ?? -Infinity) < 8000;
-    if (this.stage) {
-      // An attempt is running. Moving away from where it got stuck, or hitting something, means it worked.
-      if (dist2D(this.from, pose) > 15 || damaging) { this.free(); return false; }
-    } else {
-      // Not stuck unless it should be walking, is not hurting its target and has not moved for the set time.
-      if (!this.walking() || damaging || !this.idle || dist2D(this.idle.pose, pose) > 3) { this.idle = { pose: { ...pose }, since: t }; return false; }
-      if (t - this.idle.since < c.seconds * 1000) return false;
-      this.tile = this.blockedAt(pose); this.from = { ...pose }; this.stage = 1; this.at = 0;
-      Log.warn(`Character cannot move: no change for ${c.seconds} s. Collision data says its tile is blocked: ${this.tile}.`);
-    }
-    if (this.stage === 1) {
-      if (!this.at) {
-        this.at = t; const crumb = this.stepBack(pose);
-        this.message = crumb ? 'Cannot move: stepping back to where it just was.' : 'Cannot move: no earlier position to step back to.';
-        if (crumb) { Cmd.move(crumb); Log.info(this.message); }
-      } else if (t - this.at >= 6000) { this.stage = 2; this.at = 0; }
-      return true;
-    }
-    if (this.stage === 2) {
-      if (!this.at) {
-        this.at = t; const open = this.nearestOpen(pose);
-        this.message = open ? 'Cannot move: walking to the nearest open ground.' : 'Cannot move: no open ground found nearby.';
-        if (open) { Cmd.move(open); Log.info(this.message); }
-      } else if (t - this.at >= 6000) { this.stage = 3; }
-      return true;
-    }
-    this.message = `Trapped: the character could not move for ${c.seconds} s and two escape attempts failed. Free it by hand (return scroll), then start again.`;
-    Log.warn(this.message);
-    Sound.play('pet-full');
-    Hunt.stop('character cannot move (trapped)');
-    this.reset(true);
-    return true;
-  },
-  free() {
-    Log.info('Free again after the escape attempt.');
-    if (Hunt.targetGid) { Hunt.ban.set(Hunt.targetGid, now() + 60000); Hunt.targetGid = 0; }
-    this.reset();
-  },
+	crumbs: [],
+	idle: null,
+	stage: 0,
+	at: 0,
+	from: null,
+	tile: "unknown",
+	message: "",
+	lastBreadcrumbAt: -Infinity,
+	run: null,
+	lastRecallAt: -Infinity,
+	trace: [],
+	/*
+  ================
+  cfg
+  ================
+  */
+	cfg() {
+		return Settings.profile.hunt.trap;
+	},
+	/*
+  ================
+  walking
+  ================
+  */
+	walking() {
+		return [ "fight", "return", "loot" ].includes( Hunt.state ) && !World.isCasting() && !World.isSitting();
+	},
+	/*
+  ================
+  busy
+  ================
+  */
+	busy() {
+		return !!(Town.trip || WalkBack.active || Resurrect.trip || Restock.trip || Restock.recording ||
+			BuffGear.run || Alchemy.run || World.gp?.storage || Restock.activeShop());
+	},
+	/*
+  ================
+  reset
+  ================
+  */
+	reset( clearCrumbs = false ) {
+		this.idle = null;
+		this.stage = 0;
+		this.from = null;
+		this.run = null;
+		if ( clearCrumbs ) this.crumbs = [];
+	},
+	/*
+  ================
+  record
+
+  Local, opt-in diagnostic detail. Ordinary report uploads do not include poses.
+  ================
+  */
+	record( reason ) {
+		this.message = reason;
+		if ( this.cfg().diagnostics ) {
+			this.trace.push( {
+				at: now(),
+				reason,
+				stage: this.stage,
+				pose: { ...World.pose() },
+				epoch: World.epoch,
+				revision: Navigation.revision,
+				sent: this.run?.pending?.sentAt ?? null
+			} );
+			if ( this.trace.length > 64 ) this.trace.shift();
+		}
+	},
+	/*
+  ================
+  blockedAt
+  ================
+  */
+	blockedAt( pose ) {
+		return { open: "no", blocked: "yes", unknown: "unknown" }[Navigation.pointStatus( pose )];
+	},
+	/*
+  ================
+  nearestOpen
+  ================
+  */
+	nearestOpen( pose ) {
+		return Navigation.escapeCandidates( pose )[0] || null;
+	},
+	/*
+  ================
+  stepBack
+  ================
+  */
+	stepBack( pose ) {
+		for ( let i = this.crumbs.length - 1; i >= 0; i-- ) {
+			const p = this.crumbs[i];
+			if (
+				p.epoch !== undefined && p.epoch !== World.epoch ||
+				p.revision !== undefined && p.revision !== Navigation.revision
+			) continue;
+			if ( dist2D( pose, p ) >= 8 && dist2D( pose, p ) <= 120 && Navigation.segment( pose, p, true ) ) return p;
+		}
+		return null;
+	},
+	/*
+  ================
+  status
+  ================
+  */
+	status() {
+		return this.stage ? this.message : "";
+	},
+	/*
+  ================
+  request
+  ================
+  */
+	request( reason ) {
+		if ( !this.cfg()?.enabled || this.run ) return;
+		const pose = World.pose();
+		if ( !pose || !Hunt.running || !World.inWorld() || World.isDead() || this.busy() ) return;
+		this.from = { ...pose };
+		this.tile = this.blockedAt( pose );
+		this.stage = 1;
+		this.at = now();
+		this.run = {
+			epoch: World.epoch,
+			revision: Navigation.revision,
+			manualAt: Manual.lastAt,
+			at: now(),
+			phase: "halt",
+			pending: null,
+			attempted: [],
+			retreat: false,
+			verified: false,
+			gid: Hunt.targetGid || Chase.s?.gid || 0,
+			target: Chase.s?.target,
+			fresh: null
+		};
+		Loot.suspend();
+		this.record( "Recovering: " + reason );
+		Log.warn( this.message );
+	},
+	/*
+  ================
+  candidate
+  ================
+  */
+	candidate() {
+		const r = this.run, pose = World.pose();
+		const crumb = !r.retreat && this.stepBack( pose );
+		if ( crumb ) {
+			r.retreat = true;
+			return crumb;
+		}
+		this.stage = 2;
+		return Navigation.escapeCandidates( pose ).find( p => !r.attempted.some( a => dist2D( a, p ) < 7 ) ) || null;
+	},
+	/*
+  ================
+  fail
+
+  Recall is opt-in and delegates to the existing town owner. Hunting is not
+  resumed into the same trap without a completed legal trip and approach ban.
+  ================
+  */
+	fail( reason ) {
+		const r = this.run;
+		if ( r?.gid ) Hunt.ban.set( r.gid, now() + CHASE_LIMIT.ban );
+		const recall = this.cfg().recall && now() - this.lastRecallAt >= TRAP_LIMIT.recallCooldown &&
+			Town.cfg().enabled && !Town.validate();
+		this.record( "Trapped: " + reason );
+		Log.warn( this.message );
+		Sound.play( "pet-full" );
+		this.reset( true );
+		Chase.reset();
+		if ( recall ) {
+			this.lastRecallAt = now();
+			Town.begin();
+			// A recovery trip ends in town. Automatically reversing would reenter
+			// the same blocked origin, so this safety trip never spends a reverse.
+			if ( Town.trip ) Town.trip.recovery = true;
+			return;
+		}
+		Hunt.stop( "character cannot move (trapped): " + reason );
+	},
+	/*
+  ================
+  free
+  ================
+  */
+	free() {
+		const r = this.run;
+		if ( r?.gid ) Hunt.ban.set( r.gid, now() + CHASE_LIMIT.ban );
+		if ( Chase.s && r?.target ) Chase.remember( r.target );
+		Hunt.targetGid = 0;
+		this.record( "Free again: two movement steps confirmed." );
+		Log.info( this.message );
+		Chase.reset();
+		this.reset( true );
+	},
+	/*
+  ================
+  tick
+  ================
+  */
+	tick() {
+		const t = now(), pose = World.pose();
+		if ( !this.cfg()?.diagnostics ) this.trace = [];
+		if (
+			!this.cfg()?.enabled || !Hunt.running || !World.inWorld() || World.isDead() || this.busy() ||
+			now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000
+		) {
+			this.reset();
+			return false;
+		}
+		if ( !pose ) return false;
+		if ( pose.regionId & DUNGEON ) {
+			this.reset( true );
+			return false;
+		}
+		if ( !this.run ) {
+			if (
+				Navigation.pointStatus( pose ) === "open" && t - this.lastBreadcrumbAt >= 500 &&
+				(!this.crumbs.length || dist2D( this.crumbs.at( -1 ), pose ) >= 8)
+			) {
+				this.crumbs.push( { ...pose, epoch: World.epoch, revision: Navigation.revision } );
+				this.lastBreadcrumbAt = t;
+				if ( this.crumbs.length > TRAP_LIMIT.crumbs ) this.crumbs.shift();
+			}
+			if ( !this.walking() || Chase.hit( Hunt.targetGid ) ) {
+				this.idle = null;
+				return false;
+			}
+			if ( !this.idle || dist2D( this.idle.pose, pose ) > TRAP_LIMIT.progress ) {
+				this.idle = { pose: { ...pose }, since: t };
+			}
+			if ( t - this.idle.since < this.cfg().seconds * 1000 ) return false;
+			this.request( "no useful movement or confirmed damage." );
+		}
+		const r = this.run;
+		if ( !r ) return false;
+		if ( r.epoch !== World.epoch || r.revision !== Navigation.revision || r.manualAt !== Manual.lastAt ) {
+			this.reset( true );
+			Chase.reset();
+			return true;
+		}
+		if ( t - r.at > 45000 ) {
+			this.fail( "escape episode timed out" );
+			return true;
+		}
+		if ( r.phase === "halt" ) {
+			if ( !World.isCasting() && !World.gp?.targetPending && Cmd.move( pose ) ) r.phase = "choose";
+			return true;
+		}
+		if ( World.isCasting() || World.isSitting() || World.gp?.inventoryPending || World.gp?.pendingMoves ) {
+			return true;
+		}
+		let p = r.pending;
+		if ( p ) {
+			const distance = dist2D( pose, p.to );
+			// New gameplay state, an actual admitted send and a stable endpoint are
+			// required; old snapshots or one correction cannot complete an escape.
+			if (
+				p.sentAt !== null && World.gp !== p.state && distance <= TRAP_LIMIT.arrive &&
+				Navigation.pointStatus( pose ) === "open"
+			) {
+				if ( p.arrivedAt === null ) {
+					p.arrivedAt = t;
+					p.arrivedState = World.gp;
+					return true;
+				}
+				if ( World.gp === p.arrivedState || t - p.arrivedAt < TRAP_LIMIT.verify ) return true;
+				if ( r.verified ) {
+					this.free();
+					return true;
+				}
+				r.verified = true;
+				r.pending = null;
+				r.phase = "choose";
+			} else {
+				p.arrivedAt = null;
+				if ( p.sentAt === null ) {
+					if ( t - p.at > TRAP_LIMIT.admission ) {
+						this.fail( "escape movement could not be admitted" );
+						return true;
+					}
+					if ( Navigation.segment( pose, p.to, true ) && Cmd.move( p.to ) ) {
+						p.sentAt = t;
+						p.state = World.gp;
+						this.record( "Escape move sent; waiting for observed arrival." );
+					}
+					return true;
+				}
+				if ( t - p.sentAt < TRAP_LIMIT.motion ) return true;
+				r.pending = null;
+				r.phase = "choose";
+				r.verified = false;
+				this.record( "Escape did not reach its endpoint; choosing another legal step." );
+			}
+		}
+		if ( r.attempted.length >= TRAP_LIMIT.candidates ) {
+			this.fail( "bounded escape attempts failed" );
+			return true;
+		}
+		const to = this.candidate();
+		if ( !to ) {
+			this.fail( "no legal escape endpoint is reachable" );
+			return true;
+		}
+		r.attempted.push( { ...to } );
+		r.pending = { to: { ...to }, at: t, sentAt: null, state: World.gp, arrivedAt: null };
+		this.record(
+			r.verified ? "Verifying escape with a second movement step." : "Trying a collision-checked escape step."
+		);
+		return true;
+	}
 };
-const huntTickBeforeTrap = Hunt.tick;
-Hunt.tick = function () {
-  if (Trap.tick()) return;
-  return huntTickBeforeTrap.apply(this, arguments);
-};
-bus.on('hunt', () => Trap.reset(true));
+bus.on( "hunt", () => Trap.reset( true ) );
+for ( const event of [ "reset", "profile", "character" ] ) {
+	bus.on( event, () => {
+		Trap.reset( true );
+		Trap.trace = [];
+	} );
+}
+Hook.observers.push( command => {
+	if ( command?.kind === "gameplay" ) Trap.reset( true );
+} );
 
 
 // Always-on reconnect. When the connection to the game is lost (a server restart, a network drop) the bot waits for the
@@ -6522,7 +7311,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.100", "title": "Alchemy helper stones: a simple Use switch for each", "items": ["Luck, Steady, Immortal and Astral now each have a Use switch. When it is ticked, the bot fuses a stone automatically before every attempt at or above the plus you set whenever the item has fewer charges than you asked it to keep, so the stones are used while enhancing without any extra clicking.", "Before, a helper only ran when its count was set above zero and the counts started at zero, which made it look as if the stones were never used. The counts now start at 1 and mean how many charges to keep, and old settings keep their helpers switched on.", "The Alchemy tab says which helpers it will use, from which plus and how many charges it keeps, or says that none are ticked."]}, {"version": "1.2.99", "title": "Alchemy tab: every gear kind, rules from +N, odds and a results log", "items": ["The Alchemy tab now enhances weapons, shields, armour and accessories, each with its own elixir (the A and B elixirs of its kind). Before, only weapons worked.", "Rules from a plus: use lucky powder from +N, and Luck, Steady, Immortal and Astral stones from +N. A missing charge is fused automatically from stones of the item's degree before the attempt, so you do not have to fuse them by hand. The defaults follow the server: Steady and Immortal from +5, where a failure can start to destroy or damage the item.", "The tab shows the real odds taken from the server's data: the chance of the next attempt (with powder and Luck counted like the server does) and how many elixirs you should expect to need to reach your target, and the chance of getting there without a single failure.", "A results panel with attempts, successes, failures, destroyed items, the highest plus reached, the success rate, what was used, and a timestamped log of each attempt and fusion."]}, {"version": "1.2.98", "title": "Auto skill upgrades can cover every learned skill", "items": ["New dropdown Skills to upgrade under Settings → Auto mastery and skills: Only skills in my rotations, buffs and imbue (the default, as before) or All skills I have learned. With All, the skills you use are raised first and then every other skill line you already have.", "It still only raises the next level of skills you have already learned, within the game's own rules (mastery level, strength, intelligence, prerequisites, skill points and your reserve). It never learns brand-new skills.", "The status line lists at most the first eight reasons, so a long skill list does not flood it."]}, {"version": "1.2.97", "title": "Auto skill upgrades say what they see", "items": ["The auto mastery and skills status now names each skill it is not raising and why: not learned yet, already at its highest level, mastery or strength too low, a prerequisite missing, or not enough skill points. It also says when your rotations, buffs and imbue hold no skills yet, and when the skills switch is off.", "The skill upgrades only cover skills you already learned that are in your attack rotations, buffs or imbue on the Combat tab. The dropdown that was called Spend skill points on is now Order when both are ticked, because it does nothing unless both switches are on.", "The bug report now includes this status line."]}, {"version": "1.2.96", "title": "Waits for a party resurrection before reviving itself", "items": ["Fixed: with Accept resurrection from party members on, the bot was meant to wait 20 seconds before reviving itself when a party member is around, but the check for a living helper was the wrong way round, so it only waited when the helper was dead. It now waits the 20 seconds whenever a living party member is in view.", "A helper seen in the last 15 seconds still counts, so a moment out of view does not cut the wait short.", "The Activity log now says what it is doing when the character dies, for example Died: waiting 20 s for a party member to resurrect before reviving."]}, {"version": "1.2.95", "title": "Notices a character that cannot move", "items": ["A character that should be walking (chasing, returning or picking up) but has not moved at all for 20 seconds, with nothing being damaged, is now treated as stuck, for example inside a tree. It first steps back to where it just was, then walks to the nearest open ground.", "If both fail, hunting stops with an alert chime and a clear message, instead of the character standing there for minutes. It does not use a return scroll on its own.", "When it happens the Activity log says whether the collision data thinks the character's tile is blocked, and the bug report shows the same, to help find why characters get stuck in trees.", "Settings → Obstacles switches it off or changes the 20 seconds. Tested on the simulated game only; not yet seen on the live server."]}, {"version": "1.2.94", "title": "Says why it went to town", "items": ["Every town trip now writes its reason to the Activity log, for example Town trip started: potions running low, and the town status line shows it during the trip. Reasons are bag nearly full, pet nearly full, potions or ammunition low, weapon broken, gear worn, no XP for a while, every set number of minutes, returning after a death, or started by you.", "The Activity log is in the Wide window: press Wide in the title bar.", "The bug report shows the reason of the current or last trip and how long ago it started, without item names."]}, {"version": "1.2.93", "title": "Find the exact item that drops, and see its number in the pickup line", "items": ["A Pick always rule on the Items page takes an item whatever the Loot switches say, so you never need to switch on a whole kind like potions to get one item. The rule is for that exact item, and each size or degree is its own item.", "New on the Items page: Only items on the ground now, which lists just the items in view, so you can set the rule on exactly what is dropping.", "The pickup status line now shows the item numbers behind each skipped kind, for example 12 potions #19 #20, to compare with the number shown when you point at an item in the Items table."]}];
+const RELEASE_NOTES = [{"version": "1.2.101", "title": "Safer obstacle pursuit and confirmed escape recovery", "items": ["Blocked enemies are evaluated before repeated attack approaches. Failed routes retain movement control, stop and release the target, and use bounded retries with short-lived failed-approach memory.", "Detours use cached routes and short collision-checked steps. Party damage and position jitter no longer count as a successful detour, and ranged skills get a bounded trial instead of an assumed walking line-of-sight rule.", "Escape uses validated breadcrumbs or legal nearby steps, retries refused local sends, and requires fresh, stable arrival followed by a second move before resuming. No legal exit means a bounded stop instead of blind movement.", "Settings adds optional recovery recall and local detailed escape diagnostics, both off by default. Recovery recall completes town services and stops in town rather than reversing into the trap."], "note": "Live tree-contact recovery still needs controlled gameplay validation. This release does not change OpenSRO collision rules or provide a server-side teleport."}, {"version": "1.2.100", "title": "Alchemy helper stones: a simple Use switch for each", "items": ["Luck, Steady, Immortal and Astral now each have a Use switch. When it is ticked, the bot fuses a stone automatically before every attempt at or above the plus you set whenever the item has fewer charges than you asked it to keep, so the stones are used while enhancing without any extra clicking.", "Before, a helper only ran when its count was set above zero and the counts started at zero, which made it look as if the stones were never used. The counts now start at 1 and mean how many charges to keep, and old settings keep their helpers switched on.", "The Alchemy tab says which helpers it will use, from which plus and how many charges it keeps, or says that none are ticked."]}, {"version": "1.2.99", "title": "Alchemy tab: every gear kind, rules from +N, odds and a results log", "items": ["The Alchemy tab now enhances weapons, shields, armour and accessories, each with its own elixir (the A and B elixirs of its kind). Before, only weapons worked.", "Rules from a plus: use lucky powder from +N, and Luck, Steady, Immortal and Astral stones from +N. A missing charge is fused automatically from stones of the item's degree before the attempt, so you do not have to fuse them by hand. The defaults follow the server: Steady and Immortal from +5, where a failure can start to destroy or damage the item.", "The tab shows the real odds taken from the server's data: the chance of the next attempt (with powder and Luck counted like the server does) and how many elixirs you should expect to need to reach your target, and the chance of getting there without a single failure.", "A results panel with attempts, successes, failures, destroyed items, the highest plus reached, the success rate, what was used, and a timestamped log of each attempt and fusion."]}, {"version": "1.2.98", "title": "Auto skill upgrades can cover every learned skill", "items": ["New dropdown Skills to upgrade under Settings → Auto mastery and skills: Only skills in my rotations, buffs and imbue (the default, as before) or All skills I have learned. With All, the skills you use are raised first and then every other skill line you already have.", "It still only raises the next level of skills you have already learned, within the game's own rules (mastery level, strength, intelligence, prerequisites, skill points and your reserve). It never learns brand-new skills.", "The status line lists at most the first eight reasons, so a long skill list does not flood it."]}, {"version": "1.2.97", "title": "Auto skill upgrades say what they see", "items": ["The auto mastery and skills status now names each skill it is not raising and why: not learned yet, already at its highest level, mastery or strength too low, a prerequisite missing, or not enough skill points. It also says when your rotations, buffs and imbue hold no skills yet, and when the skills switch is off.", "The skill upgrades only cover skills you already learned that are in your attack rotations, buffs or imbue on the Combat tab. The dropdown that was called Spend skill points on is now Order when both are ticked, because it does nothing unless both switches are on.", "The bug report now includes this status line."]}, {"version": "1.2.96", "title": "Waits for a party resurrection before reviving itself", "items": ["Fixed: with Accept resurrection from party members on, the bot was meant to wait 20 seconds before reviving itself when a party member is around, but the check for a living helper was the wrong way round, so it only waited when the helper was dead. It now waits the 20 seconds whenever a living party member is in view.", "A helper seen in the last 15 seconds still counts, so a moment out of view does not cut the wait short.", "The Activity log now says what it is doing when the character dies, for example Died: waiting 20 s for a party member to resurrect before reviving."]}, {"version": "1.2.95", "title": "Notices a character that cannot move", "items": ["A character that should be walking (chasing, returning or picking up) but has not moved at all for 20 seconds, with nothing being damaged, is now treated as stuck, for example inside a tree. It first steps back to where it just was, then walks to the nearest open ground.", "If both fail, hunting stops with an alert chime and a clear message, instead of the character standing there for minutes. It does not use a return scroll on its own.", "When it happens the Activity log says whether the collision data thinks the character's tile is blocked, and the bug report shows the same, to help find why characters get stuck in trees.", "Settings → Obstacles switches it off or changes the 20 seconds. Tested on the simulated game only; not yet seen on the live server."]}, {"version": "1.2.94", "title": "Says why it went to town", "items": ["Every town trip now writes its reason to the Activity log, for example Town trip started: potions running low, and the town status line shows it during the trip. Reasons are bag nearly full, pet nearly full, potions or ammunition low, weapon broken, gear worn, no XP for a while, every set number of minutes, returning after a death, or started by you.", "The Activity log is in the Wide window: press Wide in the title bar.", "The bug report shows the reason of the current or last trip and how long ago it started, without item names."]}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -6752,6 +7541,8 @@ const Diagnostics = {
     return `Monsters in view: ${seen}. Skipped: ${parts.join('; ') || 'none'}.`;
   },
   main() {
+    if (Trap.run) return Trap.message;
+    if (Chase.owns()) return Chase.message || 'Checking obstacle approach.';
     if (BuffGear.run) return BuffGear.run.restoring ? 'Buff gear: restoring combat equipment.' : 'Buff gear: swapping or casting.';
     if (BuffGear.recovery) return 'Buff gear: manual equipment review needed.';
     if (Alchemy.pending) return Alchemy.run ? 'Alchemy: waiting for the server result.' : 'Alchemy stopped; outstanding result unconfirmed.';
@@ -8153,10 +8944,12 @@ const UI = {
         this.number('Manual control pause (s)', () => H().manualPauseS, v => H().manualPauseS = v, 1, 30)));
       this.pane.append(this.group('Obstacles',
         this.check('Walk around obstacles when chasing a mob', () => H().detour.enabled, v => H().detour.enabled = v),
-        this.number('Stand still for (ms) before going around', () => H().detour.stallMs, v => H().detour.stallMs = v, 1000, 10000),
+        this.number('Approach progress check interval (ms)', () => H().detour.stallMs, v => H().detour.stallMs = v, 1000, 10000),
         this.check('Detect a character that cannot move', () => H().trap.enabled, v => H().trap.enabled = v),
         this.number('Cannot move for (seconds)', () => H().trap.seconds, v => H().trap.seconds = v, 10, 120),
-        el('p', 'When the character stands still without hurting its target and a tree or wall is in the way (needs the collision data the game loads, outdoors only), it walks around it, then attacks as normal. After three detours on one mob it drops that mob for a minute. A character that should be walking but has not moved at all for the set time (for example stuck inside a tree) first steps back to where it just was, then walks to the nearest open ground; if that fails, hunting stops with an alert so it does not stand there for minutes.', 'muted')));
+        this.check('Recall to town if legal escape attempts fail', () => H().trap.recall, v => H().trap.recall = v),
+        this.check('Keep detailed escape diagnostics locally', () => H().trap.diagnostics, v => H().trap.diagnostics = v),
+        el('p', 'Checks blocked approaches before repeating attacks, follows collision-checked detours and stops/releases unreachable targets. Failed approaches are remembered briefly. Escape retries refused movement and requires fresh, stable arrival plus a second move before hunting resumes. Optional recall needs a configured scroll town cycle and stops in town instead of reversing into the trap. Detailed diagnostics stay local and can include exact positions; both new options are off by default. Unknown collision data cannot authorize an escape', 'muted')));
       this.stuckNote = el('p', AntiStuck.status(), 'muted');
       this.pane.append(this.group('Anti-stuck',
         this.check('Recover when hunting makes no progress', () => H().antiStuck.enabled, v => H().antiStuck.enabled = v),
@@ -8392,7 +9185,7 @@ function boot() {
   Ticker.start(() => Controller.tick(), 100);
   setInterval(() => { Wardrobe.tick(); UI.update(); }, 500);
   W.SROLean = { version: VERSION, stats: Stats, updates: Updates, diagnostics: Diagnostics, reports: Reports, alchemy: Alchemy, buffGear: BuffGear, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, resurrect: Resurrect,
-    restock: Restock, town: Town, walkBack: WalkBack, antiStuck: AntiStuck, autoMastery: AutoMastery, reconnect: Reconnect, petPotion: PetPotion, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, ui: UI, map: LeanMap, support: Support, items: ItemRules, stop: stopAll, log: Log };
+    restock: Restock, town: Town, walkBack: WalkBack, antiStuck: AntiStuck, chase: Chase, trap: Trap, autoMastery: AutoMastery, reconnect: Reconnect, petPotion: PetPotion, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, ui: UI, map: LeanMap, support: Support, items: ItemRules, stop: stopAll, log: Log };
   Log.info('nixxane bot ready. F8 starts/stops; F7 folds; the × minimises; Shift+F7 hides/shows the window.');
 }
 

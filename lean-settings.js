@@ -44,7 +44,7 @@ const DEFAULT_PROFILE = {
     sit: { enabled: true, hpBelow: 35, mpBelow: 20, resumeAt: 90 },
     antiStuck: { enabled: true, minutes: 3, maxRecoveries: 3 },
     detour: { enabled: true, stallMs: 2500 },
-    trap: { enabled: true, seconds: 20 },
+    trap: { enabled: true, seconds: 20, recall: false, diagnostics: false },
     onDeath: 'stop', stopNoHpPotion: false, stopInvFull: false,
     playerAlert: { enabled: false, radius: 250, pause: false }, manualPauseS: 6,
   },

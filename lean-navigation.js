@@ -85,9 +85,16 @@ const Navigation = {
     const t = n ? clamp(((p.x - a.x) * dx + (p.z - a.z) * dz) / n, 0, 1) : 0;
     return Math.hypot(p.x - a.x - t * dx, p.z - a.z - t * dz);
   },
-  clear(a, b) {
+  clear(a, b, departing = false) {
     const length = Math.hypot(b.x - a.x, b.z - a.z), steps = Math.max(1, Math.ceil(length / 8));
-    for (let i = 1; i <= steps; i++) if (!this.open(a.x + (b.x - a.x) * i / steps, a.z + (b.z - a.z) * i / steps)) return false;
+    let reachedOpen = this.open(a.x, a.z);
+    for (let i = 1; i <= steps; i++) {
+      const x = a.x + (b.x - a.x) * i / steps, z = a.z + (b.z - a.z) * i / steps;
+      if (!this.covered(x, z)) return false;
+      if (this.open(x, z)) reachedOpen = true;
+      else if (!departing || reachedOpen) return false;
+    }
+    if (!reachedOpen) return false;
     const minX = Math.floor((Math.min(a.x, b.x) - 2) / 80), maxX = Math.floor((Math.max(a.x, b.x) + 2) / 80);
     const minZ = Math.floor((Math.min(a.z, b.z) - 2) / 80), maxZ = Math.floor((Math.max(a.z, b.z) + 2) / 80);
     const cross = (p, q, r) => (q.x - p.x) * (r.z - p.z) - (q.z - p.z) * (r.x - p.x);
@@ -104,7 +111,7 @@ const Navigation = {
     }
     return true;
   },
-  plan(from, to, arrivalRadius = 0) {
+  plan(from, to, arrivalRadius = 0, options = {}) {
     if (!this.scene || (from.regionId | to.regionId) & DUNGEON) return null;
     const start = this.local(from), goal = this.local(to);
     if (!start || !goal || !this.open(start.x, start.z)) return null;
@@ -120,7 +127,8 @@ const Navigation = {
       return top;
     };
     push(first); let best = first, reached = false;
-    for (let n = 0; heap.length && n < 60000; n++) {
+    let visited = 0;
+    for (; heap.length && visited < (options.maxNodes ?? 60000); visited++) {
       const p = pop(), k = key(p); if (closed.has(k)) continue; closed.add(k);
       if (h(p) < h(best)) best = p;
       const a = p === first ? start : center(p);
@@ -133,6 +141,7 @@ const Navigation = {
         q.f = q.g + h(q); scores.set(qk, q.g); push(q);
       }
     }
+    if (options.result) { options.result.limited = !reached && heap.length > 0; options.result.visited = visited; }
     const goalCovered = this.scene.grids.has(Math.floor(goal.x / SECTOR) + ',' + Math.floor(goal.z / SECTOR));
     if (!reached && (goalCovered || h(first) - h(best) < 2)) return [];
     const path = []; for (let p = best; p && p !== first; p = p.parent) path.push(center(p)); path.reverse();
@@ -140,7 +149,7 @@ const Navigation = {
     // Smooth only segments whose terrain and object collision checks both pass.
     const result = []; let anchor = start;
     for (let i = 0; i < path.length;) {
-      let j = i; while (j + 1 < path.length && Math.hypot(path[j + 1].x - anchor.x, path[j + 1].z - anchor.z) < 600 && this.clear(anchor, path[j + 1])) j++;
+      let j = i; while (j + 1 < path.length && Math.hypot(path[j + 1].x - anchor.x, path[j + 1].z - anchor.z) < (options.maxChord ?? 600) && this.clear(anchor, path[j + 1])) j++;
       result.push(this.pose(path[j], from.y)); anchor = path[j]; i = j + 1;
     }
     return result;

@@ -206,6 +206,8 @@ const Controller = {
       ItemRules.dropTick();
       Loot.checkPetFull();
       if (Town.tick()) { this.mode = 'town service'; return; }
+      if (Trap.tick()) { this.mode = 'escape'; return; }
+      if (Chase.tick()) { this.mode = 'obstacle pursuit'; return; }
       if (BuffGear.tick()) { this.mode = 'buff gear'; return; }
       if (SpeedScroll.tick()) { this.mode = 'speed scroll'; return; }
       if (!WalkBack.active && !Restock.trip && !Restock.recording && !Controller.resumeAfterRevive &&
