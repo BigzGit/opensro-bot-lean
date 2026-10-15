@@ -55,14 +55,16 @@ const Alchemy = {
     const refs = item?.magicReferences || [];
     return (item?.magic || []).every(encoded => refs.some(r => r.paramId === Number(toBigInt(encoded) & 65535n)));
   },
-  wanted(cfg = this.cfg()) { return Object.keys(STONES).filter(kind => Math.min(STONE_MAX, Number(cfg.stones?.[kind]) || 0) > 0); },
+  // The helpers switched on, and how many charges of each to keep on the item (1 to 6).
+  wanted(cfg = this.cfg()) { return Object.keys(STONES).filter(kind => !!cfg.use?.[kind]); },
+  keep(kind, cfg = this.cfg()) { return Math.min(STONE_MAX, Math.max(1, Math.floor(Number(cfg.stones?.[kind])) || 1)); },
   // The plus from which a helper is used.
   from(kind, cfg = this.cfg()) { return Math.max(0, Number(cfg.from?.[kind]) || 0); },
   // The next stone to fuse: the first kind still below its wanted count, with a bag stone of the weapon's degree.
   nextStone(item, cfg = this.cfg(), plus = Infinity) {
     const degree = this.degree(item);
     for (const kind of this.wanted(cfg).filter(k => plus >= this.from(k, cfg))) {
-      const want = Math.min(STONE_MAX, Number(cfg.stones[kind])), have = this.attributeCount(item, STONES[kind].option);
+      const want = this.keep(kind, cfg), have = this.attributeCount(item, STONES[kind].option);
       if (have >= want) continue;
       const ref = STONES[kind].base + degree - 1;
       const stone = World.items().find(i => i.refObjId === ref && (i.typeFlags & 0xfffe) === 0x3dec && i.quantity > 0 && i.slot >= 13);
@@ -102,7 +104,7 @@ const Alchemy = {
     const elixir = World.items().find(i => this.elixir(i, kind) && (!cfg.elixir || i.refObjId === cfg.elixir));
     if (!elixir) return null;
     const degree = this.degree(item), powder = cfg.powder && degree > 0 ? World.items().find(i => this.powderDegree(i) === degree) : null;
-    const luck = (Number(cfg.stones?.luck) || 0) > 0;
+    const luck = !!cfg.use?.luck;
     const at = plus => this.chanceAt(plus, elixir.refObjId, powder && plus >= this.from('powder', cfg) ? powder.refObjId : 0, luck && plus >= this.from('luck', cfg));
     const target = Math.min(250, Math.max(item.plus + 1, Number(cfg.target) || 0));
     return { now: at(item.plus), plan: item.plus < target ? this.expected(item.plus, target, at) : null, target };
@@ -130,7 +132,7 @@ const Alchemy = {
     if (gp.inventoryPending || !gp.alchemy || gp.alchemy.pending) return reject('Wait for known, settled inventory and alchemy state.');
     if (!this.gear(item) || this.fingerprint(item) !== this.selected?.fingerprint) return reject('Weapon changed or moved. Select it again.');
     const wants = this.wanted(c);
-    if (stonesOnly && !wants.length) return reject('Set at least one stone count above zero first.');
+    if (stonesOnly && !wants.length) return reject('Tick at least one stone type first (Use Luck, Steady, Immortal or Astral).');
     if (wants.length && !this.degree(item)) return reject('Weapon degree is unknown; cannot choose matching stones.');
     if (wants.length && !this.attributesKnown(item)) return reject('The weapon\'s attributes are not loaded yet. Try again in a moment.');
     if (!stonesOnly) {
@@ -291,11 +293,12 @@ const Alchemy = {
       el('p', 'Works on weapons, shields, armour and accessories in your bag; stop hunting and travel first. Each attempt spends one elixir of the item\'s kind and, when enabled and from the plus you set, one lucky powder of its degree. A failure resets the + to 0 (to +4 with an Astral stone); from +5 a failure can also destroy the item half the time unless it has an Immortal charge, or damage it unless it has a Steady charge. Stop prevents the next attempt; a sent attempt may still finish. Unknown results pause without retrying.', 'muted'));
     UI.alchemyPreview = el('div', '', 'row'); UI.alchemyNote = el('p', '', 'muted'); group.append(UI.alchemyPreview, UI.alchemyNote); UI.pane.append(group);
     const stones = UI.group('Stones that help and protect');
-    for (const [kind, s] of Object.entries(STONES)) stones.append(UI.number(s.label + ': keep this many on the item (0 = off)', () => c().stones[kind], n => c().stones[kind] = n, 0, STONE_MAX),
+    for (const [kind, s] of Object.entries(STONES)) stones.append(UI.check('Use ' + s.label + ' stones while enhancing', () => c().use[kind], v => c().use[kind] = v),
+      UI.number(s.label + ': keep this many charges on the item', () => c().stones[kind], n => c().stones[kind] = n, 1, STONE_MAX),
       UI.number(s.label + ': from +', () => c().from[kind], n => c().from[kind] = n, 0, 250));
     stones.append(UI.number('Stop after this many fusions (0 = no limit)', () => c().stoneLimit, n => c().stoneLimit = n, 0, 1000));
     stones.append(UI.row(UI.button('Fuse stones now', () => this.start(true)), UI.button('Stop', () => this.stop())),
-      el('p', 'Each stone adds a charge to the item, up to 6. Before an attempt at or above the plus you set, a missing charge is fused automatically from stones of the item\'s degree in your bag. Luck adds 5% to the chance, Steady stops the durability damage and Immortal stops the destruction when an enhancement fails from +5, and Astral keeps +4 instead of resetting to 0 (it needs Immortal charges). A fusion can fail and use up the stone. Stops if a stone is missing, the game refuses, or when it reaches the fusion limit above (off by default). Fuse stones now ignores the plus and only fills the charges.', 'muted'));
+      el('p', 'Each stone adds a charge to the item, up to 6. Tick Use for the stones you want. Before every attempt at or above the plus you set, if the item has fewer charges than you asked to keep, one is fused automatically from a stone of the item\'s degree in your bag. Luck adds 5% to the chance, Steady stops the durability damage and Immortal stops the destruction when an enhancement fails from +5, and Astral keeps +4 instead of resetting to 0 (it needs Immortal charges). A fusion can fail and use up the stone. Stops if a stone is missing, the game refuses, or when it reaches the fusion limit above (off by default). Fuse stones now ignores the plus and only fills the charges.', 'muted'));
     UI.pane.append(stones);
     const results = UI.group('Results');
     UI.alchemyStats = el('p', '', 'muted'); UI.alchemyLog = el('p', '', 'muted');
@@ -314,7 +317,9 @@ const Alchemy = {
     const odds = item && this.gear(item) ? this.odds(item, c) : null;
     const chance = odds ? `\nNext attempt at +${item.plus}: ${odds.now}% to succeed.` + (odds.plan ? ` To reach +${odds.target} expect about ${fmt(odds.plan.attempts)} elixirs; the chance of getting there without a single failure is ${(odds.plan.clean * 100).toFixed(odds.plan.clean < .1 ? 2 : 0)}%.` : '') : '';
     const kind = this.kind(item) || 'weapon';
-    UI.alchemyNote.textContent = this.message + attributes + chance +
+    const used = this.wanted(c).map(k => `${STONES[k].label} from +${this.from(k, c)} (keep ${this.keep(k, c)})`);
+    const helpers = '\nStones while enhancing: ' + (used.length ? used.join(' · ') : 'none ticked, so none are fused. Tick Use Luck, Steady, Immortal or Astral below.');
+    UI.alchemyNote.textContent = this.message + attributes + chance + helpers +
       `\nElixirs available: ${World.items().filter(i => this.elixir(i, kind) && (!c.elixir || i.refObjId === c.elixir)).reduce((n, i) => n + i.quantity, 0)}` +
       (c.powder ? ` · Matching powder: ${World.items().filter(i => this.powderDegree(i) === this.degree(item) && this.degree(item) > 0).reduce((n, i) => n + i.quantity, 0)}` : '');
     if (UI.alchemyStats) {

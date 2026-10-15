@@ -3,7 +3,7 @@ const NOTES_URL = 'https://nixxane.github.io/opensro-bot-lean-site/#patch-notes'
 const CLASS_KEYS = ['normal', 'champion', 'giant', 'party', 'elite', 'unique'];
 const DEFAULT_PROFILE = {
   items: { rules: {} },
-  alchemy: { target: 3, limit: 20, elixir: 0, powder: false, stones: { luck: 0, steady: 0, immortal: 0, astral: 0 }, stoneLimit: 0,
+  alchemy: { target: 3, limit: 20, elixir: 0, powder: false, use: { luck: false, steady: false, immortal: false, astral: false }, stones: { luck: 1, steady: 1, immortal: 1, astral: 1 }, stoneLimit: 0,
     // The plus from which each helper is used: a failure from +5 up can destroy the item (Steady and Immortal matter from there),
     // Luck and lucky powder help at every plus, and Astral keeps +4 on a failure.
     from: { powder: 0, luck: 0, steady: 5, immortal: 5, astral: 4 } },
@@ -82,6 +82,11 @@ function botProfile(input) {
   // Magic and attribute stones used to sit in the alchemy switch, so they keep its setting.
   for (const key of ['magicStones', 'attrStones']) {
     if (pickup && !(key in pickup)) result.hunt.pickup[key] = pickup.alchemy ?? pickup.others ?? true;
+  }
+  // Helper stones used to be on when their count was above zero; now each has a switch and a count of at least 1.
+  const oldStones = input.alchemy?.stones;
+  if (oldStones && !input.alchemy?.use) for (const key of Object.keys(result.alchemy.use)) {
+    const n = Number(oldStones[key]) || 0; result.alchemy.use[key] = n > 0; result.alchemy.stones[key] = Math.min(6, Math.max(1, n));
   }
   return result;
 }

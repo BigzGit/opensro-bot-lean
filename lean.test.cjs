@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, ItemRules, Items, AutoMastery, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -2847,7 +2847,8 @@ function stoneFixture(change = {}) {
   f.World.gp.inventory = f.World.gp.inventory.map(i => i.slot === 13 ? { ...i, magicReferences: refs } : i);
   f.World.gp.inventory.push({ slot: 16, refObjId: 6879, typeFlags: 0x3dec, quantity: 3 }, { slot: 17, refObjId: 6867, typeFlags: 0x3dec, quantity: 3 },
     { slot: 18, refObjId: 6855, typeFlags: 0x3dec, quantity: 3 });
-  Object.assign(f.Settings.profile.alchemy.stones, { luck: 2, steady: 0, immortal: 0 }, change);
+  Object.assign(f.Settings.profile.alchemy.stones, { luck: 2, steady: 0, immortal: 0, astral: 0 }, change);
+  { const a = f.Settings.profile.alchemy; for (const k of Object.keys(a.use)) { a.use[k] = (a.stones[k] || 0) > 0; a.stones[k] = Math.max(1, a.stones[k] || 0); } }
   Object.assign(f.Settings.profile.alchemy.from, { powder: 0, luck: 0, steady: 0, immortal: 0, astral: 0 });
   f.Alchemy.select(13);
   const have = { 77: 0, 78: 0, 79: 0 };
@@ -3005,7 +3006,7 @@ test('lucky powder and the stones are used only from the plus you set', () => {
   const g = stoneFixture({ luck: 1, steady: 1, immortal: 1 }); Object.assign(g.Settings.profile.alchemy.from, { luck: 0, steady: 5, immortal: 5 });
   const item = g.Alchemy.item(), cfg = g.Settings.profile.alchemy;
   assert.equal(g.Alchemy.nextStone(item, cfg, 0).kind, 'luck'); assert.equal(g.Alchemy.nextStone(item, cfg, 4).kind, 'luck');
-  cfg.stones.luck = 0; assert.equal(g.Alchemy.nextStone(item, cfg, 4), null, 'steady and immortal wait for +5');
+  cfg.use.luck = false; assert.equal(g.Alchemy.nextStone(item, cfg, 4), null, 'steady and immortal wait for +5');
   assert.equal(g.Alchemy.nextStone(item, cfg, 5).kind, 'steady'); assert.equal(g.Alchemy.nextStone(item, cfg, Infinity).kind, 'steady');
 });
 test('the alchemy odds follow the server rules: powder and Luck add while below 100, clamped, and the expectation is exact', () => {
@@ -3025,6 +3026,21 @@ test('alchemy keeps statistics and a log of every attempt and fusion', () => {
   assert.match(text, /Started: Test weapon \+0 to \+6/); assert.match(text, /Success: \+0 → \+1/); assert.match(text, /Failed at \+1: now \+0/);
   assert.equal(f.Alchemy.result.highest, 1); assert.equal(f.Alchemy.result.successes, 1); assert.equal(f.Alchemy.result.failures, 1);
 });
+test('the helper stones are fused automatically while enhancing, once their switch is on and the plus is reached', () => {
+  const f = stoneFixture({ luck: 0 }); const a = f.Settings.profile.alchemy; a.target = 8; Object.assign(a.from, { luck: 0, steady: 2, immortal: 5, astral: 4 });
+  a.use.steady = true; a.use.immortal = true; a.stones.steady = 1; a.stones.immortal = 1;
+  f.Alchemy.start(); f.Controller.tick();
+  assert.equal(f.commands.at(-1).mode, 'reinforce', 'below +2 nothing is fused first');
+  const item = f.Alchemy.item();
+  assert.equal(f.Alchemy.nextStone({ ...item, plus: 2 }, a, 2).kind, 'steady'); assert.equal(f.Alchemy.nextStone({ ...item, plus: 5 }, a, 5).kind, 'steady');
+  assert.deepEqual([...f.Alchemy.wanted(a)], ['steady', 'immortal']);
+  a.use.steady = false; assert.equal(f.Alchemy.nextStone({ ...item, plus: 5 }, a, 5).kind, 'immortal'); a.use.immortal = false; assert.equal(f.Alchemy.nextStone({ ...item, plus: 9 }, a, 9), null, 'nothing ticked, nothing fused');
+});
+test('an old profile with stone counts keeps those helpers switched on', () => {
+  const f = fixture(), old = JSON.parse(JSON.stringify(f.Settings.profile)); delete old.alchemy.use; old.alchemy.stones = { luck: 3, steady: 0, immortal: 2 };
+  const p = f.botProfile(old);
+  assert.equal(p.alchemy.use.luck, true); assert.equal(p.alchemy.stones.luck, 3); assert.equal(p.alchemy.use.steady, false); assert.equal(p.alchemy.stones.steady, 1); assert.equal(p.alchemy.use.immortal, true); assert.equal(p.alchemy.stones.immortal, 2);
+});
 test('a failed stone fusion uses the stone up and the run carries on; a refusal explains itself and stops', () => {
   const f = stoneFixture(); f.Alchemy.start(true); f.Controller.tick();
   // 0xb651 answers a failed fusion with error 0x23 and flags 0x80 on slot 0, after the stone left the bag.
@@ -3043,7 +3059,7 @@ test('a failed stone fusion uses the stone up and the run carries on; a refusal 
   assert.match(h.Alchemy.message, /code 16: the game does not accept this stone here/);
 });
 test('alchemy stone setup needs a known degree and readable attributes, a wanted count and settled state', () => {
-  let f = stoneFixture({ luck: 0 }); f.Alchemy.start(true); assert.equal(f.Alchemy.run, null); assert.match(f.Alchemy.message, /at least one stone count/);
+  let f = stoneFixture({ luck: 0 }); f.Alchemy.start(true); assert.equal(f.Alchemy.run, null); assert.match(f.Alchemy.message, /at least one stone type/);
   f = stoneFixture(); f.World.gp.inventory[0].magic = [String((1n << 32n) | 999n)]; f.Alchemy.select(13); f.Alchemy.start(true);
   assert.equal(f.Alchemy.run, null); assert.match(f.Alchemy.message, /attributes are not loaded/); assert.equal(f.commands.length, 0);
   f = stoneFixture(); delete f.World.gp.inventory[0].tooltip; f.Alchemy.select(13); f.Alchemy.start(true); assert.equal(f.Alchemy.run, null); assert.match(f.Alchemy.message, /degree is unknown/);
