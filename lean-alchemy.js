@@ -1,4 +1,4 @@
-// Weapon enhancement (elixirs) and the Luck / Steady / Immortal magic stones. Never resend an unconfirmed
+// Item enhancement (elixirs, for weapons, shields, armour and accessories) and the Luck / Steady / Immortal / Astral stones. Never resend an unconfirmed
 // material-spending request.
 // A stone adds 1 to the weapon's attribute count (at most 6): Luck raises the enhancement success chance, Steady
 // protects the durability and Immortal the weapon itself when an enhancement fails. Stone items are one per weapon
@@ -9,17 +9,26 @@ const STONES = {
   luck: { label: 'Luck', option: 'MATTR_LUCK', base: 6871 },
   steady: { label: 'Steady', option: 'MATTR_SOLID', base: 6859 },
   immortal: { label: 'Immortal', option: 'MATTR_ATHANASIA', base: 6847 },
+  astral: { label: 'Astral', option: 'MATTR_ASTRAL', base: 6883 },
 };
 const STONE_MAX = 6;
 const STONE_FAILED = 0x23;
 const Alchemy = {
-  windowOwner: null, selected: null, run: null, pending: null, result: null, message: 'Select a bag weapon to begin.', started: false,
+  windowOwner: null, selected: null, run: null, pending: null, result: null, message: 'Select an item from your bag to begin.', started: false,
   cfg() { return Settings.profile.alchemy; },
-  weapon(i) { return i && i.slot >= 13 && i.slot <= 255 && (i.typeFlags & 0x7e) === 0x2c && ((i.typeFlags >>> 7) & 15) === 6 && Number.isInteger(i.plus) && i.plus >= 0; },
+  // The server's enhancement families (alchemy catalog.go category()): weapon, shield, accessory and armor. An elixir is
+  // refused (0x09) for any other family.
+  kind(i) {
+    if (!i || i.slot < 13 || i.slot > 255 || (i.typeFlags & 0x7e) !== 0x2c || !Number.isInteger(i.plus) || i.plus < 0) return '';
+    const t = (i.typeFlags >>> 7) & 15;
+    return t === 6 ? 'weapon' : t === 4 ? 'shield' : t === 5 || t === 12 ? 'accessory' : [1, 2, 3, 9, 10, 11].includes(t) ? 'armor' : '';
+  },
+  gear(i) { return !!this.kind(i); },
   degree(i) { const n = i?.tooltip?.fields?.itemClass; return Number.isInteger(n) && n > 0 ? Math.floor((n - 1) / 3) + 1 : 0; },
   // Retail itemdata: weapon recipes 3675/3679 (param1 includes category 6).
   // Powder A 3683..3694 and B 3695..3706 have param1 = degree 1..12.
-  elixir(i) { return i && [3675, 3679].includes(i.refObjId) && (i.typeFlags & 0xfffe) === 0x0d6c && i.quantity > 0 && i.slot >= 13; },
+  // Reinforce elixirs (item data ITEM_ETC_ARCHEMY_REINFORCE_RECIPE_<KIND>_A / _B), per gear kind.
+  elixir(i, kind = 'weapon') { return i && !!ALCHEMY_DATA.kinds[kind]?.includes(i.refObjId) && (i.typeFlags & 0xfffe) === 0x0d6c && i.quantity > 0 && i.slot >= 13; },
   powderDegree(i) {
     if (!i || (i.typeFlags & 0xfffe) !== 0x156c || !(i.quantity > 0) || i.slot < 13) return 0;
     return i.refObjId >= 3683 && i.refObjId <= 3694 ? i.refObjId - 3682 : i.refObjId >= 3695 && i.refObjId <= 3706 ? i.refObjId - 3694 : 0;
@@ -29,8 +38,8 @@ const Alchemy = {
   select(slot) {
     if (this.run || this.pending) return UI.toast('Stop alchemy and wait for the pending result before changing weapons.', 'warn');
     const item = World.items().find(i => i.slot === Number(slot));
-    this.selected = this.weapon(item) ? { slot: item.slot, fingerprint: this.fingerprint(item) } : null;
-    this.message = this.selected ? 'Weapon selected. Set the target and attempt limit.' : 'Select a bag weapon to begin.';
+    this.selected = this.gear(item) ? { slot: item.slot, fingerprint: this.fingerprint(item) } : null;
+    this.message = this.selected ? 'Item selected. Set the target and attempt limit.' : 'Select an item from your bag to begin.';
   },
   item() { return World.items().find(i => i.slot === this.selected?.slot); },
   // The count of one attribute (Luck, Steady, Immortal) on a weapon, from its magic options; the option's amount is the count.
@@ -47,10 +56,12 @@ const Alchemy = {
     return (item?.magic || []).every(encoded => refs.some(r => r.paramId === Number(toBigInt(encoded) & 65535n)));
   },
   wanted(cfg = this.cfg()) { return Object.keys(STONES).filter(kind => Math.min(STONE_MAX, Number(cfg.stones?.[kind]) || 0) > 0); },
+  // The plus from which a helper is used.
+  from(kind, cfg = this.cfg()) { return Math.max(0, Number(cfg.from?.[kind]) || 0); },
   // The next stone to fuse: the first kind still below its wanted count, with a bag stone of the weapon's degree.
-  nextStone(item, cfg = this.cfg()) {
+  nextStone(item, cfg = this.cfg(), plus = Infinity) {
     const degree = this.degree(item);
-    for (const kind of this.wanted(cfg)) {
+    for (const kind of this.wanted(cfg).filter(k => plus >= this.from(k, cfg))) {
       const want = Math.min(STONE_MAX, Number(cfg.stones[kind])), have = this.attributeCount(item, STONES[kind].option);
       if (have >= want) continue;
       const ref = STONES[kind].base + degree - 1;
@@ -59,11 +70,46 @@ const Alchemy = {
     }
     return null;
   },
+  powderWanted(item, cfg = this.cfg()) { return !!cfg.powder && item.plus >= this.from('powder', cfg); },
   materials(item, cfg = this.cfg()) {
-    const elixir = World.items().find(i => this.elixir(i) && (!cfg.elixir || i.refObjId === cfg.elixir));
-    const powder = cfg.powder ? World.items().find(i => this.powderDegree(i) === this.degree(item) && this.degree(item) > 0) : null;
-    return { elixir, powder };
+    const kind = this.kind(item), degree = this.degree(item);
+    const elixir = World.items().find(i => this.elixir(i, kind) && (!cfg.elixir || i.refObjId === cfg.elixir));
+    const wantPowder = this.powderWanted(item, cfg);
+    const powder = wantPowder ? World.items().find(i => this.powderDegree(i) === degree && degree > 0) : null;
+    return { elixir, powder, wantPowder };
   },
+  // The server's odds for one attempt (reinforce.go): the elixir's chance at the plus (+11 holds above), plus the powder's
+  // and the Luck bonus while the running chance is below 100, clamped to 10..100. Skill and avatar bonuses are not known here.
+  chanceAt(plus, elixirRef, powderRef, luck) {
+    const e = ALCHEMY_DATA.elixirs[elixirRef]; if (!e) return null;
+    const at = Math.min(Math.max(0, plus), 11), p = powderRef && ALCHEMY_DATA.powders[powderRef];
+    let c = e[at];
+    if (p && c < 100) c += p.chances[at];
+    if (luck && c < 100) c += 5;
+    return Math.max(10, Math.min(100, c));
+  },
+  // Expected attempts to climb from plus `from` to `target` when a failure resets to +0 (no Astral), and the chance of
+  // getting there without one failure. P[k] is the chance of climbing from +0 to +k in a row.
+  expected(from, target, chance) {
+    const P = [1]; for (let k = 0; k < target; k++) P[k + 1] = P[k] * chance(k) / 100;
+    let all = 0, run = 0; for (let k = 0; k < target; k++) { all += P[k]; if (k >= from) run += P[k]; }
+    const q = P[target] / P[from], first = all / P[target];
+    return { attempts: run / P[from] + (1 - q) * first, clean: q };
+  },
+  // What the next attempts would use and how likely they are to work, from the bag and the settings.
+  odds(item, cfg = this.cfg()) {
+    const kind = this.kind(item); if (!kind) return null;
+    const elixir = World.items().find(i => this.elixir(i, kind) && (!cfg.elixir || i.refObjId === cfg.elixir));
+    if (!elixir) return null;
+    const degree = this.degree(item), powder = cfg.powder && degree > 0 ? World.items().find(i => this.powderDegree(i) === degree) : null;
+    const luck = (Number(cfg.stones?.luck) || 0) > 0;
+    const at = plus => this.chanceAt(plus, elixir.refObjId, powder && plus >= this.from('powder', cfg) ? powder.refObjId : 0, luck && plus >= this.from('luck', cfg));
+    const target = Math.min(250, Math.max(item.plus + 1, Number(cfg.target) || 0));
+    return { now: at(item.plus), plan: item.plus < target ? this.expected(item.plus, target, at) : null, target };
+  },
+  // The log and statistics shown under the settings: newest last, at most 60 lines.
+  log: [],
+  note(text) { this.log.push({ at: Date.now(), text }); if (this.log.length > 60) this.log.shift(); },
   blocked() {
     if (BuffGear.run || BuffGear.recovery) return 'Restore or review combat gear before alchemy.';
     const gp = World.gp;
@@ -82,7 +128,7 @@ const Alchemy = {
     const reject = text => { this.message = text; UI.toast(text, 'warn'); };
     if (error) return reject(error);
     if (gp.inventoryPending || !gp.alchemy || gp.alchemy.pending) return reject('Wait for known, settled inventory and alchemy state.');
-    if (!this.weapon(item) || this.fingerprint(item) !== this.selected?.fingerprint) return reject('Weapon changed or moved. Select it again.');
+    if (!this.gear(item) || this.fingerprint(item) !== this.selected?.fingerprint) return reject('Weapon changed or moved. Select it again.');
     const wants = this.wanted(c);
     if (stonesOnly && !wants.length) return reject('Set at least one stone count above zero first.');
     if (wants.length && !this.degree(item)) return reject('Weapon degree is unknown; cannot choose matching stones.');
@@ -91,17 +137,18 @@ const Alchemy = {
     if (!Number.isInteger(c.target) || c.target < 1 || c.target > 250 || !Number.isInteger(c.limit) || c.limit < 1 || c.limit > 1000) return reject('Set target + from 1 to 250 and attempts from 1 to 1000.');
     if (item.plus >= c.target) return reject('Weapon already meets the target +.');
     const materials = this.materials(item);
-    if (!materials.elixir) return reject('No selected weapon elixirs in the bag.');
-    if (c.powder && !this.degree(item)) return reject('Weapon degree is unknown; cannot choose compatible lucky powder.');
-    if (c.powder && !materials.powder) return reject('No lucky powder matching this weapon degree.');
+    if (!materials.elixir) return reject(`No selected ${this.kind(item)} elixirs in the bag.`);
+    if (materials.wantPowder && !this.degree(item)) return reject('Weapon degree is unknown; cannot choose compatible lucky powder.');
+    if (materials.wantPowder && !materials.powder) return reject('No lucky powder matching this weapon degree.');
     }
     this.run = { slot: item.slot, identity: this.identity(item), fingerprint: this.fingerprint(item), stonesOnly,
       cfg: { ...c }, config: JSON.stringify(c), manualAt: Manual.lastAt, character: World.charName,
-      attempts: 0, successes: 0, failures: 0, elixirs: 0, powders: 0, stoneAttempts: 0, stoneFailures: 0, stonesUsed: { luck: 0, steady: 0, immortal: 0 }, nextAt: now(), opening: null };
+      attempts: 0, successes: 0, failures: 0, destroyed: 0, highest: item.plus, elixirs: 0, powders: 0, stoneAttempts: 0, stoneFailures: 0, stonesUsed: { luck: 0, steady: 0, immortal: 0, astral: 0 }, nextAt: now(), opening: null };
     this.result = this.run; this.message = 'Preparing alchemy.';
+    this.note(stonesOnly ? 'Started fusing stones.' : `Started: ${item.name || Items.name(item.refObjId)} +${item.plus} to +${c.target}.`);
   },
   stop(reason = 'Alchemy stopped. An attempt already sent may still finish.') {
-    if (this.run) { this.run = null; this.message = reason; }
+    if (this.run) { this.note(reason); this.run = null; this.message = reason; }
     // Close only a session we opened/used, on the same character. Native close
     // does not cancel reinforcement; keep the pending result until confirmed.
     const owner = this.windowOwner; this.windowOwner = null;
@@ -135,7 +182,7 @@ const Alchemy = {
     // exactly one of each selected reagent consumed, not just a stale flag.
     if (Restock.count(p.elixir.ref) !== p.elixir.before - 1 || p.powder && Restock.count(p.powder.ref) !== p.powder.before - 1) return;
     const item = World.items().find(i => i.slot === p.run.slot);
-    if (outcome !== 0x40 && (!this.weapon(item) || this.identity(item) !== p.run.identity)) {
+    if (outcome !== 0x40 && (!this.gear(item) || this.identity(item) !== p.run.identity)) {
       this.stop('Weapon identity changed. Outstanding result requires manual review.'); return;
     }
     if (outcome === 0x40 && item) { this.stop('Unexpected destruction result. Outstanding result requires manual review.'); return; }
@@ -145,6 +192,9 @@ const Alchemy = {
     this.pending = null;
     p.run.elixirs++; if (p.powder) p.run.powders++;
     if (outcome === 0x10) p.run.successes++; else p.run.failures++;
+    if (outcome === 0x40) p.run.destroyed++;
+    this.note(outcome === 0x10 ? `Success: +${p.plus} → +${item.plus}` : outcome === 0x40 ? `Destroyed at +${p.plus}` : `Failed at +${p.plus}: now +${item.plus}`);
+    if (item) p.run.highest = Math.max(p.run.highest, item.plus);
     if (outcome === 0x40) { this.selected = null; this.stop('Weapon destroyed; alchemy stopped.'); this.message = 'Weapon destroyed; alchemy stopped.'; return; }
     p.run.fingerprint = this.fingerprint(item); this.selected = { slot: item.slot, fingerprint: p.run.fingerprint };
     p.run.nextAt = now() + 1000;
@@ -163,9 +213,10 @@ const Alchemy = {
   observeStone(p, gp, failed = false) {
     if (gp.inventoryPending || Restock.count(p.stone.ref) !== p.stone.before - 1) return;
     const item = World.items().find(i => i.slot === p.run.slot), label = STONES[p.stone.kind].label;
-    if (!this.weapon(item) || this.identity(item) !== p.run.identity) { this.stop('Weapon identity changed. Outstanding result requires manual review.'); return; }
+    if (!this.gear(item) || this.identity(item) !== p.run.identity) { this.stop('Weapon identity changed. Outstanding result requires manual review.'); return; }
     const count = this.attributeCount(item, STONES[p.stone.kind].option);
     this.pending = null; p.run.stonesUsed[p.stone.kind]++; if (failed) p.run.stoneFailures++;
+    this.note(failed ? `${label} stone failed and was used up` : `${label} stone fused: ${count} of ${STONE_MAX}`);
     p.run.fingerprint = this.fingerprint(item); this.selected = { slot: item.slot, fingerprint: p.run.fingerprint };
     p.run.nextAt = now() + 1000;
     if (this.run !== p.run) return;
@@ -180,7 +231,7 @@ const Alchemy = {
     if (blocked || r.character !== World.charName || r.manualAt !== Manual.lastAt || r.config !== JSON.stringify(this.cfg())) return this.stop(blocked || 'Alchemy stopped: settings, character or manual control changed.');
     if (this.pending) { this.message = 'Attempt ' + r.attempts + ': waiting for server result.'; return; }
     const item = World.items().find(i => i.slot === r.slot);
-    if (!this.weapon(item) || this.fingerprint(item) !== r.fingerprint) return this.stop('Weapon changed or moved. Select it again.');
+    if (!this.gear(item) || this.fingerprint(item) !== r.fingerprint) return this.stop('Weapon changed or moved. Select it again.');
     if (!r.stonesOnly && (r.attempts >= r.cfg.limit || item.plus >= r.cfg.target)) return this.stop('Target or attempt limit reached.');
     if (!gp.alchemy) return this.stop('Alchemy state unavailable.');
     if (gp.inventoryPending || gp.alchemy.pending || Loot.pressed()) { this.message = 'Alchemy waiting for inventory or potion use.'; return; }
@@ -193,7 +244,7 @@ const Alchemy = {
     }
     if (r.opening !== null) r.opening = null;
     if (now() < r.nextAt || !Cmd.spaced('alchemy-start')) return;
-    const need = this.nextStone(item, r.cfg);
+    const need = this.nextStone(item, r.cfg, r.stonesOnly ? Infinity : item.plus);
     if (need?.missing) return this.stop(`No ${STONES[need.missing].label} stone of degree ${this.degree(item)} in the bag.`);
     if (need) {
       const cap = Math.max(0, Math.floor(Number(r.cfg.stoneLimit) || 0));
@@ -210,8 +261,8 @@ const Alchemy = {
       return;
     }
     if (r.stonesOnly) return this.stop('The weapon has the wanted stone counts.');
-    const { elixir, powder } = this.materials(item, r.cfg);
-    if (!elixir || r.cfg.powder && !powder) return this.stop('Selected elixirs or compatible lucky powder ran out.');
+    const { elixir, powder, wantPowder } = this.materials(item, r.cfg);
+    if (!elixir || wantPowder && !powder) return this.stop('Selected elixirs or compatible lucky powder ran out.');
     const slots = [item.slot, elixir.slot, ...(powder ? [powder.slot] : [])];
     if (slots.some(slot => !Number.isInteger(slot) || slot < 13 || slot > 255) || new Set(slots).size !== slots.length) return this.stop('Invalid material slots.');
     if (Cmd.raw({ kind: 'alchemy-start', mode: 'reinforce', slots }, 'Alchemy: enhance selected weapon')) {
@@ -224,38 +275,59 @@ const Alchemy = {
     }
   },
   draw() {
-    const c = () => this.cfg(), weapons = () => [[-1, 'Select a weapon from your bag'], ...World.items().filter(i => this.weapon(i)).map(i => [i.slot, (i.name || Items.name(i.refObjId)) + ' +' + i.plus + ' · bag slot ' + i.slot])];
-    const group = UI.group('Weapon enhancement');
-    group.append(UI.select('Weapon', weapons, () => this.selected?.slot ?? -1, slot => { this.select(slot); UI.draw(); }),
+    const c = () => this.cfg(), items = () => [[-1, 'Select an item from your bag'], ...World.items().filter(i => this.gear(i)).map(i => [i.slot, (i.name || Items.name(i.refObjId)) + ' +' + i.plus + ' · ' + this.kind(i) + ' · bag slot ' + i.slot])];
+    const elixirs = () => {
+      const kind = this.kind(this.item()) || 'weapon';
+      return [[0, 'Any compatible ' + kind + ' elixir'], ...[...new Map(World.items().filter(i => this.elixir(i, kind)).map(i => [i.refObjId, i.name || Items.name(i.refObjId)])).entries()]];
+    };
+    const group = UI.group('Item enhancement');
+    group.append(UI.select('Item', items, () => this.selected?.slot ?? -1, slot => { this.select(slot); UI.draw(); }),
       UI.number('Target +', () => c().target, n => c().target = n, 1, 250),
       UI.number('Maximum attempts', () => c().limit, n => c().limit = n, 1, 1000),
-      UI.select('Weapon elixir', () => [[0, 'Any compatible weapon elixir'], ...[...new Map(World.items().filter(i => this.elixir(i)).map(i => [i.refObjId, i.name || Items.name(i.refObjId)])).entries()]], () => c().elixir, value => c().elixir = Number(value)),
+      UI.select('Elixir', elixirs, () => c().elixir, value => c().elixir = Number(value)),
       UI.check('Use lucky powder of matching degree', () => c().powder, value => c().powder = value),
+      UI.number('Lucky powder from +', () => c().from.powder, n => c().from.powder = n, 0, 250),
       UI.row(UI.button('Start alchemy', () => this.start()), UI.button('Stop alchemy', () => this.stop())),
-      el('p', 'Keep the weapon in your bag and stop hunting/travel first. Each attempt spends a weapon elixir and, when enabled, matching lucky powder. Failures can reduce +, damage or destroy the weapon. Stop prevents the next attempt; a sent attempt may still finish. Unknown results pause without retrying.', 'muted'));
+      el('p', 'Works on weapons, shields, armour and accessories in your bag; stop hunting and travel first. Each attempt spends one elixir of the item\'s kind and, when enabled and from the plus you set, one lucky powder of its degree. A failure resets the + to 0 (to +4 with an Astral stone); from +5 a failure can also destroy the item half the time unless it has an Immortal charge, or damage it unless it has a Steady charge. Stop prevents the next attempt; a sent attempt may still finish. Unknown results pause without retrying.', 'muted'));
     UI.alchemyPreview = el('div', '', 'row'); UI.alchemyNote = el('p', '', 'muted'); group.append(UI.alchemyPreview, UI.alchemyNote); UI.pane.append(group);
-    const stones = UI.group('Magic stones for the weapon');
-    for (const [kind, s] of Object.entries(STONES)) stones.append(UI.number(s.label + ' stones: fuse up to (0 = off)', () => c().stones[kind], n => c().stones[kind] = n, 0, STONE_MAX));
+    const stones = UI.group('Stones that help and protect');
+    for (const [kind, s] of Object.entries(STONES)) stones.append(UI.number(s.label + ': keep this many on the item (0 = off)', () => c().stones[kind], n => c().stones[kind] = n, 0, STONE_MAX),
+      UI.number(s.label + ': from +', () => c().from[kind], n => c().from[kind] = n, 0, 250));
     stones.append(UI.number('Stop after this many fusions (0 = no limit)', () => c().stoneLimit, n => c().stoneLimit = n, 0, 1000));
     stones.append(UI.row(UI.button('Fuse stones now', () => this.start(true)), UI.button('Stop', () => this.stop())),
-      el('p', 'Each stone adds 1 to that attribute on the weapon, up to 6. Luck raises the enhancement success chance, Steady stops durability damage and Immortal stops destruction when an enhancement fails; none of them stops the + from being reset (an Astral stone does that, from +4). The stone must be of the weapon\'s degree and in your bag. Start alchemy fuses the stones first, then enhances; Fuse stones now only fuses them. A fusion can fail and use up the stone. Adding a kind the weapon does not have yet needs a free magic option slot. Stops if a stone is missing, the game refuses, or when it reaches the fusion limit above (off by default).', 'muted'));
+      el('p', 'Each stone adds a charge to the item, up to 6. Before an attempt at or above the plus you set, a missing charge is fused automatically from stones of the item\'s degree in your bag. Luck adds 5% to the chance, Steady stops the durability damage and Immortal stops the destruction when an enhancement fails from +5, and Astral keeps +4 instead of resetting to 0 (it needs Immortal charges). A fusion can fail and use up the stone. Stops if a stone is missing, the game refuses, or when it reaches the fusion limit above (off by default). Fuse stones now ignores the plus and only fills the charges.', 'muted'));
     UI.pane.append(stones);
+    const results = UI.group('Results');
+    UI.alchemyStats = el('p', '', 'muted'); UI.alchemyLog = el('p', '', 'muted');
+    results.append(UI.alchemyStats, UI.alchemyLog, UI.button('Clear results', () => { this.result = null; this.log.length = 0; this.refresh(); }));
+    UI.pane.append(results);
     this.refresh();
   },
   refresh() {
     if (UI.current !== 'Alchemy' || !UI.alchemyNote) return;
-    const item = this.item(), r = this.result;
-    const attributes = item && this.weapon(item) ? '\nStones on the weapon: ' + Object.entries(STONES).map(([kind, s]) => {
+    const item = this.item(), r = this.result, c = this.cfg();
+    const fmt = n => !Number.isFinite(n) ? 'a huge number of' : n < 100 ? n.toFixed(n < 10 ? 1 : 0) : n < 1e6 ? Math.round(n).toLocaleString('en-US') : n.toExponential(1);
+    const attributes = item && this.gear(item) ? '\nStones on the item: ' + Object.entries(STONES).map(([kind, s]) => {
       const have = this.attributesKnown(item) ? this.attributeCount(item, s.option) : '?', bag = World.items().filter(i => i.refObjId === s.base + this.degree(item) - 1 && i.quantity > 0).reduce((n, i) => n + i.quantity, 0);
       return `${s.label} ${have}/${STONE_MAX} (${bag} in bag)`;
     }).join(' · ') : '';
-    UI.alchemyNote.textContent = this.message + attributes + (r ? `\nAttempts ${r.attempts} · Success ${r.successes} · Failed ${r.failures} · Elixirs used ${r.elixirs} · Powder used ${r.powders}` : '') +
-      `\nElixirs available: ${World.items().filter(i => this.elixir(i) && (!this.cfg().elixir || i.refObjId === this.cfg().elixir)).reduce((n, i) => n + i.quantity, 0)}` +
-      (this.cfg().powder ? ` · Matching powder: ${World.items().filter(i => this.powderDegree(i) === this.degree(item) && this.degree(item) > 0).reduce((n, i) => n + i.quantity, 0)}` : '');
+    const odds = item && this.gear(item) ? this.odds(item, c) : null;
+    const chance = odds ? `\nNext attempt at +${item.plus}: ${odds.now}% to succeed.` + (odds.plan ? ` To reach +${odds.target} expect about ${fmt(odds.plan.attempts)} elixirs; the chance of getting there without a single failure is ${(odds.plan.clean * 100).toFixed(odds.plan.clean < .1 ? 2 : 0)}%.` : '') : '';
+    const kind = this.kind(item) || 'weapon';
+    UI.alchemyNote.textContent = this.message + attributes + chance +
+      `\nElixirs available: ${World.items().filter(i => this.elixir(i, kind) && (!c.elixir || i.refObjId === c.elixir)).reduce((n, i) => n + i.quantity, 0)}` +
+      (c.powder ? ` · Matching powder: ${World.items().filter(i => this.powderDegree(i) === this.degree(item) && this.degree(item) > 0).reduce((n, i) => n + i.quantity, 0)}` : '');
+    if (UI.alchemyStats) {
+      UI.alchemyStats.textContent = r
+        ? `Attempts ${r.attempts} · Success ${r.successes} · Failed ${r.failures} · Destroyed ${r.destroyed || 0} · Highest + ${r.highest ?? 0}` + (r.attempts ? ` · Success rate ${Math.round(r.successes / r.attempts * 100)}%` : '') +
+          `\nUsed: elixirs ${r.elixirs} · powder ${r.powders} · stones ${Object.entries(STONES).map(([k, s]) => `${s.label} ${r.stonesUsed?.[k] || 0}`).join(' / ')}`
+        : 'No results yet.';
+      UI.alchemyLog.textContent = this.log.slice(-12).map(l => new Date(l.at).toLocaleTimeString('en-GB') + '  ' + l.text).join('\n');
+    }
     const key = item ? item.refObjId + ':' + item.plus + ':' + item.slot : '';
     if (UI.alchemyPreview.dataset.item !== key) {
       UI.alchemyPreview.dataset.item = key; UI.alchemyPreview.replaceChildren();
-      if (this.weapon(item)) {
+      if (this.gear(item)) {
         const icon = el('span', '', 'skill-icon'); Icons.paint(icon, item.icon || Items.iconDdj(item.refObjId));
         UI.alchemyPreview.append(icon, el('span', (item.name || Items.name(item.refObjId)) + ' +' + item.plus + (this.degree(item) ? ' · Degree ' + this.degree(item) : '')));
       }

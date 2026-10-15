@@ -716,7 +716,7 @@ const server = http.createServer((req, res) => {
       testCommands.length = 0;
     });
     await page.getByRole('button', { name: 'Alchemy', exact: true }).click();
-    await page.getByLabel('Weapon', { exact: true }).selectOption('13');
+    await page.getByLabel('Item', { exact: true }).selectOption('13');
     await page.getByLabel('Target +', { exact: true }).fill('1');
     await page.getByLabel('Target +', { exact: true }).dispatchEvent('change');
     await page.getByLabel('Maximum attempts', { exact: true }).fill('2');
@@ -730,7 +730,7 @@ const server = http.createServer((req, res) => {
       w.applyGameplay({ ...gp, inventory: gp.inventory.map(i => i.slot === 13 ? { ...i, plus: 1 } : { ...i, quantity: 2 }),
         alchemy: { visible: true, pending: false, mode: 'reinforce', flags: 0x10, error: null, slot: 13 } });
     });
-    await page.getByText(/Target reached: \+1\./).waitFor();
+    await page.getByText(/Target reached: \+1\./).first().waitFor();
     await page.waitForFunction(() => testCommands.some(c => c.kind === 'alchemy-close'));
     assert.equal(await page.evaluate(() => SROLean.alchemy.result.elixirs), 1);
     assert.equal(await page.evaluate(() => SROLean.alchemy.result.powders), 1);

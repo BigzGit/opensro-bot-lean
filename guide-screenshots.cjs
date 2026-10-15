@@ -121,7 +121,7 @@ const gameplay = { localGid: 1, target: 0, targetPending: false, inventoryPendin
     await jump('Potion restock'); await snap('07-restock');
     await tab('Town'); await snap('08-town-triggers');
     await jump('Scroll town cycle'); await snap('08-town-cycle');
-    await tab('Alchemy'); await snap('09-alchemy'); await jump('Magic stones for the weapon'); await snap('09b-alchemy-stones');
+    await tab('Alchemy'); await snap('09-alchemy'); await jump('Stones that help and protect'); await snap('09b-alchemy-stones');
     await tab('Party'); await snap('13-party');
     await tab('Settings'); await snap('10-settings');
     await jump('Anti-stuck'); await snap('11-anti-stuck');

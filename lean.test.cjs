@@ -2848,6 +2848,7 @@ function stoneFixture(change = {}) {
   f.World.gp.inventory.push({ slot: 16, refObjId: 6879, typeFlags: 0x3dec, quantity: 3 }, { slot: 17, refObjId: 6867, typeFlags: 0x3dec, quantity: 3 },
     { slot: 18, refObjId: 6855, typeFlags: 0x3dec, quantity: 3 });
   Object.assign(f.Settings.profile.alchemy.stones, { luck: 2, steady: 0, immortal: 0 }, change);
+  Object.assign(f.Settings.profile.alchemy.from, { powder: 0, luck: 0, steady: 0, immortal: 0, astral: 0 });
   f.Alchemy.select(13);
   const have = { 77: 0, 78: 0, 79: 0 };
   // The game fuses one stone: the bag loses it and the weapon's option count rises.
@@ -2979,6 +2980,50 @@ test('dying says in the log whether the bot waits for a party resurrection', () 
   assert.ok(t.f.Log.lines.some(l => /Died: no party member in view, reviving in 5 s\./.test(l.text)));
   t = deathFixture('revive'); t.f.Settings.profile.party.acceptRes = false; t.die();
   assert.ok(t.f.Log.lines.some(l => /Died: reviving in 5 s \(Accept resurrection from party members is off\)\./.test(l.text)));
+});
+test('alchemy works on every gear kind with that kind\'s elixir, and refuses to use another kind\'s', () => {
+  const kinds = { weapon: [6, 3675], shield: [4, 3676], armor: [1, 3677], accessory: [5, 3678] };
+  for (const [kind, [t3, elixir]] of Object.entries(kinds)) {
+    const f = alchemyFixture(); f.World.gp.inventory = [
+      { slot: 13, refObjId: 100, typeFlags: 44 | (t3 << 7), plus: 0, durability: 100, variance: '1', magic: [], quantity: 1, name: 'Test', tooltip: { fields: { itemClass: 25 } } },
+      { slot: 14, refObjId: elixir, typeFlags: 0x0d6c, quantity: 5 }, { slot: 15, refObjId: 3679 === elixir ? 3680 : 3679, typeFlags: 0x0d6c, quantity: 5 }];
+    f.Alchemy.select(13); assert.equal(f.Alchemy.kind(f.Alchemy.item()), kind);
+    f.Alchemy.start(); f.Controller.tick();
+    assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'alchemy-start', mode: 'reinforce', slots: [13, 14] }, kind + ' uses its own elixir');
+  }
+  const g = alchemyFixture(); g.World.gp.inventory = [{ slot: 13, refObjId: 100, typeFlags: 44 | (1 << 7), plus: 0, durability: 100, variance: '1', magic: [], quantity: 1, tooltip: { fields: { itemClass: 25 } } },
+    { slot: 14, refObjId: 3679, typeFlags: 0x0d6c, quantity: 5 }];
+  g.Alchemy.select(13); g.Alchemy.start(); assert.equal(g.Alchemy.run, null); assert.match(g.Alchemy.message, /No selected armor elixirs in the bag/);
+  assert.equal(g.Alchemy.kind({ slot: 20, typeFlags: 44 | (6 << 7) | 1, plus: 0 }), 'weapon'); assert.equal(g.Alchemy.kind({ slot: 20, typeFlags: 0x0d6c, plus: 0 }), '', 'not gear');
+});
+test('lucky powder and the stones are used only from the plus you set', () => {
+  const f = alchemyFixture(true); f.Settings.profile.alchemy.from.powder = 2; f.Settings.profile.alchemy.target = 5;
+  f.Alchemy.start(); f.Controller.tick();
+  assert.deepEqual([...f.commands.at(-1).slots], [13, 14], 'no powder at +0');
+  f.result(0x10, 1); f.advance(1500); f.Controller.tick(); assert.deepEqual([...f.commands.at(-1).slots], [13, 14], 'none at +1');
+  f.result(0x10, 2); f.advance(1500); f.Controller.tick(); assert.deepEqual([...f.commands.at(-1).slots], [13, 14, 15], 'powder from +2');
+  const g = stoneFixture({ luck: 1, steady: 1, immortal: 1 }); Object.assign(g.Settings.profile.alchemy.from, { luck: 0, steady: 5, immortal: 5 });
+  const item = g.Alchemy.item(), cfg = g.Settings.profile.alchemy;
+  assert.equal(g.Alchemy.nextStone(item, cfg, 0).kind, 'luck'); assert.equal(g.Alchemy.nextStone(item, cfg, 4).kind, 'luck');
+  cfg.stones.luck = 0; assert.equal(g.Alchemy.nextStone(item, cfg, 4), null, 'steady and immortal wait for +5');
+  assert.equal(g.Alchemy.nextStone(item, cfg, 5).kind, 'steady'); assert.equal(g.Alchemy.nextStone(item, cfg, Infinity).kind, 'steady');
+});
+test('the alchemy odds follow the server rules: powder and Luck add while below 100, clamped, and the expectation is exact', () => {
+  const A = alchemyFixture().Alchemy;
+  assert.equal(A.chanceAt(0, 3675, 0, false), 25); assert.equal(A.chanceAt(0, 3675, 3683, false), 75, 'powder adds its chance');
+  assert.equal(A.chanceAt(0, 3675, 0, true), 30, 'Luck adds 5'); assert.equal(A.chanceAt(0, 3679, 3695, true), 100, 'already at 100: Luck is skipped, the cap holds');
+  assert.equal(A.chanceAt(20, 3675, 0, false), 5 < 10 ? 10 : 5, 'never below 10'); assert.equal(A.chanceAt(11, 3679, 0, false), A.chanceAt(30, 3679, 0, false), '+11 holds above');
+  assert.equal(A.expected(0, 1, () => 25).attempts, 4); assert.equal(A.expected(0, 1, () => 25).clean, .25);
+  assert.equal(A.expected(0, 2, () => 50).attempts, 6); assert.equal(A.expected(1, 2, () => 50).attempts, 4);
+  const f = alchemyFixture(); f.Settings.profile.alchemy.target = 5; const o = f.Alchemy.odds(f.Alchemy.item(), f.Settings.profile.alchemy);
+  assert.equal(o.now, 50, 'weapon elixir B at +0'); assert.ok(o.plan.attempts > 5 && o.plan.clean > 0 && o.plan.clean < 1);
+});
+test('alchemy keeps statistics and a log of every attempt and fusion', () => {
+  const f = alchemyFixture(); f.Alchemy.log.length = 0; f.Settings.profile.alchemy.target = 6;
+  f.Alchemy.start(); f.Controller.tick(); f.result(0x10, 1); f.advance(1500); f.Controller.tick(); f.result(0x20, 0);
+  const text = f.Alchemy.log.map(l => l.text).join('\n');
+  assert.match(text, /Started: Test weapon \+0 to \+6/); assert.match(text, /Success: \+0 → \+1/); assert.match(text, /Failed at \+1: now \+0/);
+  assert.equal(f.Alchemy.result.highest, 1); assert.equal(f.Alchemy.result.successes, 1); assert.equal(f.Alchemy.result.failures, 1);
 });
 test('a failed stone fusion uses the stone up and the run carries on; a refusal explains itself and stops', () => {
   const f = stoneFixture(); f.Alchemy.start(true); f.Controller.tick();
