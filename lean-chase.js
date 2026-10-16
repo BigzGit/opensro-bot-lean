@@ -18,6 +18,7 @@ const CHASE_LIMIT = {
 	targetMove: 40,
 	replans: 2
 };
+const CHASE_OBSERVE_MS = 8000;
 
 /*
 ================
@@ -61,7 +62,7 @@ const Chase = {
   ================
   */
 	owns() {
-		return !!this.s && this.s.phase !== "attack";
+		return !!this.s && ![ "attack", "observe" ].includes( this.s.phase );
 	},
 	/*
   ================
@@ -150,7 +151,9 @@ const Chase = {
 			now() - f.at < CHASE_LIMIT.memory &&
 			f.epoch === World.epoch && f.revision === Navigation.revision
 		);
-		return this.failures.some( f => dist2D( f.from, from ) < 40 && dist2D( f.target, target ) < 40 );
+		return this.failures.some( f =>
+			f.gid === target.gid && dist2D( f.from, from ) < 40 && dist2D( f.target, target ) < 40
+		);
 	},
 	/*
   ================
@@ -182,6 +185,41 @@ const Chase = {
 			return false;
 		}
 		return !World.gp?.pendingMoves;
+	},
+	/*
+  ================
+  stalled
+
+  A failed simplified query is not proof that native combat cannot proceed.
+  Keep ordinary target ownership until fresh state shows no approach or damage.
+  ================
+  */
+	stalled( target ) {
+		const s = this.s, t = now(), distance = dist2D( World.pose(), target );
+		if ( !s.observation ) s.observation = { at: t, best: distance, state: World.gp };
+		const o = s.observation;
+		if (
+			World.gp.target !== target.gid || World.gp.targetPending || World.isCasting() ||
+			World.gp.inventoryPending || this.hit( target.gid, o.at ) || distance < o.best - CHASE_LIMIT.progress
+		) {
+			o.at = t;
+			o.best = distance;
+			o.state = World.gp;
+		}
+		return World.gp !== o.state && t - o.at >= Math.max( CHASE_OBSERVE_MS, this.cfg().stallMs );
+	},
+	/*
+  ================
+  observeApproach
+  ================
+  */
+	observeApproach( target ) {
+		this.s.phase = "observe";
+		this.s.at = now();
+		this.detour = null;
+		this.stalled( target );
+		this.message = "Letting the game approach the selected target; route result is inconclusive.";
+		return false;
 	},
 	/*
   ================
@@ -262,24 +300,18 @@ const Chase = {
 			s.at = t;
 			return false;
 		}
+		const observedStall = s.phase === "observe" && this.stalled( target );
+		if ( s.phase === "observe" && !observedStall ) return false;
 		if ( t - s.at > CHASE_LIMIT.episode ) return this.abandon( target, "approach timed out" );
 		if ( s.phase === "attack" && t - s.checkedAt < this.cfg().stallMs ) return false;
-		if ( [ "evaluate", "unknown", "attack" ].includes( s.phase ) ) {
+		if ( [ "evaluate", "unknown", "attack", "observe" ].includes( s.phase ) ) {
 			const query = Navigation.attackRoute( pose, target, this.radius( target ) );
 			s.checkedAt = t;
 			if ( query.status === "unknown" ) {
-				if ( s.phase !== "unknown" ) {
-					s.phase = "unknown";
-					s.unknownAt = t;
-				}
-				this.message = "Waiting for collision coverage before approaching the target.";
-				this.settle();
-				if ( t - s.unknownAt >= CHASE_LIMIT.unknown ) {
-					Hunt.stop( "Collision data unavailable; reload before hunting." );
-				}
-				return true;
+				return this.observeApproach( target );
 			}
 			if ( query.status === "invalid-start" ) {
+				if ( !observedStall ) return this.observeApproach( target );
 				if ( !Trap.cfg()?.enabled ) return this.abandon( target, "blocked start; escape recovery is disabled" );
 				Trap.request( "Current position is blocked." );
 				return true;
@@ -310,9 +342,10 @@ const Chase = {
 				return false;
 			}
 			if ( query.status !== "route" ) {
+				if ( !observedStall || query.status === "search-limit" ) return this.observeApproach( target );
 				return this.abandon(
 					target,
-					query.status === "search-limit" ? "route search budget exhausted" : "no reachable attack position"
+					"native approach stalled; planner found no route"
 				);
 			}
 			if ( this.repeated( target, pose ) ) return this.abandon( target, "this approach recently failed" );

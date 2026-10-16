@@ -103,6 +103,86 @@ module.exports = function runObstacleTests( { fixture, combatFixture, navProduct
 		assert.ok( c.f.commands.every( command => command.kind === "move" ) );
 		assert.ok( c.f.commands.at( -1 ).destination.z > 100 );
 	});
+	test("ordinary terrain height differences do not reject nearby reachable mobs", () => {
+		const c = chase( false );
+		c.target.y = 50;
+		assert.equal( c.f.Navigation.query( c.f.World.pose(), c.target ).status, "direct" );
+		c.step( 0 );
+		assert.ok( c.f.commands.some( command => command.kind === "skill" ) );
+		assert.equal( c.f.Hunt.ban.size, 0 );
+	});
+	test("an uncertain route failure cannot immediately ban or halt a fresh target", () => {
+		const c = chase( false );
+		c.f.Navigation.attackRoute = () => ({ status: "unreachable", route: [] });
+		c.step( 0 );
+		assert.ok( c.f.commands.some( command => command.kind === "skill" ) );
+		assert.equal( c.f.Chase.owns(), false );
+		assert.equal( c.f.Hunt.ban.size, 0 );
+		assert.ok( !c.f.commands.some( command => command.kind === "move" ) );
+	});
+	test("party target remains eligible on sloped ground instead of being skipped for a farther mob", () => {
+		const f = combatFixture();
+		const nearby = f.World.ents.get( 30 );
+		nearby.y = 60;
+		f.World.ents.set( 31, { ...nearby, gid: 31, x: 350, y: 0 } );
+		f.World.ents.set( 2, { gid: 2, kind: "player", name: "PartyMate" } );
+		f.World.gp.social = { localName: "Me", members: [ { id: 2, name: "PartyMate" } ] };
+		f.World.onCast( { caster: 2, target: 30, results: [] } );
+		f.Hunt.start();
+		f.Hunt.tick();
+		assert.equal( f.Hunt.targetGid, 30 );
+		assert.ok( f.commands.some( command => command.kind === "skill" && command.gid === 30 ) );
+		assert.equal( f.Hunt.ban.size, 0 );
+	});
+	test("native movement progress keeps an imperfect planner from abandoning the target", () => {
+		const c = chase( false );
+		c.f.Navigation.attackRoute = () => ({ status: "unreachable", route: [] });
+		c.step( 0 );
+		for ( let i = 1; i <= 10; i++ ) {
+			fresh( c.f, { ...c.f.World.pose(), x: 100 + i * 10 } );
+			c.step( 1000 );
+		}
+		assert.equal( c.f.Chase.owns(), false );
+		assert.equal( c.f.Hunt.ban.size, 0 );
+	});
+	test("confirmed native hits defeat a false route rejection for the same selected target", () => {
+		const c = chase( false );
+		c.f.Navigation.attackRoute = () => ({ status: "unreachable", route: [] });
+		c.step( 0 );
+		for ( let token = 1; token <= 8; token++ ) {
+			c.f.bus.emit( "cast", {
+				caster: 1,
+				token,
+				skill: 500,
+				results: [ { target: 30, impacts: [ { damage: 10 } ] } ]
+			} );
+			fresh( c.f, c.f.World.pose() );
+			c.step( 3000 );
+		}
+		assert.equal( c.f.Hunt.running, true );
+		assert.equal( c.f.Hunt.ban.size, 0 );
+		assert.ok( !c.f.commands.some( command => command.kind === "release-target" ) );
+	});
+	test("stale gameplay alone cannot prove the selected native approach is stuck", () => {
+		const c = chase( false );
+		c.f.Navigation.attackRoute = () => ({ status: "unreachable", route: [] });
+		c.step( 0 );
+		c.step( 16000 );
+		assert.equal( c.f.Chase.owns(), false );
+		assert.equal( c.f.Hunt.ban.size, 0 );
+	});
+	test("one failed mob does not blacklist a different mob beside it", () => {
+		const c = chase();
+		c.step( 0 );
+		c.f.Chase.remember( c.target );
+		c.f.Chase.reset();
+		const other = { ...c.target, gid: 31 };
+		c.f.World.ents.set( 31, other );
+		c.f.Hunt.engage( other );
+		assert.equal( c.f.Chase.s.gid, 31 );
+		assert.equal( c.f.Chase.s.phase, "route" );
+		assert.equal( c.f.Hunt.ban.has( 31 ), false );
+	});
 	test("a complete detour verifies arrival before returning to attacks", () => {
 		const c = chase();
 		c.step( 0 );
@@ -123,10 +203,16 @@ module.exports = function runObstacleTests( { fixture, combatFixture, navProduct
 		const c = chase();
 		c.f.Navigation.attackRoute = () => ({ status: "unreachable", route: [] });
 		c.step( 0 );
+		assert.equal( c.f.Chase.owns(), false );
+		fresh( c.f, c.f.World.pose() );
+		c.step( 8500 );
 		assert.equal( c.f.Chase.s.phase, "abandon" );
 		finishAbandon( c );
 		assert.ok( c.f.commands.some( command => command.kind === "release-target" ) );
-		assert.ok( c.f.commands.every( command => ![ "attack", "skill" ].includes( command.kind ) ) );
+		assert.ok(
+			c.f.commands.some( command => command.kind === "skill" ),
+			"native approach was tried before abandonment"
+		);
 	});
 	test("failed detours exhaust a bounded episode without same-tick offensive fallback", () => {
 		const c = chase();
@@ -139,9 +225,16 @@ module.exports = function runObstacleTests( { fixture, combatFixture, navProduct
 		const c = chase();
 		c.ackRelease = false;
 		c.f.Navigation.attackRoute = () => ({ status: "unreachable", route: [] });
-		for ( let i = 0; i < 12 && c.f.Hunt.running; i++ ) c.step();
+		for ( let i = 0; i < 22 && c.f.Hunt.running; i++ ) {
+			fresh( c.f, c.f.World.pose() );
+			c.step();
+		}
 		assert.equal( c.f.Hunt.running, false );
-		assert.ok( c.f.commands.every( command => ![ "attack", "skill", "select" ].includes( command.kind ) ) );
+		const release = c.f.commands.findIndex( command => command.kind === "release-target" );
+		assert.ok( release >= 0 );
+		assert.ok(
+			c.f.commands.slice( release ).every( command => ![ "attack", "skill", "select" ].includes( command.kind ) )
+		);
 	});
 	test("target HP changes and cast announcements do not release a detour", () => {
 		const c = chase();
@@ -176,27 +269,32 @@ module.exports = function runObstacleTests( { fixture, combatFixture, navProduct
 		assert.ok( c.f.Chase.owns() );
 		assert.ok( !c.f.commands.some( command => command.kind === "attack" ) );
 	});
-	test("missing collision data waits boundedly without a false geometry ban", () => {
+	test("missing collision data preserves native combat without a false geometry ban", () => {
 		const c = chase();
 		c.f.Navigation.scene = null;
 		c.step( 0 );
 		c.step( 6000 );
-		assert.equal( c.f.Hunt.running, false );
+		assert.equal( c.f.Hunt.running, true );
+		assert.equal( c.f.Chase.owns(), false );
 		assert.equal( c.f.Hunt.ban.size, 0 );
 	});
 	test("planner search exhaustion is distinct from missing coverage", () => {
 		const c = chase();
 		c.f.Navigation.attackRoute = () => ({ status: "search-limit", route: [] });
 		c.step( 0 );
-		assert.match( c.f.Chase.s.reason, /budget/ );
+		assert.equal( c.f.Chase.s.phase, "observe" );
+		assert.equal( c.f.Hunt.ban.size, 0 );
 	});
-	test("invalid start requests recovery before offensive commands", () => {
+	test("invalid planner start needs a fresh native stall before escape recovery", () => {
 		const f = trapped();
 		f.Trap.reset();
 		const target = f.World.ents.get( 30 );
 		f.Hunt.engage( target );
+		assert.equal( f.Trap.run, null );
+		fresh( f, f.World.pose() );
+		f.advance( 8500 );
+		f.Hunt.engage( target );
 		assert.ok( f.Trap.run );
-		assert.ok( !f.commands.some( command => [ "attack", "skill" ].includes( command.kind ) ) );
 	});
 	test("disabled detours preserve ordinary combat", () => {
 		const c = chase();

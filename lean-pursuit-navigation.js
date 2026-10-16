@@ -6,7 +6,7 @@ Uses admitted game collision products. A query never changes a player pose;
 the native movement command and its observed result remain authoritative.
 ===========================================================================
 */
-const PURSUIT_NAV = { nodes: 6000, chord: 120, step: 60, arrive: 7, height: 20, candidates: 4 };
+const PURSUIT_NAV = { nodes: 6000, chord: 120, step: 60, arrive: 7, candidates: 4 };
 
 /*
 ================
@@ -51,10 +51,9 @@ Navigation.segment
 ================
 */
 Navigation.segment = function( from, to, departing = false ) {
-	if (
-		!from || !to || !Number.isFinite( dist2D( from, to ) ) ||
-		Math.abs( (from.y ?? 0) - (to.y ?? 0) ) > PURSUIT_NAV.height
-	) return false;
+	if ( !from || !to || !Number.isFinite( dist2D( from, to ) ) ) return false;
+	// This product describes X/Z traversal, not terrain slope. Native movement
+	// resolves height; a destination's different Y is not evidence of a wall.
 	if ( this.pointStatus( to ) !== "open" ) return false;
 	const a = this.local( from ), b = this.local( to );
 	if ( !a || !b || !this.clear( a, b, departing ) ) return false;

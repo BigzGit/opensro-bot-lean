@@ -2,9 +2,9 @@
 
 Implemented on `codex/obstacle-pursuit-recovery`, based on bot 1.2.100.
 
-The bot now checks a selected enemy's approach before sending repeated combat commands. A blocked approach owns character movement until its detour completes or the target is stopped and released. Missing coverage, invalid start, search exhaustion, unreachable route, direct approach and valid detour are distinct outcomes. Unknown coverage waits five seconds and stops hunting without inventing a geometry ban.
+The bot checks a selected enemy's approach before sending repeated combat commands. A confirmed detour owns character movement until it completes or the target is stopped and released. Missing coverage, invalid start, search exhaustion, unreachable route, direct approach and valid detour are distinct outcomes. Since 1.2.102, failed initial queries preserve native targeting and need fresh observed lack of progress before a no-route result can abandon a target. Unknown coverage and search exhaustion alone never authorize a ban or stop.
 
-Detours keep their route, use short collision-checked moves, replan on meaningful target/collision changes or loss of route progress, and have a bounded retry/episode budget. Arrival needs fresh state and a stability interval. Target HP changes alone never cancel a route. Failed approaches are remembered locally for 15 seconds, scoped to nearby positions, world epoch and collision revision. This is not a permanent obstacle map.
+Detours keep their route, use short collision-checked moves, replan on meaningful target/collision changes or loss of route progress, and have a bounded retry/episode budget. Arrival needs fresh state and a stability interval. Target HP changes alone never cancel a route. Failed approaches are remembered locally for 15 seconds, scoped to the same monster, nearby positions, world epoch and collision revision. This is not a permanent obstacle map, and never blacklists a different nearby monster.
 
 Known ranged skill reach permits one bounded trial before routing. Only positive local result impacts preserve successful ranged offense; local cast sends, party damage and repeated cast publications do not establish new damage. Unknown weapon reach is not fabricated. The bot cannot infer projectile visibility solely from a walking chord.
 
@@ -21,8 +21,14 @@ The implementation does not teleport, reset poses, disable collision or promise 
 
 Run `python build-lean.py`, `node --check bot.lean.user.js`, and `node lean.test.cjs`. The integration runner includes `lean.obstacle.test.cjs` with generated-script fixtures. Browser validation uses `node lean.browser.test.cjs <directory-containing-playwright>`. Optional game collision comparison uses `node lean.navigation.native.test.mjs <OpenSRO-checkout>` and requires generated game assets. Test results for the delivered branch are reported separately; these commands are not a claim of live-server verification.
 
-## Validation on 2026-10-15
+## Validation on 2026-10-15 (1.2.101)
 
 The final fork build and JavaScript syntax check exited 0. `node lean.test.cjs` passed 345 integration tests, including 30 obstacle/recovery regressions. The isolated headless Edge browser suite exited 0 with zero page errors. The local game collision comparison passed 30 legacy routes and 30 pursuit routes, with six enclosed approach pairs remaining unreachable. `git diff --check` exited 0. Rebuilding in the fork reproduced the reviewed userscript bytes.
 
 No live account, production bot session, real scroll consumption or tree-interior recovery was exercised. The optional native clip adapter has behavioral tests and a documented contract, but still needs a separately provided client endpoint for live native-equivalent queries.
+
+## Targeting regression correction (1.2.102)
+
+The owner's live test reported repeated no-route abandonment of apparently reachable enemies, with nearby and party targets being skipped. A regression fixture reproduced a clear path being rejected solely because the two poses differed in Y by over 20 units (2 m). The collision query is horizontal and must leave terrain height resolution to native movement. The raw height cutoff is removed. Failed initial queries now observe normal movement and positive local result impacts before taking over; an unconfirmed query alone cannot halt, release or ban a fresh target. Failed-approach memory is also restricted to the same entity ID. These changes preserve the existing nearest/attacker priorities and party-aware no-KS handling; they do not introduce a new party-assist priority.
+
+Validation on 2026-10-16: the regenerated script passed syntax checking, all 352 integration tests, the isolated Edge browser suite with zero page errors, and the local collision comparison (30 legacy routes, 30 pursuit routes, six enclosed pairs). The height regression failed against 1.2.101 with `actual: 'unreachable', expected: 'direct'` before the fix. Live verification of the owner's exact hunting area remains outstanding.
