@@ -44,7 +44,7 @@ const approaches = npc => {
   }
   return rows;
 };
-let routes = 0, failed = 0;
+let routes = 0, failed = 0, pursuitRoutes = 0;
 const failures = [];
 for (const from of approaches(warehouse)) for (const to of approaches(manina)) {
   World.gp = { pose: from };
@@ -60,11 +60,25 @@ for (const from of approaches(warehouse)) for (const to of approaches(manina)) {
     previous = clipped;
   }
   routes++;
+  const query = Navigation.query(from, to);
+  if (query.status === 'direct' || query.status === 'route') {
+    let pose = from;
+    for (const point of query.route) {
+      const clipped = native.clip(pose, point);
+      assert.ok(clipped, 'Native coverage missing on pursuit route');
+      assert.ok(Math.hypot(clipped.x - point.x + ((clipped.regionId & 255) - (point.regionId & 255)) * 1920,
+        clipped.z - point.z + ((clipped.regionId >>> 8) - (point.regionId >>> 8)) * 1920) < 2,
+      'Pursuit chord crosses native collision');
+      pose = clipped;
+    }
+    pursuitRoutes++;
+  }
 }
 // One synthetic sample lies behind the warehouse structure. Verify that the
 // native clipper's grid traversal is also confined there, rather than hiding
 // it as a successful route. The other 30 approach pairs must route safely.
 assert.ok(routes >= 30, 'Warehouse-to-Manina routing regressed');
+assert.ok(pursuitRoutes >= 24, 'Bounded pursuit routing lost ordinary town approaches');
 assert.ok(failures.every(pair => pair.from.x === warehouse.x && Math.abs(pair.from.z - (warehouse.z - 60)) < 0.01));
 if (failures.length) {
   const from = failures[0].from, queue = [from], seen = new Set();
@@ -81,4 +95,4 @@ if (failures.length) {
     }
   }
 }
-console.log(JSON.stringify({ routes, nativeEnclosedPairs: failed, objects: product.objects.length, regions: product.navmesh.regions.length }));
+console.log(JSON.stringify({ routes, pursuitRoutes, nativeEnclosedPairs: failed, objects: product.objects.length, regions: product.navmesh.regions.length }));

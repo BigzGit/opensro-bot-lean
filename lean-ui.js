@@ -783,10 +783,12 @@ const UI = {
         this.number('Manual control pause (s)', () => H().manualPauseS, v => H().manualPauseS = v, 1, 30)));
       this.pane.append(this.group('Obstacles',
         this.check('Walk around obstacles when chasing a mob', () => H().detour.enabled, v => H().detour.enabled = v),
-        this.number('Stand still for (ms) before going around', () => H().detour.stallMs, v => H().detour.stallMs = v, 1000, 10000),
+        this.number('Approach progress check interval (ms)', () => H().detour.stallMs, v => H().detour.stallMs = v, 1000, 10000),
         this.check('Detect a character that cannot move', () => H().trap.enabled, v => H().trap.enabled = v),
         this.number('Cannot move for (seconds)', () => H().trap.seconds, v => H().trap.seconds = v, 10, 120),
-        el('p', 'When the character stands still without hurting its target and a tree or wall is in the way (needs the collision data the game loads, outdoors only), it walks around it, then attacks as normal. After three detours on one mob it drops that mob for a minute. A character that should be walking but has not moved at all for the set time (for example stuck inside a tree) first steps back to where it just was, then walks to the nearest open ground; if that fails, hunting stops with an alert so it does not stand there for minutes.', 'muted')));
+        this.check('Recall to town if legal escape attempts fail', () => H().trap.recall, v => H().trap.recall = v),
+        this.check('Keep detailed escape diagnostics locally', () => H().trap.diagnostics, v => H().trap.diagnostics = v),
+        el('p', 'Checks blocked approaches before repeating attacks, follows collision-checked detours and stops/releases unreachable targets. Failed approaches are remembered briefly. Escape retries refused movement and requires fresh, stable arrival plus a second move before hunting resumes. Optional recall needs a configured scroll town cycle and stops in town instead of reversing into the trap. Detailed diagnostics stay local and can include exact positions; both new options are off by default. Unknown collision data cannot authorize an escape', 'muted')));
       this.stuckNote = el('p', AntiStuck.status(), 'muted');
       this.pane.append(this.group('Anti-stuck',
         this.check('Recover when hunting makes no progress', () => H().antiStuck.enabled, v => H().antiStuck.enabled = v),

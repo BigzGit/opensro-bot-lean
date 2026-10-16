@@ -647,6 +647,11 @@ const Town = {
       if (now() - t.at > 15000) this.fail('NPC window did not close.');
       else this.close({ 'close-storage': 'walk-vendor', 'close-vendor': 'walk-smith', 'close-smith': 'walk-gate' }[t.phase]);
     } else if (t.phase === 'reverse') {
+      if (t.recovery) {
+        this.trip = null;
+        Hunt.stop('Recovery town services completed. Check the hunting spot before returning.');
+        return true;
+      }
       if (gp.inventoryPending || World.isCasting()) return true;
       if (t.supplies.some(s => Restock.count(s.refObjId) < s.target) || this.damaged().length || !this.scroll(0x09ec) || !this.scroll(0x19ec)) { this.fail('Final supply, repair or travel-scroll check failed.'); return true; }
       if (World.freeBagSlots() <= 1) { this.fail('Returned to town; free at least two character bag slots before hunting again.'); return true; }
