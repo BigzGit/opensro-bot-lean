@@ -2100,7 +2100,8 @@ Navigation.attackRoute = function( from, target, radius, failed = [] ) {
 		if ( failed.some( p => dist2D( p, goal ) < PURSUIT_NAV.step ) || !this.segment( goal, target ) ) continue;
 		const route = this.query( from, goal, budget );
 		budget -= route.visited || 0;
-		if ( route.status === "route" || route.status === "direct" ) return route;
+		// A direct leg to a stand-off goal still needs explicit movement.
+		if ( route.status === "route" || route.status === "direct" ) return { ...route, status: "route" };
 	}
 	return direct;
 };
@@ -4565,13 +4566,15 @@ const Chase = {
 			return true;
 		}
 		if ( s.phase === "probe" ) {
-			if ( this.hit( target.gid, s.probeAt ) ) {
+			if ( s.probeAt !== null && this.hit( target.gid, s.probeAt ) ) {
 				s.phase = "attack";
 				s.at = t;
 				s.checkedAt = t;
 				return false;
 			}
-			if ( t - s.probeAt < 2000 ) return true;
+			// Allow ordinary combat to admit the trial, including preparatory imbues.
+			if ( s.probeAt === null && t - s.probeReadyAt < CHASE_LIMIT.unknown ) return false;
+			if ( s.probeAt !== null && t - s.probeAt < 2000 ) return true;
 			s.phase = "evaluate";
 		}
 		if ( s.phase === "abandon" ) {
@@ -4637,7 +4640,8 @@ const Chase = {
 				}
 				if ( World.isCasting() ) return true;
 				s.probed = true;
-				s.probeAt = t;
+				s.probeReadyAt = t;
+				s.probeAt = null;
 				s.phase = "probe";
 				return false;
 			}
@@ -4751,6 +4755,15 @@ Hunt.engage = function( target ) {
 	if ( Chase.drive( target ) ) return;
 	return engageBeforeChase.apply( this, arguments );
 };
+// Cmd emits this event only after local dispatch succeeds. Selection, buffs and
+// refused sends cannot consume the probe's damage observation window.
+bus.on( "command", command => {
+	const s = Chase.s;
+	if ( s?.phase !== "probe" || s.probeAt !== null || command.gid !== s.gid ) return;
+	if ( command.kind === "attack" || command.kind === "skill" && World.skill( command.skillId )?.targetRequired ) {
+		s.probeAt = now();
+	}
+});
 bus.on( "cast", cast => Chase.observe( cast ) );
 bus.on( "hunt", () => Chase.reset() );
 for ( const event of [ "reset", "profile", "character" ] ) bus.on( event, () => Chase.reset( true ) );

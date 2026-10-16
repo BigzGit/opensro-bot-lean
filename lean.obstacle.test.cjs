@@ -303,6 +303,58 @@ module.exports = function runObstacleTests( { fixture, combatFixture, navProduct
 		assert.equal( c.f.Chase.owns(), false );
 		assert.ok( c.f.commands.some( command => command.kind === "skill" ) );
 	});
+	test("a clear stand-off leg remains a detour when the monster chord is blocked", () => {
+		const c = chase(false);
+		c.f.Navigation.install(navProduct([{ x: 0, y: 0, z: 0, yaw: 0,
+			mesh: { vertices: [200, 0, 90, 200, 0, 110], edges: [0, 1, 0, 65535, 3, 0] } }]));
+		c.f.World.catalog.get(500).range = 125;
+		assert.equal(c.f.Navigation.segment(c.f.World.pose(), c.target), false);
+		const query = c.f.Navigation.attackRoute(c.f.World.pose(), c.target, 120);
+		assert.equal(query.status, "route");
+		assert.equal(query.route[0].z, 220);
+		c.step(0);
+		c.step();
+		assert.equal(c.f.Chase.s.phase, "route");
+		assert.ok(c.f.commands.at(-1).destination.z > 100);
+		assert.ok(c.f.commands.every(command => command.kind === "move"));
+	});
+	test("controller sends a ranged probe after selecting a fresh target", () => {
+		const c = chase();
+		c.f.World.catalog.get(500).range = 300;
+		c.f.World.gp.target = 0;
+		c.f.Controller.tick();
+		assert.equal(c.f.commands.at(-1).kind, "select");
+		c.f.advance(500);
+		c.f.World.applyGameplay({ ...c.f.World.gp, target: 30, targetPending: false });
+		c.f.Controller.tick();
+		assert.equal(c.f.commands.at(-1).kind, "skill");
+		assert.equal(c.f.Chase.s.phase, "probe");
+		c.f.advance(500);
+		c.f.Controller.tick();
+		assert.equal(c.f.commands.filter(command => command.kind === "skill").length, 1);
+	});
+	test("refused probe sends do not start the damage timeout and admission stays bounded", () => {
+		const c = chase();
+		c.f.World.catalog.get(500).range = 300;
+		const raw = c.f.Cmd.raw;
+		c.f.Cmd.raw = () => false;
+		c.step(0);
+		c.step(2100);
+		assert.equal(c.f.Chase.s.phase, "probe");
+		assert.equal(c.f.Chase.s.probeAt, null);
+		c.f.Cmd.raw = raw;
+		c.step(100);
+		assert.equal(c.f.commands.at(-1).kind, "skill");
+		assert.notEqual(c.f.Chase.s.probeAt, null);
+		c.step(2100);
+		assert.equal(c.f.Chase.s.phase, "route");
+		const refused = chase();
+		refused.f.World.catalog.get(500).range = 300;
+		refused.f.Cmd.raw = () => false;
+		refused.step(0);
+		refused.step(5100);
+		assert.equal(refused.f.Chase.s.phase, "route");
+	});
 	test("ranged trial is bounded and successful ranged damage avoids unnecessary walking", () => {
 		const c = chase();
 		c.f.World.catalog.get( 500 ).range = 300;

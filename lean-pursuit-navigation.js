@@ -123,7 +123,8 @@ Navigation.attackRoute = function( from, target, radius, failed = [] ) {
 		if ( failed.some( p => dist2D( p, goal ) < PURSUIT_NAV.step ) || !this.segment( goal, target ) ) continue;
 		const route = this.query( from, goal, budget );
 		budget -= route.visited || 0;
-		if ( route.status === "route" || route.status === "direct" ) return route;
+		// A direct leg to a stand-off goal still needs explicit movement.
+		if ( route.status === "route" || route.status === "direct" ) return { ...route, status: "route" };
 	}
 	return direct;
 };
