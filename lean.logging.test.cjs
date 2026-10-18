@@ -7,6 +7,43 @@ Tests activity independently of gameplay decisions using the bot fixture.
 */
 module.exports = function loggingTests( { test, fixture, townFixture } ) {
 	const assert = require( "node:assert/strict" );
+	test( "friendly target messages retain technical selection evidence for export", () => {
+		const f = fixture();
+		const target = { gid: 466785, name: "Mangyang", kind: "monster", regionId: 1, x: 130, y: 0, z: 100, attackFlags: 16, appearanceState: [0] };
+		f.World.ents.set( target.gid, target );
+		f.World.attackers.set( target.gid, f.World.simNow() );
+		f.Hunt.chooseTarget();
+		const entry = f.Log.lines.find( entry => entry.code === "target-selected" );
+		assert.ok( entry );
+		assert.equal( f.Activity.userMessage( entry ), "Targeting Mangyang — it’s attacking you." );
+		assert.doesNotMatch( f.Activity.userMessage( entry ), /466785|priority|requested/ );
+		f.World.ents.delete( target.gid );
+		assert.match( f.Activity.userMessage( entry ), /Mangyang/ );
+		const exported = JSON.parse( f.Activity.export() ).events.find( event => event.code === "target-selected" );
+		assert.equal( exported.details.monsterId, 466785 );
+		assert.equal( exported.details.selectionPolicy, "attackers" );
+		assert.equal( exported.details.attackingPlayer, true );
+		assert.doesNotMatch( f.Activity.export(), /Mangyang/ );
+		assert.match( f.Activity.export( true ), /Mangyang/ );
+	} );
+	test( "friendly logs distinguish targeting from a confirmed hit and handle unnamed monsters", () => {
+		const f = fixture();
+		for ( const policy of [ "nearest", "lowhp", "attackers" ] ) {
+			f.Activity.clear(); f.Activity.states.clear(); f.Settings.profile.hunt.priority = policy;
+			f.World.ents.set( 77, { gid: 77, kind: "monster", regionId: 1, x: 110, z: 100, attackFlags: 16, appearanceState: [0] } );
+			f.Hunt.chooseTarget();
+			const entry = f.Log.lines.find( event => event.code === "target-selected" );
+			assert.equal( f.Activity.userMessage( entry ), "Targeting a monster." );
+			assert.equal( entry.outcome, "requested" );
+		}
+	} );
+	test( "friendly town and loot wording does not remove technical export fields", () => {
+		const f = fixture();
+		const entry = f.Activity.emit( { code: "trip-phase", category: "town", text: "Town phase: walk-smith", outcome: "waiting" } );
+		assert.equal( f.Activity.userMessage( entry ), "Walking to the repair merchant." );
+		assert.match( f.Activity.export( true ), /Town phase: walk-smith/ );
+		assert.equal( f.Activity.userMessage( { code: "pickup-confirmed" } ), "Picked up loot." );
+	} );
 	test( "command capture is opt-in and cannot evict normal warnings", () => {
 		const f = fixture();
 		f.Log.warn( "Important warning" );

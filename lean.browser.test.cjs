@@ -829,7 +829,8 @@ const server = http.createServer((req, res) => {
     await page.evaluate(() => { SROLean.log.command({ kind: 'move' }, 'SecretHero diagnostic command'); SROLean.ui.updateSession(); });
     await page.getByLabel('Settings log severity', { exact: true }).selectOption('cmd');
     assert.equal(await settingsHistory.locator('li').count(), 1);
-    assert.match(await settingsHistory.innerText(), /requested: SecretHero diagnostic command/);
+    assert.match(await settingsHistory.innerText(), /Requesting movement\./);
+    assert.doesNotMatch(await settingsHistory.innerText(), /SecretHero|\[cmd\]|requested:/);
     await activityPanel.getByRole('button', { name: 'Export preview', exact: true }).click();
     const activityPreview = page.getByLabel('Activity export preview', { exact: true });
     assert.doesNotMatch(await activityPreview.inputValue(), /SecretHero/);
@@ -847,6 +848,33 @@ const server = http.createServer((req, res) => {
     await activityPanel.getByRole('button', { name: 'Confirm clear (5 s)', exact: true }).click();
     assert.equal(await settingsHistory.locator('li').count(), 0);
     assert.equal(await page.evaluate(() => JSON.stringify(SROLean.stats.display())), totalsBeforeClear);
+    // Copy from a shadow-DOM log must replace old clipboard contents even with game shortcuts present.
+    await browser.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.evaluate(async () => {
+      delete navigator.clipboard;
+      window.clipboardBeforeLogTest = await navigator.clipboard.readText();
+      await navigator.clipboard.writeText('// ==UserScript== old clipboard');
+      window.gameCopyKeys = 0;
+      window.gameCopyHandler = event => {
+        if (event.ctrlKey && event.code === 'KeyC') { window.gameCopyKeys++; event.preventDefault(); }
+      };
+      window.addEventListener('keydown', window.gameCopyHandler);
+      SROLean.log.info('Copy this log sentence.'); SROLean.ui.updateSession();
+      const log = SROLean.ui.logs, range = document.createRange();
+      log.focus(); range.selectNodeContents(log.querySelector('li span'));
+      const selection = SROLean.ui.root.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+      SROLean.log.info('New activity while text is selected.'); SROLean.ui.updateSession();
+      if (SROLean.ui.selectedActivityText() !== 'Copy this log sentence.') throw Error('Log refresh replaced selected text');
+    });
+    await page.keyboard.press('Control+c');
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'Copy this log sentence.');
+    assert.equal(await page.evaluate(() => window.gameCopyKeys), 0);
+    await page.evaluate(async () => {
+      SROLean.ui.root.getSelection().removeAllRanges();
+      window.removeEventListener('keydown', window.gameCopyHandler);
+      await navigator.clipboard.writeText(window.clipboardBeforeLogTest);
+      delete window.clipboardBeforeLogTest;
+    });
     assert.deepEqual(errors,[]);
     // All reporting traffic is intercepted; capture uses a synthetic canvas, never the user's screen.
     await page.setViewportSize({width:1200,height:1000});

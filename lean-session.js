@@ -38,6 +38,10 @@ UI.renderActivity = function( log ) {
 	if ( !log || !log.isConnected || log.hidden ) return;
 	log.refreshControls?.();
 	if ( log.paused ) { if (log.activityStatus) log.activityStatus.textContent = 'Paused; new activity continues in history.'; return; }
+	if ( this.selectedActivityText?.( log ) ) {
+		if ( log.activityStatus ) log.activityStatus.textContent = 'Text selected; new activity continues in history.';
+		return;
+	}
 	const viewKey = Activity.revision + ':' + JSON.stringify(Activity.filters);
 	if ( log.viewKey === viewKey && log.rendered ) return;
 	log.viewKey = viewKey;
@@ -49,7 +53,7 @@ UI.renderActivity = function( log ) {
 		const row = el( "li", null, entry.level );
 		row.entry = entry;
 		row.append( el( "time", new Date( entry.at ).toLocaleTimeString( "en-GB" ) ),
-			el( "span", "[" + entry.level + "] [" + entry.category + "] " + (entry.outcome ? entry.outcome + ": " : "") + entry.text + (entry.repeatCount > 1 ? " ×" + entry.repeatCount : "") ) );
+			el( "span", (entry.level === "warn" ? "Warning: " : entry.level === "error" ? "Error: " : "") + Activity.userMessage( entry ) + (entry.repeatCount > 1 ? " ×" + entry.repeatCount : "") ) );
 		return row;
 	} );
 	log.replaceChildren( ...rows );

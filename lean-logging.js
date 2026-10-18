@@ -8,7 +8,7 @@ observed evidence; an operation ID never implies a server transaction ID.
 */
 const ACTIVITY_LIMIT = { normal: 400, commands: 1000, text: 1000, repeatMs: 1000, captureMs: 600000 };
 const ACTIVITY_CATEGORIES = [ "session", "combat", "movement", "town", "potion", "loot", "party", "buff", "alchemy", "reconnect", "settings", "engine", "assets" ];
-const ACTIVITY_DETAIL_KEYS = [ "durationMs", "distance", "attempt", "quantity", "hpPct", "mpPct", "delayMs", "choice", "errorCode", "goldChange", "kills", "deaths", "potions", "items", "revision", "visited", "progressAgeMs" ];
+const ACTIVITY_DETAIL_KEYS = [ "durationMs", "distance", "attempt", "quantity", "hpPct", "mpPct", "delayMs", "choice", "errorCode", "goldChange", "kills", "deaths", "potions", "items", "revision", "visited", "progressAgeMs", "monsterId", "skillId", "attackingPlayer" ];
 const Activity = {
 	commands: [], revision: 0, sequence: 0, session: 0, operation: 0, captureUntil: 0,
 	filters: { category: "all", level: "all", search: "", detailed: false },
@@ -54,15 +54,25 @@ const Activity = {
 				const value = event.details?.[key];
 				if ( typeof value === "number" && Number.isFinite( value ) || typeof value === "boolean" ) details[key] = value;
 			}
+			if ( [ "attackers", "nearest", "lowhp" ].includes( event.details?.selectionPolicy ) ) details.selectionPolicy = event.details.selectionPolicy;
 			const entry = { id: ++this.sequence, at: Date.now(), mono: now(), lastAt: Date.now(),
 				level, category, code: /^[a-z0-9-]{1,64}$/.test( event.code || "" ) ? event.code : "legacy-message",
 				text, outcome: [ "requested", "confirmed", "refused", "unconfirmed", "cancelled", "waiting", "summary" ].includes( event.outcome ) ? event.outcome : null,
 				sessionId: this.session, epoch: Number.isSafeInteger( World.epoch ) ? World.epoch : null,
 				operationId: Number.isSafeInteger( event.operationId ) ? event.operationId : null, details, repeatCount: 1 };
+			entry.userText = event.userText ? String( event.userText ).slice( 0, ACTIVITY_LIMIT.text ) : null;
+			if ( entry.code === "target-selected" ) {
+				const name = World.ents.get( details.monsterId )?.name || "a monster";
+				entry.userText = "Targeting " + name + (details.attackingPlayer ? " — it’s attacking you." : ".");
+			}
+			if ( entry.code === "approach-abandoned" ) {
+				entry.userText = "Couldn’t reach " + (World.ents.get( details.monsterId )?.name || "the monster") + "; looking for another target.";
+			}
+			if ( entry.userText ) entry.userText = entry.userText.slice( 0, ACTIVITY_LIMIT.text );
 			const rows = level === "cmd" ? this.commands : Log.lines;
 			const previous = rows[rows.length - 1];
 			if ( previous && previous.code === entry.code && previous.text === text && previous.level === level &&
-				previous.category === category && previous.operationId === entry.operationId && previous.sessionId === entry.sessionId &&
+				previous.category === category && previous.userText === entry.userText && previous.operationId === entry.operationId && previous.sessionId === entry.sessionId &&
 				previous.epoch === entry.epoch && previous.outcome === entry.outcome &&
 				JSON.stringify( previous.details ) === JSON.stringify( details ) && entry.mono - previous.lastMono < ACTIVITY_LIMIT.repeatMs ) {
 				previous.repeatCount++;
@@ -132,7 +142,7 @@ const Activity = {
 		return [ ...Log.lines, ...(this.filters.detailed ? this.commands : []) ].sort( ( a, b ) => a.id - b.id ).filter( entry =>
 			(this.filters.category === "all" || entry.category === this.filters.category) &&
 			(this.filters.level === "all" || entry.level === this.filters.level) &&
-			(!search || (entry.text + " " + entry.code).toLowerCase().includes( search )) );
+			(!search || (this.userMessage( entry ) + " " + entry.text + " " + entry.code).toLowerCase().includes( search )) );
 	},
 	clear() {
 		Log.lines.length = 0;
@@ -174,7 +184,8 @@ const Activity = {
 	/*
 	================
 	export
-	Standard export excludes all free text and entity/location/account data.
+	Standard export excludes names, free text, player identities and locations.
+	Monster/skill IDs and selection enums provide non-personal diagnostic context.
 	Raw local export is a separate explicit preview choice, never an upload.
 	================
 	*/
@@ -182,10 +193,10 @@ const Activity = {
 		const events = this.visible().map( entry => ( { id: entry.id, at: entry.at, lastAt: entry.lastAt,
 			level: entry.level, category: entry.category, code: entry.code, outcome: entry.outcome,
 			sessionId: entry.sessionId, epoch: entry.epoch, operationId: entry.operationId,
-			repeatCount: entry.repeatCount, details: entry.details, ...(raw ? { text: entry.text } : {}) } ) );
+			repeatCount: entry.repeatCount, details: entry.details, ...(raw ? { text: entry.text, userMessage: this.userMessage( entry ) } : {}) } ) );
 		if ( format === "text" ) return events.map( entry => new Date( entry.at ).toISOString() + " [" + entry.level + "] [" + entry.category + "] " +
-			(entry.outcome || "event") + " " + entry.code + " ×" + entry.repeatCount + (raw ? ": " + entry.text : " " + JSON.stringify( entry.details )) ).join( "\n" );
-		return JSON.stringify( { version: VERSION, raw, events }, null, 2 );
+			(entry.outcome || "event") + " " + entry.code + " ×" + entry.repeatCount + (raw ? ": " + entry.text : "") + " " + JSON.stringify( entry.details ) ).join( "\n" );
+		return JSON.stringify( { version: VERSION, schema: 2, distanceUnits: "game units (10 per metre)", raw, events }, null, 2 );
 	},
 
 	/*
@@ -266,10 +277,13 @@ Activity.wrap( Town, "arrived", function() {
 	if ( this.trip ) Activity.emit( { category: "town", code: "town-arrival", text: "Town arrival verified; beginning services.", outcome: "confirmed", operationId: Activity.contexts.town?.id } );
 } );
 Activity.wrap( Hunt, "chooseTarget", function( target ) {
-	if ( target ) Activity.transition( "combat", "target-selected", "Selected target " + target.gid + " by " + this.cfg().priority + " priority.", "requested", { distance: dist2D( World.pose(), target ) } );
+	if ( target ) Activity.transition( "combat", "target-selected", "Selected target " + target.gid + " by " + this.cfg().priority + " priority.", "requested", {
+		distance: dist2D( World.pose(), target ), monsterId: target.gid, selectionPolicy: this.cfg().priority,
+		attackingPlayer: (World.simNow() ?? 0) - (World.attackers.get( target.gid ) ?? -Infinity) < 6000
+	} );
 } );
 Activity.wrap( Chase, "abandon", function( result, target, reason ) {
-	Activity.emit( { category: "movement", code: "approach-abandoned", level: "warn", text: "Target " + target.gid + ": " + reason, outcome: "unconfirmed", details: { revision: Navigation.revision, durationMs: now() - this.s.at } } );
+	Activity.emit( { category: "movement", code: "approach-abandoned", level: "warn", text: "Target " + target.gid + ": " + reason, outcome: "unconfirmed", details: { monsterId: target.gid, revision: Navigation.revision, durationMs: now() - this.s.at } } );
 } );
 Activity.wrap( Stats, "potion", function( result, item ) {
 	const ref = item.refObjId, previous = Activity.pendingPotions.get( ref ), me = World.me();

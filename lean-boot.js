@@ -15,11 +15,18 @@ function boot() {
   // field owns focus. Stop propagation early, but retain native editing defaults.
   const protectEditing = e => {
     const path = e.composedPath(), target = path[0];
-    if (path.includes(UI.root?.host) && (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName || ''))) {
+    const copyingLog = (e.ctrlKey || e.metaKey) && e.code === 'KeyC' && UI.selectedActivityText();
+    if (copyingLog || path.includes(UI.root?.host) && (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName || ''))) {
       e.stopImmediatePropagation();
     }
   };
   for (const type of ['keydown', 'keypress', 'keyup']) W.addEventListener(type, protectEditing, true);
+  W.addEventListener('copy', e => {
+    const text = UI.selectedActivityText();
+    if (!text || !e.clipboardData) return;
+    e.clipboardData.setData('text/plain', text);
+    e.preventDefault(); e.stopImmediatePropagation();
+  }, true);
   // Scrolling the panel must not also zoom or move the game camera underneath it.
   W.addEventListener('wheel', e => { if (e.composedPath().includes(UI.root?.host)) e.stopImmediatePropagation(); }, { capture: true, passive: true });
   Combat.init(); Loot.init(); Alchemy.init(); BuffGear.init();

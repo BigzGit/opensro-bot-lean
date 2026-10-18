@@ -21,6 +21,8 @@ Starting the bot opens **Current session**, with live hunting totals. The **▼ 
 
 Activity is available under **Settings → Recent activity** and in the session window. Both lists scroll and follow incoming entries only while you are at the bottom. Normal history retains the newest 400 events. Categories, outcomes (requested/confirmed/refused/unconfirmed) and repeat counts help distinguish dispatch from observed results. Alchemy outcomes, game refusals and town-state changes appear here too.
 
+Visible messages use monster names and plain language, such as **Targeting Mangyang**. Technical IDs, selection policy, outcomes and distances remain in diagnostic exports rather than being printed before each message. Standard exports omit names; raw exports explicitly include the original technical message and the readable message. Select log text and press **Ctrl+C** to copy only that selection.
+
 Use category/severity filters and search to narrow the view. **Pause log** freezes that view while collection continues; **Follow latest** resumes it. Both views share filters and keep independent reading positions. **Clear history** requires a second click within five seconds and does not reset session statistics.
 
 **Detailed capture (10 minutes)** enables a separate, bounded 1,000-event command trace. Routine commands cannot evict normal warnings. Capture automatically stops after ten minutes; all history is local to this page and is lost on reload. Potion consumption is summarized rather than logging every routine use; detailed capture includes individual observed consumptions.
