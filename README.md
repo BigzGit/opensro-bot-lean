@@ -19,7 +19,13 @@ Settings are saved separately for each character. The bot checks for updates on 
 
 Starting the bot opens **Current session**, with live hunting totals. The **▼ Show logs** button expands the shared activity history downward. Close the window to keep playing without it; hunting continues. **Session** reopens the same window, and stopping keeps the totals visible. Use **Reset session totals** to clear them explicitly.
 
-All retained activity, including command messages, is available under **Settings → Recent activity** and in the session window. Both lists scroll and follow incoming entries only while you are at the bottom. History retains the newest 400 entries for this page.
+Activity is available under **Settings → Recent activity** and in the session window. Both lists scroll and follow incoming entries only while you are at the bottom. Normal history retains the newest 400 events. Categories, outcomes (requested/confirmed/refused/unconfirmed) and repeat counts help distinguish dispatch from observed results. Alchemy outcomes, game refusals and town-state changes appear here too.
+
+Use category/severity filters and search to narrow the view. **Pause log** freezes that view while collection continues; **Follow latest** resumes it. Both views share filters and keep independent reading positions. **Clear history** requires a second click within five seconds and does not reset session statistics.
+
+**Detailed capture (10 minutes)** enables a separate, bounded 1,000-event command trace. Routine commands cannot evict normal warnings. Capture automatically stops after ten minutes; all history is local to this page and is lost on reload. Potion consumption is summarized rather than logging every routine use; detailed capture includes individual observed consumptions.
+
+**Export preview** shows exactly what will be downloaded or selected for copying. Standard JSON/text export omits free-form messages, player names and precise locations. **Include raw local messages** explicitly includes text that may contain private details; review before sharing. Export never uploads anything, and the existing bug-report upload does not silently include this history.
 
 Under **Supplies → Automatic potion use**, enter **Potion delay (ms)** as a whole number from 0 to 60000. The default is 350 ms. This minimum interval is saved per character; item cooldowns and inventory admission still apply.
 

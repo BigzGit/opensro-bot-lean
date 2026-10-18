@@ -11,8 +11,8 @@ const Diagnostics = {
       [/(bag|inventory).*(full|space|capacity)/i, 'bag-capacity'],
       [/COS ground|cos.pickup|pickup/i, 'pickup-error'],
       [/gold|money/i, 'insufficient-gold-or-payment'],
-      [/scroll|return|travel/i, 'travel-error'],
       [/timeout|timed out/i, 'timeout'],
+      [/scroll|return|travel/i, 'travel-error'],
     ]) if (pattern.test(text)) return code;
     return 'unclassified-error';
   },

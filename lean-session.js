@@ -36,21 +36,24 @@ Only readers at the bottom follow new entries.
 */
 UI.renderActivity = function( log ) {
 	if ( !log || !log.isConnected || log.hidden ) return;
-	const last = Log.lines[Log.lines.length - 1];
-	if ( log.lastEntry === last && log.rendered ) return;
+	log.refreshControls?.();
+	if ( log.paused ) { if (log.activityStatus) log.activityStatus.textContent = 'Paused; new activity continues in history.'; return; }
+	const viewKey = Activity.revision + ':' + JSON.stringify(Activity.filters);
+	if ( log.viewKey === viewKey && log.rendered ) return;
+	log.viewKey = viewKey;
 	const follow = !log.rendered || log.scrollTop + log.clientHeight >= log.scrollHeight - SESSION_LIMIT.bottomTolerance;
 	const top = log.scrollTop;
 	const anchor = Array.from( log.children ).find( row => row.offsetTop + row.offsetHeight >= top );
 	const offset = anchor ? anchor.offsetTop - top : 0;
-	const rows = Log.lines.map( entry => {
+	const rows = Activity.visible().map( entry => {
 		const row = el( "li", null, entry.level );
 		row.entry = entry;
 		row.append( el( "time", new Date( entry.at ).toLocaleTimeString( "en-GB" ) ),
-			el( "span", "[" + entry.level + "] " + entry.text ) );
+			el( "span", "[" + entry.level + "] [" + entry.category + "] " + (entry.outcome ? entry.outcome + ": " : "") + entry.text + (entry.repeatCount > 1 ? " ×" + entry.repeatCount : "") ) );
 		return row;
 	} );
 	log.replaceChildren( ...rows );
-	log.lastEntry = last;
+	if (log.activityStatus) log.activityStatus.textContent = rows.length + ' events shown';
 	log.rendered = true;
 	const retained = anchor && rows.find( row => row.entry === anchor.entry );
 	log.scrollTop = follow ? log.scrollHeight : retained ? retained.offsetTop - offset : top;
@@ -75,8 +78,11 @@ UI.showSession = function() {
 		this.sessionLog = this.activityLog( "Session activity" );
 		this.sessionLog.id = "session-activity";
 		this.sessionLog.hidden = true;
+		this.sessionLogPanel = this.activityPanel(this.sessionLog, "Session");
+		this.sessionLogPanel.hidden = true;
 		this.sessionArrow = this.button( "▼ Show logs", () => {
 			this.sessionLog.hidden = !this.sessionLog.hidden;
+			this.sessionLogPanel.hidden = this.sessionLog.hidden;
 			this.sessionArrow.textContent = this.sessionLog.hidden ? "▼ Show logs" : "▲ Hide logs";
 			this.sessionArrow.setAttribute( "aria-expanded", String( !this.sessionLog.hidden ) );
 			this.renderActivity( this.sessionLog );
@@ -87,7 +93,7 @@ UI.showSession = function() {
 		this.sessionBox = this.windowFrame( "Current session", () => { this.sessionBox.hidden = true; },
 			stats, this.button( "Reset session totals", () => Stats.reset() ),
 			el( "p", "Totals pause while stopped or disconnected. Net gold includes town expenses. Closing this window keeps hunting active.", "muted" ),
-			this.sessionArrow, this.sessionLog );
+			this.sessionArrow, this.sessionLogPanel );
 		this.sessionBox.classList.add( "session-window" );
 		this.root.append( this.sessionBox );
 		this.sessionBox.style.left = Math.max( 4, innerWidth - 450 ) + "px";
@@ -105,6 +111,9 @@ UI.updateSession
 ================
 */
 UI.updateSession = function() {
+	if ( Activity.captureUntil && now() >= Activity.captureUntil ) {
+		Activity.capture( false );
+	}
 	if ( this.current === "Settings" ) this.renderActivity( this.logs );
 	if ( !this.sessionBox || this.sessionBox.hidden ) return;
 	const values = Stats.display();
@@ -135,6 +144,7 @@ UI.potionDelay = function() {
 			this.toast( "Potion delay must be a whole number from 0 to 60000 ms.", "warn" );
 			return;
 		}
+		Activity.emit({category:'settings', code:'potion-delay-changed', text:'Potion delay changed from ' + Settings.profile.potion.delayMs + ' to ' + value + ' ms.', details:{delayMs:value}});
 		Settings.profile.potion.delayMs = value;
 		Settings.saveProfile();
 	} );

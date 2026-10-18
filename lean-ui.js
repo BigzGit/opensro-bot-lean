@@ -208,7 +208,7 @@ const UI = {
     this.tip = el('div', null, 'skill-tip'); this.tip.hidden = true; this.root.append(this.tip);
     // The panel's spot is remembered across reloads (global, like the minimised icon's).
     this.dragBy(header, host, () => { if (host.style.left) this.uiPrefs({ panel: { x: host.offsetLeft, y: host.offsetTop } }); });
-    W.addEventListener('resize', () => { this.fitWindow(this.reportBox); this.fitWindow(this.notesBox); this.fitWindow(this.sessionBox); if (this.minimised) this.placeOrb(host.offsetLeft, host.offsetTop); else if (host.style.left) this.fitWindow(host); });
+    W.addEventListener('resize', () => { this.fitWindow(this.reportBox); this.fitWindow(this.notesBox); this.fitWindow(this.sessionBox); this.fitWindow(this.activityExportBox); if (this.minimised) this.placeOrb(host.offsetLeft, host.offsetTop); else if (host.style.left) this.fitWindow(host); });
     this.setWide(!!this.uiPrefs().wide, false);
     this.draw(); this.update();
     this.restorePanel();
@@ -631,7 +631,7 @@ const UI = {
         this.check('On a timer', () => town().every.on, v => town().every.on = v),
         this.number('Every (minutes)', () => town().every.minutes, v => town().every.minutes = v, 5, 600),
         this.check('Revive in town and use reverse return', () => town().revive, v => town().revive = v),
-        this.select('After death, reverse to', [['death', 'Death location'], ['recall', 'Last return-scroll location']], () => town().deathReturn, v => town().deathReturn = v),
+        this.select('After death, reverse to', [['death', 'Death location'], ['recall', 'Last return-scroll location']], () => town().deathReturn, v => { town().deathReturn = v; Activity.emit({category:'settings',code:'reverse-choice-changed',text:'Revival reverse destination changed to ' + v + '.',details:{choice:v === 'death' ? 3 : 2}}); }),
         el('p', 'Service trips reverse to their departure point. After death, use the selected destination. A missing game destination stops the trip; it never substitutes another point.', 'muted'),
         el('p', 'Worn gear means the most worn repairable item you are wearing, measured against its own maximum durability; the trip repairs it. A broken weapon (0 durability) has its own switch, on by default. The XP and timer clocks run only while hunting and restart with every trip.', 'muted')));
       const services = this.group('Scroll town cycle',
@@ -785,7 +785,7 @@ const UI = {
         })));
       this.pane.append(this.group('Bug reports', el('p', 'Preview diagnostics and optionally a screenshot, then send them to the developer. Nothing sends automatically.', 'muted'), this.button('Send bug report', () => Reports.open())));
       this.logs = this.activityLog('Settings activity');
-      this.pane.append(this.group('Current activity', this.waitNote), this.group('Recent activity', this.logs));
+      this.pane.append(this.group('Current activity', this.waitNote), this.group('Recent activity', this.activityPanel(this.logs, 'Settings')));
     }
     this.update();
     this.pane.scrollTop = scroll;

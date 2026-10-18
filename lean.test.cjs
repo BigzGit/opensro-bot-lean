@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -1534,7 +1534,7 @@ test('pet auto potion never touches the wrong pets, the player potions or an unc
   f.Controller.tick(); assert.equal(petUses(f).length, 1); assert.equal(petUses(f)[0].companionGid, undefined, 'the player potion went first, the pet waits for the next tick');
   f = petPotionFixture(); f.Controller.tick(); assert.equal(petUses(f).length, 1);
   f.advance(2000); f.Controller.tick(); assert.equal(petUses(f).length, 1, 'no second kit until the first is seen consumed');
-  f.advance(4000); f.Controller.tick(); assert.equal(petUses(f).length, 1); assert.match(f.PetPotion.message, /did not take/);
+  f.advance(4000); f.Controller.tick(); assert.equal(petUses(f).length, 1); assert.match(f.PetPotion.message, /consumption unconfirmed/);
   f.advance(31000); f.Controller.tick(); assert.equal(petUses(f).length, 2, 'retried after the 30 s pause');
   f = petPotionFixture(); f.Controller.tick(); assert.equal(petUses(f).length, 1);
   f.World.applyGameplay({ ...f.World.gp, inventory: f.World.gp.inventory.map(i => i.slot === 21 ? { ...i, quantity: 4 } : i), cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 300, status: 5, dead: false }] });
@@ -3845,4 +3845,5 @@ async function updateTests() {
   console.log('Total integration tests: ' + passed);
 }
 require('./lean.session.test.cjs')({ test, fixture, townFixture });
+require('./lean.logging.test.cjs')({ test, fixture, townFixture });
 updateTests().catch(error => { console.error(error); process.exitCode = 1; });

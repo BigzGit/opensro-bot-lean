@@ -327,7 +327,6 @@ const Town = {
     // Say why, once: the trigger is only visible before departure, and people ask why the bot went to town.
     const why = revival ? 'returning after a death' : this.reason() || 'started by you';
     this.lastTrip = { why, at: now() };
-    Log.info('Town trip started: ' + why + '.');
     this.trip = { phase: 'recall', at: now(), started: now(), origin: { ...origin }, revival, reverseChoice, why,
       huntArea: revival && !(reverseChoice === TOWN_REVERSE.death && this.deathPoint) && Hunt.cfg().center ? { center: { ...Hunt.cfg().center }, radius: Hunt.cfg().radius } : null,
       manualAt: Manual.lastAt, character: World.charName, petRef: Loot.pet()?.rec.refObjId,
@@ -420,7 +419,10 @@ const Town = {
       if (now() - p.at > 15000) this.fail('Inventory transaction timed out. No repeat command sent.');
       return false;
     }
-    if (check(p)) { t.pending = null; return true; }
+    if (check(p)) {
+      Activity.emit({ category: 'town', code: 'inventory-confirmed', text: 'Town ' + t.phase + ': inventory result observed.', outcome: 'confirmed', operationId: Activity.contexts.town?.id, details: { quantity: p.quantity } });
+      t.pending = null; return true;
+    }
     if (World.gp.error || now() - p.at > 15000) this.fail(World.gp.error || 'Transaction was not confirmed. No repeat command sent.');
     return false;
   },
@@ -484,7 +486,7 @@ const Town = {
     if (!shop || shop.npc !== this.npc('smith')?.gid || shop.error) return this.fail(shop?.error || 'Weapon merchant selection changed.');
     if (!this.pendingDone(p => this.ammoCount(p.ref) >= p.before + p.quantity) || !this.trip || gp.inventoryPending) return;
     t.ammoSkipped ||= [];
-    const skip = (s, why) => { t.ammoSkipped.push(s.kind); this.message = `Ammunition: no ${s.kind}s bought, ${why}.`; Log.warn(this.message); UI.toast(this.message, 'warn', 6000); };
+    const skip = (s, why) => { t.ammoSkipped.push(s.kind); this.message = `Ammunition: no ${s.kind}s bought, ${why}.`; UI.toast(this.message, 'warn', 6000); };
     const s = this.ammoSupplies().find(s => !t.ammoSkipped.includes(s.kind) && this.ammoCount(s.refObjId) < s.target);
     if (!s) { this.enter('repair'); return; }
     const offer = shop.offers.find(o => o.refObjId === s.refObjId && (o.currency === undefined || o.currency === 1) &&
