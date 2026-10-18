@@ -159,3 +159,8 @@ nav button{min-width:0;padding:0 3px}
 /* Ten pages: two rows of five tabs in the compact window. The wide window keeps its page list. */
 nav button{flex:1 0 calc(20% - 2px)}
 fieldset>input[type=search]{width:100%;margin:2px 0 6px}
+
+/* Shared activity views own their scrolling inside Settings and the session window. */
+.activity-history{position:relative;height:220px;max-height:30vh;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;margin:6px 0;padding:6px;list-style:none;background:#171711;border:1px solid #5d5034;font-size:11px}
+.activity-history[hidden]{display:none}.activity-history li{display:flex;gap:7px;line-height:1.5}.activity-history time{flex:none;color:#b0a48b}.activity-history span{white-space:pre-wrap;overflow-wrap:anywhere;min-width:0}.activity-history .warn{color:#ffc67a}.activity-history .error{color:#ff9999}.activity-history .cmd{color:#aba79c}
+.session-window .dialog-body{max-height:calc(100vh - 100px)}:host(.wide) .session-window .body{display:block}.session-window .field{margin:3px 0}.session-window .session-values{padding-bottom:6px}

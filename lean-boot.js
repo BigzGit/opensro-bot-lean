@@ -25,9 +25,9 @@ function boot() {
   Combat.init(); Loot.init(); Alchemy.init(); BuffGear.init();
   bus.on('character', name => {
     const key = name ? 'profile:' + name : 'profile:default';
-    if (key !== Settings.profileKey) { Town.lastScrollPoint = null; stopAll(); Settings.useCharacter(name); }
+    if (key !== Settings.profileKey) { Town.lastScrollPoint = null; Town.deathPoint = null; stopAll(); Settings.useCharacter(name); }
   });
-  bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); BuffGear.reset(); Town.lastScrollPoint = null; SpeedScroll.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
+  bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); BuffGear.reset(); Town.lastScrollPoint = null; Town.deathPoint = null; SpeedScroll.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
   bus.on('phase', phase => {
     if (phase !== 'world') {
       BuffGear.interrupt('World transition interrupted buff swaps.');

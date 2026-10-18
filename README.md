@@ -15,6 +15,16 @@ A compact OpenSRO bot for hunting, potions, pet loot and automatic town trips.
 
 Settings are saved separately for each character. The bot checks for updates on load and every 15 minutes; click **Update** beside the version when it appears, install, then reload when ready.
 
+## Session window and logs
+
+Starting the bot opens **Current session**, with live hunting totals. The **▼ Show logs** button expands the shared activity history downward. Close the window to keep playing without it; hunting continues. **Session** reopens the same window, and stopping keeps the totals visible. Use **Reset session totals** to clear them explicitly.
+
+All retained activity, including command messages, is available under **Settings → Recent activity** and in the session window. Both lists scroll and follow incoming entries only while you are at the bottom. History retains the newest 400 entries for this page.
+
+Under **Supplies → Automatic potion use**, enter **Potion delay (ms)** as a whole number from 0 to 60000. The default is 350 ms. This minimum interval is saved per character; item cooldowns and inventory admission still apply.
+
+Under **Town → Scroll town cycle**, enable the cycle, set up your recall town and services, and enable **Revive in town and use reverse return**. Choose **Death location** or **Last return-scroll location** for revival trips. Ordinary repair/sell/refill trips reverse to their departure point. Carry reverse scrolls; missing or refused destinations stop the trip without silently switching destinations. Existing protections for your character's inventory remain unchanged.
+
 ## Item rules
 
 The **Items** page lists every item in the game with sBot-style filters (group, race, gender, type, degree, search, only items with a rule). Per item choose **Pick** always/never and one action: **Store** (warehouse on town trips), **Sell** (pet loot at the repair merchant), **Keep**, or **Drop** (thrown away from your bag or the pet while hunting, never picked up again). Click a cell, right-click a row, or use the bulk buttons for everything shown (second click confirms). Rules come first; other items follow the Loot switches. Your own bag is never sold, and supplies the town trip needs are never stored from it.

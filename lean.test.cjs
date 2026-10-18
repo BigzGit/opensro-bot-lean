@@ -2591,7 +2591,7 @@ test('town revival overrides stop default and preserves reverse intent through b
   f.World.gp.inventory.find(i => i.slot === 6).durability = 10;
   f.advance(1000); f.Controller.tick();
   const reverse = f.commands.find(c => c.kind === 'travel-gate');
-  assert.equal(reverse.type, 5); assert.equal(reverse.target, 2);
+  assert.equal(reverse.type, 5); assert.equal(reverse.target, 3);
   f.bus.emit('phase', 'entering-world'); f.bus.emit('reset'); f.World.gp.pose.x = 700;
   f.advance(1000); f.Controller.tick();
   assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, true);
@@ -2819,7 +2819,7 @@ test('death return accepts the current hunt area even with an older remembered s
   f.World.gp.pose.x = 100; f.Town.begin(true); f.Town.enter('reverse-wait');
   f.Town.phase('entering-world'); f.World.gp.pose.x = 950;
   f.Town.tick(); assert.equal(f.Town.trip, null);
-  assert.equal(f.Town.lastScrollPoint.x, 950);
+  assert.equal(f.Town.lastScrollPoint.x, 1500, 'death return must not overwrite the remembered recall point');
 });
 
 test('death arrival still requires settled travel inside the expected destination area', () => {
@@ -3844,4 +3844,5 @@ async function updateTests() {
   });
   console.log('Total integration tests: ' + passed);
 }
+require('./lean.session.test.cjs')({ test, fixture, townFixture });
 updateTests().catch(error => { console.error(error); process.exitCode = 1; });

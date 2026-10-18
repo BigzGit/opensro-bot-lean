@@ -1,7 +1,9 @@
 // Town service owns the whole recall -> warehouse -> shop -> smith -> reverse trip.
-// Native reverse scrolls are spent by travel-gate type 5/choice 2, not item-use.
+// Native travel-gate type 5 spends the reverse scroll: choice 2 recalls, choice 3 returns to death.
+// See OpenSRO action/reversereturn.go, 6FEF10 and 5DA1B0's choice rows.
+const TOWN_REVERSE = { recall: 2, death: 3 };
 const Town = {
-  trip: null, lastScrollPoint: null, message: 'Town cycle off.',
+  trip: null, lastScrollPoint: null, deathPoint: null, message: 'Town cycle off.',
   // Clocks for the "no XP for N minutes" and "every N minutes" triggers. They run only while hunting, alive and in
   // the world, and restart when a trip begins or completes, so a long trip never triggers the next one.
   xpKey: '', lastXpAt: 0, cycleFrom: 0,
@@ -286,12 +288,12 @@ const Town = {
     if (key !== this.xpKey) { this.xpKey = key; this.lastXpAt = now(); }
   },
   restartClocks() { this.lastXpAt = this.cycleFrom = now(); },
-  validate() {
+  validate(revival = false) {
     const c = this.cfg(), supplies = this.supplies();
     const missing = [['arrival', 'arrival point'], ['vendor', 'potion merchant'], ['smith', 'repair merchant'], ['gate', 'world statue / teleport'], ...(c.petFull ? [['storage', 'warehouse']] : [])].filter(([key]) => !c[key]).map(([, label]) => label);
     if (missing.length) return 'Save missing town services: ' + missing.join(', ') + '.';
     if (!supplies.length || supplies.some(s => !s.refObjId || !Number.isInteger(s.low) || !Number.isInteger(s.target) || s.low < 0 || s.target <= s.low || s.target > 10000)) return 'Choose potions and valid low-stock/refill quantities.';
-    if (!this.scroll(0x09ec) || !this.scroll(0x19ec)) return 'Carry a return scroll and a reverse return scroll before hunting.';
+    if ((!revival && !this.scroll(0x09ec)) || !this.scroll(0x19ec)) return revival ? 'Carry a reverse return scroll for revival return.' : 'Carry a return scroll and a reverse return scroll before hunting.';
     if (toBigInt(World.gp.progression?.gold ?? 0) <= 0n) return 'Carry gold for potions, storage and repairs.';
     return '';
   },
@@ -313,9 +315,10 @@ const Town = {
     return false;
   },
   begin(revival = false) {
-    const error = this.validate();
+    const error = this.validate(revival);
     if (error) return this.fail(error);
-    const origin = revival ? this.lastScrollPoint || Hunt.cfg().center : World.pose();
+    const reverseChoice = revival && this.cfg().deathReturn === 'death' ? TOWN_REVERSE.death : TOWN_REVERSE.recall;
+    const origin = revival ? (reverseChoice === TOWN_REVERSE.death ? this.deathPoint || Hunt.cfg().center : this.lastScrollPoint || Hunt.cfg().center) : World.pose();
     if (!origin) return this.fail('No saved hunting point for revival return.');
     if (revival) Hunt.running = true;
     Restock.trip = null;
@@ -325,8 +328,8 @@ const Town = {
     const why = revival ? 'returning after a death' : this.reason() || 'started by you';
     this.lastTrip = { why, at: now() };
     Log.info('Town trip started: ' + why + '.');
-    this.trip = { phase: 'recall', at: now(), started: now(), origin: { ...origin }, revival, why,
-      huntArea: revival && Hunt.cfg().center ? { center: { ...Hunt.cfg().center }, radius: Hunt.cfg().radius } : null,
+    this.trip = { phase: 'recall', at: now(), started: now(), origin: { ...origin }, revival, reverseChoice, why,
+      huntArea: revival && !(reverseChoice === TOWN_REVERSE.death && this.deathPoint) && Hunt.cfg().center ? { center: { ...Hunt.cfg().center }, radius: Hunt.cfg().radius } : null,
       manualAt: Manual.lastAt, character: World.charName, petRef: Loot.pet()?.rec.refObjId,
       config: JSON.stringify(this.cfg()), supplies: this.supplies() };
     Hunt.targetGid = Hunt.lootGid = 0;
@@ -625,7 +628,7 @@ const Town = {
       if (t.transition && (distance <= radius || inHuntArea) && !gp.inventoryPending && !gp.returnScroll) {
         if (t.phase === 'recall-wait') { this.lastScrollPoint = { ...t.origin }; this.arrived(); }
         else {
-          this.lastScrollPoint = { ...World.pose() };
+          if (t.reverseChoice !== TOWN_REVERSE.death) this.lastScrollPoint = { ...World.pose() };
           this.trip = null; Hunt.targetGid = Hunt.lootGid = 0; Hunt.state = 'search'; this.restartClocks();
           this.message = 'Town service complete; hunting resumed.'; UI.toast(this.message);
         }
@@ -655,12 +658,12 @@ const Town = {
         return true;
       }
       if (gp.inventoryPending || World.isCasting()) return true;
-      if (t.supplies.some(s => Restock.count(s.refObjId) < s.target) || this.damaged().length || !this.scroll(0x09ec) || !this.scroll(0x19ec)) { this.fail('Final supply, repair or travel-scroll check failed.'); return true; }
+      if (t.supplies.some(s => Restock.count(s.refObjId) < s.target) || this.damaged().length || !t.revival && !this.scroll(0x09ec) || !this.scroll(0x19ec)) { this.fail('Final supply, repair or travel-scroll check failed.'); return true; }
       if (World.freeBagSlots() <= 1) { this.fail('Returned to town; free at least two character bag slots before hunting again.'); return true; }
       const npc = this.npc('gate');
       if (!npc || gp.target !== npc.gid || !(gp.targetCapabilities & 0x20000000)) { this.fail('Reverse-return teleport NPC unavailable.'); return true; }
       const scroll = this.scroll(0x19ec);
-      if (Cmd.raw({ kind: 'travel-gate', gid: npc.gid, type: 5, target: 2 }, 'Town: reverse to last return-scroll point')) this.sentScroll(scroll, 'reverse-wait');
+      if (Cmd.raw({ kind: 'travel-gate', gid: npc.gid, type: 5, target: t.reverseChoice }, t.reverseChoice === TOWN_REVERSE.death ? 'Town: reverse to death location' : 'Town: reverse to last return-scroll point')) this.sentScroll(scroll, 'reverse-wait');
     }
     return true;
   },

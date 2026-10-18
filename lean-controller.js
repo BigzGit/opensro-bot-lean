@@ -43,7 +43,7 @@ Hunt.tick = function () {
   if (World.isDead()) {
     Loot.suspend();
     this.state = 'dead';
-    if (!this.deathAt) { this.deathAt = now(); Party.noteDeath(); Log.info('Died: ' + Party.waitNote()); }
+    if (!this.deathAt) { Town.deathPoint = World.pose() ? { ...World.pose() } : null; this.deathAt = now(); Party.noteDeath(); Log.info('Died: ' + Party.waitNote()); }
     if ((Town.autoRevive() || H.onDeath === 'revive') && !this.revived && now() - this.deathAt > Party.reviveDelay() && !Party.resBusy()) {
       if (Cmd.rebirth(1)) this.revived = true;
     } else if (!Town.autoRevive() && H.onDeath === 'stop') this.stop('character died');

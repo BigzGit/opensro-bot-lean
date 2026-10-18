@@ -203,6 +203,7 @@ const server = http.createServer((req, res) => {
       SROLean.stats.reset();
     });
     await page.getByRole('button',{name:'Start / stop · F8',exact:true}).click();
+    await page.evaluate(() => { if (SROLean.ui.sessionBox) SROLean.ui.sessionBox.hidden = true; });
     await page.evaluate(()=>{
       SROLean.stats.lastAt=performance.now()-60000;
       SROLean.world.applyGameplay({...SROLean.world.gp,progression:{...SROLean.world.gp.progression,experience:'150',gold:'4800'}});
@@ -218,6 +219,7 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.getByLabel('XP gained',{exact:true}).textContent(),'0');
     assert.equal(await page.getByLabel('Net gold',{exact:true}).textContent(),'0');
     await page.getByRole('button',{name:'Start / stop · F8',exact:true}).click();
+    await page.evaluate(() => { if (SROLean.ui.sessionBox) SROLean.ui.sessionBox.hidden = true; });
     await page.evaluate(()=>{SROLean.world.gp.progression=window.statsOriginalProgression;SROLean.stats.reset();});
     assert.equal(await page.getByLabel('Session',{exact:true}).textContent(),'Paused');
     await page.getByRole('button', { name: 'Party', exact: true }).click();
@@ -255,7 +257,7 @@ const server = http.createServer((req, res) => {
     assert.match(await page.locator('.trip-flow').innerText(), /Return scroll[\s\S]*Reverse/);
     await page.locator('.pane').screenshot({ path: __dirname + '/lean-town-page.png' });
     for (const label of ['Gear is worn', 'No XP for a while', 'On a timer']) await page.getByLabel(label, { exact: true }).uncheck();
-    const reviveToggle = page.getByLabel('Revive in town and reverse to last scroll point', { exact: true });
+    const reviveToggle = page.getByLabel('Revive in town and use reverse return', { exact: true });
     assert.equal(await reviveToggle.isChecked(), true);
     await reviveToggle.uncheck(); assert.equal(await page.evaluate(() => SROLean.town.cfg().revive), false);
     await reviveToggle.check(); assert.equal(await page.evaluate(() => SROLean.town.cfg().revive), true);
@@ -381,8 +383,10 @@ const server = http.createServer((req, res) => {
     await page.getByLabel('Hunt radius (m)', { exact: true }).dispatchEvent('change');
     assert.equal(await page.evaluate(() => SROLean.settings.profile.hunt.radius), 550);
     await page.getByRole('button', { name: 'Start / stop · F8', exact: true }).click();
+    await page.evaluate(() => { if (SROLean.ui.sessionBox) SROLean.ui.sessionBox.hidden = true; });
     assert.equal(await page.evaluate(() => SROLean.hunt.running), true);
     await page.keyboard.press('F8');
+    await page.evaluate(() => { if (SROLean.ui.sessionBox) SROLean.ui.sessionBox.hidden = true; });
     assert.equal(await page.evaluate(() => SROLean.hunt.running), false);
     try { await page.waitForFunction(() => testCommands.some(c => c.kind === 'move'), { timeout: 3000 }); }
     catch (e) { console.error(await page.evaluate(() => ({ commands: testCommands, log: SROLean.log.lines.slice(-8), pose: SROLean.world.pose(), time: performance.now() }))); throw e; }
@@ -400,11 +404,13 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.getByRole('button', { name: 'Stop all', exact: true }).isVisible(), false);
     await page.keyboard.press('F7');
     await page.getByRole('button', { name: 'Start / stop · F8', exact: true }).click();
+    await page.evaluate(() => { if (SROLean.ui.sessionBox) SROLean.ui.sessionBox.hidden = true; });
     await page.keyboard.press('Shift+F7');
     assert.equal(await page.locator('#sro-bot-lean').isVisible(), false);
     assert.equal(await page.evaluate(() => SROLean.hunt.running), true);
     await page.keyboard.press('Shift+F7');
     await page.keyboard.press('F8');
+    await page.evaluate(() => { if (SROLean.ui.sessionBox) SROLean.ui.sessionBox.hidden = true; });
     await page.getByLabel('Hunt radius (m)', { exact: true }).focus();
     await page.keyboard.press('Shift+F7');
     assert.equal(await page.locator('#sro-bot-lean').isVisible(), true);
@@ -418,6 +424,7 @@ const server = http.createServer((req, res) => {
     await page.waitForFunction(() => document.getElementById('sro-bot-lean').shadowRoot.querySelector('.orb img')?.complete);
     assert.equal(await orb.getAttribute('data-state'), 'stop');
     await page.keyboard.press('F8');
+    await page.evaluate(() => { if (SROLean.ui.sessionBox) SROLean.ui.sessionBox.hidden = true; });
     await page.waitForFunction(() => document.getElementById('sro-bot-lean').shadowRoot.querySelector('.orb').dataset.state === 'ok');
     assert.equal(await page.evaluate(() => SROLean.hunt.running), true);
     await page.evaluate(() => SROLean.ui.toast('Out of HP potions.', 'warn'));
@@ -445,6 +452,7 @@ const server = http.createServer((req, res) => {
     await page.keyboard.press('F7');
     assert.equal(await page.getByRole('button', { name: 'Stop all', exact: true }).isVisible(), true);
     await page.keyboard.press('F8');
+    await page.evaluate(() => { if (SROLean.ui.sessionBox) SROLean.ui.sessionBox.hidden = true; });
     assert.equal(await page.evaluate(() => SROLean.hunt.running), false);
     // The panel's own spot is remembered too: drag it by the title, then a reload (re-mount) puts it back there.
     const title = page.locator('#sro-bot-lean header').first(), panelStart = await page.locator('#sro-bot-lean').boundingBox();
@@ -472,18 +480,20 @@ const server = http.createServer((req, res) => {
     await page.getByRole('button', { name: 'Wide', exact: true }).click();
     assert.ok((await host.boundingBox()).width > 900, 'wide window is about 1000 px');
     assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('sroLean:ui')).wide), true);
-    assert.equal(await page.getByLabel('Activity', { exact: true }).isVisible(), true);
+    assert.equal(await page.getByLabel('Activity', { exact: true }).count(), 0);
     assert.equal(await page.locator('.status').isVisible(), false, 'the strip replaces the text status');
     assert.equal(await page.locator('.strip strong').first().innerText(), await page.evaluate(() => SROLean.world.charName));
     await page.waitForFunction(() => [...document.getElementById('sro-bot-lean').shadowRoot.querySelectorAll('nav button')].every(b => b.dataset.iconLoaded === 'true'));
     assert.match(await page.getByLabel('Supplies: HP potions', { exact: true }).innerText(), /^[\d,]+$/);
     assert.match(await page.getByLabel('Session: Hunting time', { exact: true }).innerText(), /^\d\d:\d\d:\d\d$/);
     await page.evaluate(() => SROLean.log.info('Wide log line'));
-    await page.waitForFunction(() => document.getElementById('sro-bot-lean').shadowRoot.querySelector('.log').textContent.includes('Wide log line'));
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await page.getByLabel('Settings activity').getByText('[info] Wide log line', { exact: true }).waitFor();
     // The same page switching and settings work in the wide window.
     await page.getByRole('button', { name: 'Loot', exact: true }).click();
     assert.equal(await page.getByRole('button', { name: 'Loot', exact: true }).getAttribute('aria-selected'), 'true');
     await page.getByRole('button', { name: 'Start / stop · F8', exact: true }).click();
+    await page.evaluate(() => { if (SROLean.ui.sessionBox) SROLean.ui.sessionBox.hidden = true; });
     await page.waitForFunction(() => document.getElementById('sro-bot-lean').shadowRoot.querySelector('.state').dataset.state === 'ok');
     assert.equal(await page.locator('.state strong').innerText(), 'Hunting');
     await page.screenshot({ path: __dirname + '/lean-wide-desktop.png' });
@@ -496,11 +506,12 @@ const server = http.createServer((req, res) => {
       await page.screenshot({ path: __dirname + `/lean-wide-${name.toLowerCase()}.png` });
     }
     await page.keyboard.press('F8');
+    await page.evaluate(() => { if (SROLean.ui.sessionBox) SROLean.ui.sessionBox.hidden = true; });
     await page.waitForFunction(() => document.getElementById('sro-bot-lean').shadowRoot.querySelector('.state').dataset.state === 'stop');
     // A narrow screen always gets the compact window, even with wide chosen.
     await page.setViewportSize({ width: 800, height: 1000 });
     assert.ok((await host.boundingBox()).width < 500);
-    assert.equal(await page.getByLabel('Activity', { exact: true }).isVisible(), false);
+    assert.equal(await page.getByLabel('Activity', { exact: true }).count(), 0);
     await page.setViewportSize({ width: 1200, height: 1000 });
     await page.getByRole('button', { name: 'Compact', exact: true }).click();
     assert.equal(Math.round((await host.boundingBox()).width), Math.round(compactWidth));
@@ -739,6 +750,67 @@ const server = http.createServer((req, res) => {
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.evaluate(() => { const r = document.querySelector('#sro-bot-lean').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; }), true);
     await page.screenshot({ path: __dirname + '/lean-alchemy-mobile.png', fullPage: true });
+
+    // The session view is opened by an actual successful Start, and closing it leaves hunting enabled.
+    await page.setViewportSize({ width: 1200, height: 1000 });
+    await page.evaluate(() => {
+      SROLean.stop(); SROLean.ui.minimise(false); SROLean.ui.body.hidden = false;
+      SROLean.settings.profile.hunt.stopInvFull = false;
+      SROLean.settings.profile.hunt.stopNoHpPotion = false;
+      SROLean.settings.profile.potion.restock.town.enabled = false;
+      SROLean.ui.current = 'Supplies'; SROLean.ui.draw();
+    });
+    const delay = page.getByLabel('Potion delay (ms)', { exact: true });
+    await delay.fill('1234'); await delay.dispatchEvent('change');
+    assert.equal(await page.evaluate(() => SROLean.settings.profile.potion.delayMs), 1234);
+    await delay.fill('-1'); await delay.dispatchEvent('change');
+    assert.equal(await delay.inputValue(), '1234');
+    await delay.fill('1.5'); await delay.dispatchEvent('change');
+    assert.equal(await delay.inputValue(), '1234');
+    await page.waitForTimeout(400);
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('sroBotLean:v1:' + SROLean.settings.profileKey)).potion.delayMs), 1234);
+    await page.getByRole('button', { name: 'Start / stop · F8', exact: true }).click();
+    const session = page.locator('.session-window');
+    await session.waitFor({ state: 'visible' });
+    assert.equal(await page.getByRole('button', { name: '▼ Show logs', exact: true }).getAttribute('aria-expanded'), 'false');
+    await page.getByRole('button', { name: '▼ Show logs', exact: true }).click();
+    const history = page.getByLabel('Session activity', { exact: true });
+    await page.evaluate(() => { for (let i = 0; i < 450; i++) SROLean.log.info('Session line ' + i); SROLean.ui.updateSession(); });
+    assert.equal(await history.locator('li').count(), 400);
+    assert.equal(await history.evaluate(node => node.scrollHeight > node.clientHeight), true);
+    await history.evaluate(node => { node.scrollTop = Math.floor(node.scrollHeight / 2); });
+    const anchorBefore = await history.evaluate(node => {
+      const row = [...node.children].find(row => row.offsetTop + row.offsetHeight >= node.scrollTop);
+      return { text: row.textContent, offset: row.offsetTop - node.scrollTop };
+    });
+    await page.evaluate(() => { SROLean.log.info('new line while browsing'); SROLean.ui.updateSession(); });
+    assert.equal(await history.evaluate((node, anchor) => {
+      const row = [...node.children].find(row => row.textContent === anchor.text);
+      return row && Math.abs(row.offsetTop - node.scrollTop - anchor.offset) <= 1;
+    }, anchorBefore), true);
+    await page.screenshot({ path: __dirname + '/lean-session-desktop.png' });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const bounds = await session.boundingBox();
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 391 && bounds.y >= 0 && bounds.y + bounds.height <= 845);
+    await page.screenshot({ path: __dirname + '/lean-session-mobile.png' });
+    await session.getByRole('button', { name: 'Close current session', exact: true }).click();
+    assert.equal(await page.evaluate(() => SROLean.hunt.running), true);
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    const settingsHistory = page.getByLabel('Settings activity', { exact: true });
+    await page.evaluate(() => SROLean.ui.updateSession());
+    assert.equal(await page.locator('.body > .waiting, .body > .feedback, .logbox').count(), 0);
+    await page.getByRole('button', { name: 'Session', exact: true }).click();
+    await session.waitFor({ state: 'visible' });
+    assert.equal(await page.evaluate(() => {
+      SROLean.ui.updateSession();
+      return SROLean.ui.logs.textContent === SROLean.ui.sessionLog.textContent;
+    }), true);
+    assert.equal(await page.locator('.session-window').count(), 1);
+    await page.keyboard.press('F8');
+    assert.equal(await page.evaluate(() => SROLean.hunt.running), false);
+    assert.equal(await session.isVisible(), true);
+    await session.getByRole('button', { name: 'Close current session', exact: true }).click();
+    await page.setViewportSize({ width: 1200, height: 1000 });
     assert.deepEqual(errors,[]);
     // All reporting traffic is intercepted; capture uses a synthetic canvas, never the user's screen.
     await page.setViewportSize({width:1200,height:1000});
@@ -753,10 +825,10 @@ const server = http.createServer((req, res) => {
     const preview = page.getByRole('textbox',{name:'Report preview',exact:true});
     await preview.waitFor(); assert.equal(reportRequests.length,0);
     // The report is its own floating window: fixed on screen, inside the viewport, draggable, closed from its header.
-    const dialog = () => page.evaluate(() => { const root = document.querySelector('#sro-bot-lean').shadowRoot, d = root.querySelector('.dialog:not(.patch-notes)'), r = d.getBoundingClientRect();
+    const dialog = () => page.evaluate(() => { const root = document.querySelector('#sro-bot-lean').shadowRoot, d = root.querySelector('.report-preview'), r = d.getBoundingClientRect();
       return { fixed: getComputedStyle(d).position === 'fixed', hidden: d.hidden, left: r.left, top: r.top, inside: r.left >= 0 && r.top >= 0 && r.right <= innerWidth + 1, inPanel: !!root.querySelector('.panel .dialog, .body .dialog') }; });
     const before = await dialog(); assert.deepEqual([before.fixed, before.hidden, before.inside, before.inPanel], [true, false, true, false]);
-    const titleBox = await page.locator('#sro-bot-lean').locator('css=.dialog:not(.patch-notes) header').boundingBox();
+    const titleBox = await page.locator('#sro-bot-lean').locator('css=.report-preview header').boundingBox();
     await page.mouse.move(titleBox.x + 60, titleBox.y + 15); await page.mouse.down(); await page.mouse.move(titleBox.x + 120, titleBox.y + 55, { steps: 4 }); await page.mouse.up();
     const moved = await dialog(); assert.ok(moved.left > before.left + 30 && moved.top > before.top + 20);
     await page.getByRole('button',{name:'Close bug report',exact:true}).click();
