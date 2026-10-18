@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.106
+// @version      1.2.107
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.106';
+const VERSION = '1.2.107';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -3689,7 +3689,7 @@ const Town = {
 
 // Confirm every native inventory move before casting or restoring combat gear.
 const BuffGear = {
-  run: null, recovery: null, message: 'Buff weapon swapping off.', skipped: new Map(), started: false,
+  run: null, recovery: null, message: 'Buff weapon swapping off.', skipped: new Map(), waiting: '', started: false,
   cfg() { return Settings.profile.macro; },
   items() { return World.gp?.inventory || []; },
   at(slot) { return this.items().find(i => i.slot === slot) || null; },
@@ -3758,7 +3758,8 @@ const BuffGear = {
     if (!b.enabled || !b.gearSet) return 0;
     const id = Combat.resolve(b), info = World.skill(id);
     if (!id || !info || info.targetRequired || Combat.blocked(id) || !Cmd.canCast(id) || !Combat.mpOk(id, World.me())) return 0;
-    if (this.skipped.get(b.group) === this.signature()) return 0;
+    const skip = this.skipped.get(b.group);
+    if (skip) { if (skip.signature === this.signature() && now() < skip.until) return 0; this.skipped.delete(b.group); }
     const remaining = World.buffRemaining(id);
     if (remaining > (b.refreshS ?? 3) * 1000) return 0;
     const gap = Math.max(4000, Math.min((info?.durationMs || 20000) * .85, 600000));
@@ -3776,16 +3777,20 @@ const BuffGear = {
       const buffs = this.cfg().buffs.filter(b => Number(b.gearSet) === set.id).map(b => ({ b, id: this.due(b) })).filter(b => b.id);
       if (buffs.length) queue.push({ set, buffs });
     }
-    if (!queue.length) return false;
+    if (!queue.length) { this.waiting = ''; return false; }
+    // A buff is due, so say why the swap cannot start instead of waiting silently.
+    const wait = text => { this.waiting = text; return false; };
     const home = this.setup();
-    if (!this.weapon(this.at(6))) { this.message = 'Equip your combat weapon before hunting.'; return false; }
+    if (!this.weapon(this.at(6))) return wait('Equip your combat weapon before hunting.');
     for (const set of [home, ...queue.map(q => q.set)]) {
-      if (!this.find(set.weapon) || !this.weapon(this.find(set.weapon)) || set.shield && (!this.find(set.shield) || set !== home && !this.shield(this.find(set.shield)))) {
-        this.message = 'Buff gear missing or ambiguous. Save the sets again.'; return false;
-      }
+      const name = set === home ? 'your combat gear' : 'the saved set "' + set.name + '"';
+      if (!this.find(set.weapon)) return wait(`Cannot find ${name}: its weapon is not in your bag or equipped (or two copies look identical). Save the buff set again.`);
+      if (!this.weapon(this.find(set.weapon))) return wait(`${name} is not a weapon any more. Save the buff set again.`);
+      if (set.shield && (!this.find(set.shield) || set !== home && !this.shield(this.find(set.shield)))) return wait(`Cannot find the shield of ${name} (or two copies look identical). Save the buff set again.`);
     }
     // One free bag slot permits explicit shield removal before two-handed swaps.
-    if (World.freeBagSlots() < 1) { this.message = 'Buff swaps need one free bag slot.'; return false; }
+    if (World.freeBagSlots() < 1) return wait('Buff swaps need one free bag slot.');
+    this.waiting = '';
     if (!Cmd.move(World.pose())) return false;
     Loot.suspend(); Hunt.state = 'buff'; this.run = this.create(home, queue);
     this.message = 'Pausing combat for buff gear.';
@@ -3830,7 +3835,7 @@ const BuffGear = {
       const p = r.cast, remaining = World.buffRemaining(p.id);
       if (remaining > 0) { p.accepted = true; p.visible = true; }
       if (now() < p.until || World.isCasting()) return true;
-      if (!p.accepted) { if (now() - p.at > 10000) { this.skipped.set(p.group, r.signature); this.cancel(); this.message = 'Buff cast unconfirmed; restoring combat gear.'; r.cast = null; } return true; }
+      if (!p.accepted) { if (now() - p.at > 10000) { this.skipped.set(p.group, { signature: r.signature, until: now() + 120000, why: 'the cast was not confirmed, trying again in two minutes' }); this.cancel(); this.message = 'Buff cast unconfirmed; restoring combat gear.'; r.cast = null; } return true; }
       r.effects.push(p); r.cast = null;
     }
     if (Combat.busy() || gp.inventoryPending || World.isSitting() || World.local()?.mountedOn || Loot.pressed()) return true;
@@ -3841,7 +3846,7 @@ const BuffGear = {
       if (!r.restoredAt) { r.restoredAt = now(); return true; }
       if (now() - r.restoredAt < 1000) return true;
       for (const p of r.effects) if (p.visible && World.buffRemaining(p.id) <= 0) {
-        this.skipped.set(p.group, r.signature);
+        this.skipped.set(p.group, { signature: r.signature, until: Infinity, why: 'it ended when the weapon changed back, so it stays with your combat weapon until buff settings change' });
         this.message = 'A buff ended after changing weapons; skipped until buff settings change.';
       }
       if (this.message === 'Restoring combat gear.') this.message = 'Combat gear restored.';
@@ -3860,9 +3865,27 @@ const BuffGear = {
     }
     return true;
   },
+  // The buffs assigned to a saved set that are on, with how long each has left.
+  assigned() {
+    return this.cfg().buffs.filter(b => b.enabled && Number(b.gearSet) && this.cfg().buffSets.some(s => s.id === Number(b.gearSet))).map(b => {
+      const id = Combat.resolve(b);
+      return { name: World.skillName(id || b.id), left: id ? World.buffRemaining(id) : 0, learned: !!id && World.learned(id), skip: this.skipped.get(b.group) };
+    });
+  },
   status() {
-    if (this.run || this.recovery || this.skipped.size) return this.message;
-    return this.cfg().buffSwap ? 'Buff weapon sets ready; used while hunting.' : 'Buff weapon swapping off.';
+    if (this.run || this.recovery) return this.message;
+    if (!this.cfg().buffSwap) return 'Buff weapon swapping off.';
+    const sets = this.cfg().buffSets, list = this.assigned();
+    if (!sets.length) return 'Buff weapon swapping is on, but no buff set is saved yet. Equip the buff weapon and press Save equipped buff set.';
+    if (!list.length) return 'Buff weapon swapping is on, but no buff skill is assigned to a set yet. Use Gear for <skill> under your buffs.';
+    const lines = [];
+    for (const a of list) {
+      if (!a.learned) lines.push(`${a.name}: not learned on this character, so it is never cast.`);
+      else if (a.skip && a.skip.signature === this.signature() && now() < a.skip.until) lines.push(`${a.name}: skipped because ${a.skip.why}.`);
+      else if (a.left > 0) lines.push(`${a.name}: active, ${Math.ceil(a.left / 1000)} s left; the swap happens when it is about to end.`);
+      else lines.push(`${a.name}: due now.`);
+    }
+    return (this.waiting ? this.waiting + '\n' : '') + lines.join('\n');
   },
   draw(parent) {
     const box = UI.group('Buff weapon sets');
@@ -7498,7 +7521,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.106", "title": "Town setup: pick your town, no need to stand in it", "items": ["The Town page has a Town list and a Set up this town button. Pick Hotan, Jangan, Donwhang, Constantinople or Samarkand and one click fills the arrival point, warehouse, potion merchant, repair merchant and world statue. You no longer have to use a return scroll and stand where it lands first.", "The arrival point is now a preset too. Each town's return scroll always lands on the same spot, so the bot knows it from the server's own data instead of using wherever you happened to be standing.", "Auto-set town services and Redo all automatically still work for the town you are in, and now also use the preset arrival point."]}, {"version": "1.2.105", "title": "Alchemy: aim for stat percentages with attribute stones", "items": ["New Item attributes group in the Alchemy tab. Pick an item, choose the lowest percentage you want for each of its stats (Phy. reinforce, Mag. reinforce, attack rating, attack power, critical, defense, block, absorption and so on, depending on the kind of item) and press Fuse attribute stones. The bot fuses attribute stones of the item's degree until every picked stat reaches its target.", "Every successful fusion rolls the stat again, so it can come out lower, and it can re-roll another stat of the item; the bot keeps going until all picked stats are at or above their targets, and the log names any other stat that changed.", "The tab shows each stat's current percentage and a rough number of stones each target takes (the chance is 50% per stone before bonuses and the top steps get rare fast), and a stone limit (100 by default) stops it. It stops with a message if a stone of the right kind is missing from the bag."]}, {"version": "1.2.104", "title": "Fix: stuck-character recall that fails to start", "items": ["If the optional recovery recall could not start a town trip, hunting kept running and the stuck check repeated forever. Hunting now stops with the alert, as it does when recall is off.", "Fixed a missing full stop in the Obstacles help text."], "note": "Reviewed the 1.2.101 to 1.2.103 obstacle and attack-retry changes: 360 integration tests, the obstacle suite, the browser test and the native navigation comparison all pass."}, {"version": "1.2.103", "title": "Fix attack retries carrying over to other monsters", "items": ["Fixed skills being falsely paused while the character was still approaching a monster outside skill reach.", "Attack rejection pauses now apply to the affected monster, so a failed target does not leave skills paused against the next one.", "Silent rejection checks now require the same selected target, known skill reach and fresh game state without pending movement, selection or inventory work."], "note": "The existing weaker-attacker priority remains in effect. Validated with 360 integration tests; live gameplay confirmation is still pending."}, {"version": "1.2.102", "title": "Fix false blocked-target rejections on normal terrain", "items": ["Removed a two-metre height-difference rejection from the horizontal collision query. Ordinary slopes no longer make nearby monsters look unreachable.", "Missing maps, search limits and failed initial route queries preserve the game's normal approach and targeting. A no-route abandonment now requires fresh state showing an actual sustained lack of movement and confirmed damage.", "Failed-approach memory applies only to the same monster. A failed enemy no longer excludes a different nearby enemy or a party-engaged target beside it."], "note": "This corrects the 1.2.101 targeting regression. Collision-checked detours and confirmed escape recovery remain enabled; live tree-interior recovery still needs gameplay validation."}, {"version": "1.2.101", "title": "Safer obstacle pursuit and confirmed escape recovery", "items": ["Blocked enemies are evaluated before repeated attack approaches. Failed routes retain movement control, stop and release the target, and use bounded retries with short-lived failed-approach memory.", "Detours use cached routes and short collision-checked steps. Party damage and position jitter no longer count as a successful detour, and ranged skills get a bounded trial instead of an assumed walking line-of-sight rule.", "Escape uses validated breadcrumbs or legal nearby steps, retries refused local sends, and requires fresh, stable arrival followed by a second move before resuming. No legal exit means a bounded stop instead of blind movement.", "Settings adds optional recovery recall and local detailed escape diagnostics, both off by default. Recovery recall completes town services and stops in town rather than reversing into the trap."], "note": "Live tree-contact recovery still needs controlled gameplay validation. This release does not change OpenSRO collision rules or provide a server-side teleport."}, {"version": "1.2.100", "title": "Alchemy helper stones: a simple Use switch for each", "items": ["Luck, Steady, Immortal and Astral now each have a Use switch. When it is ticked, the bot fuses a stone automatically before every attempt at or above the plus you set whenever the item has fewer charges than you asked it to keep, so the stones are used while enhancing without any extra clicking.", "Before, a helper only ran when its count was set above zero and the counts started at zero, which made it look as if the stones were never used. The counts now start at 1 and mean how many charges to keep, and old settings keep their helpers switched on.", "The Alchemy tab says which helpers it will use, from which plus and how many charges it keeps, or says that none are ticked."]}, {"version": "1.2.99", "title": "Alchemy tab: every gear kind, rules from +N, odds and a results log", "items": ["The Alchemy tab now enhances weapons, shields, armour and accessories, each with its own elixir (the A and B elixirs of its kind). Before, only weapons worked.", "Rules from a plus: use lucky powder from +N, and Luck, Steady, Immortal and Astral stones from +N. A missing charge is fused automatically from stones of the item's degree before the attempt, so you do not have to fuse them by hand. The defaults follow the server: Steady and Immortal from +5, where a failure can start to destroy or damage the item.", "The tab shows the real odds taken from the server's data: the chance of the next attempt (with powder and Luck counted like the server does) and how many elixirs you should expect to need to reach your target, and the chance of getting there without a single failure.", "A results panel with attempts, successes, failures, destroyed items, the highest plus reached, the success rate, what was used, and a timestamped log of each attempt and fusion."]}];
+const RELEASE_NOTES = [{"version": "1.2.107", "title": "Buff weapon swapping explains itself", "items": ["The Buffs & imbue page now lists every buff assigned to a weapon set and what it is waiting for: how many seconds an active buff has left (the swap only happens when it is about to end), that it is due now, that the skill is not learned, or why it was skipped.", "When a buff is due but the swap cannot start, the page says why instead of staying silent: a saved set whose weapon or shield cannot be found in the bag (or two copies look identical), a missing combat weapon, no free bag slot, no saved set, or no buff assigned to a set.", "A buff whose cast was only unconfirmed is tried again after two minutes. Before, it was skipped until you changed buff settings, so a single missed confirmation could stop swaps for good.", "The buff weapon status is part of the diagnostics export, so a bug report shows what the swap was waiting for."]}, {"version": "1.2.106", "title": "Town setup: pick your town, no need to stand in it", "items": ["The Town page has a Town list and a Set up this town button. Pick Hotan, Jangan, Donwhang, Constantinople or Samarkand and one click fills the arrival point, warehouse, potion merchant, repair merchant and world statue. You no longer have to use a return scroll and stand where it lands first.", "The arrival point is now a preset too. Each town's return scroll always lands on the same spot, so the bot knows it from the server's own data instead of using wherever you happened to be standing.", "Auto-set town services and Redo all automatically still work for the town you are in, and now also use the preset arrival point."]}, {"version": "1.2.105", "title": "Alchemy: aim for stat percentages with attribute stones", "items": ["New Item attributes group in the Alchemy tab. Pick an item, choose the lowest percentage you want for each of its stats (Phy. reinforce, Mag. reinforce, attack rating, attack power, critical, defense, block, absorption and so on, depending on the kind of item) and press Fuse attribute stones. The bot fuses attribute stones of the item's degree until every picked stat reaches its target.", "Every successful fusion rolls the stat again, so it can come out lower, and it can re-roll another stat of the item; the bot keeps going until all picked stats are at or above their targets, and the log names any other stat that changed.", "The tab shows each stat's current percentage and a rough number of stones each target takes (the chance is 50% per stone before bonuses and the top steps get rare fast), and a stone limit (100 by default) stops it. It stops with a message if a stone of the right kind is missing from the bag."]}, {"version": "1.2.104", "title": "Fix: stuck-character recall that fails to start", "items": ["If the optional recovery recall could not start a town trip, hunting kept running and the stuck check repeated forever. Hunting now stops with the alert, as it does when recall is off.", "Fixed a missing full stop in the Obstacles help text."], "note": "Reviewed the 1.2.101 to 1.2.103 obstacle and attack-retry changes: 360 integration tests, the obstacle suite, the browser test and the native navigation comparison all pass."}, {"version": "1.2.103", "title": "Fix attack retries carrying over to other monsters", "items": ["Fixed skills being falsely paused while the character was still approaching a monster outside skill reach.", "Attack rejection pauses now apply to the affected monster, so a failed target does not leave skills paused against the next one.", "Silent rejection checks now require the same selected target, known skill reach and fresh game state without pending movement, selection or inventory work."], "note": "The existing weaker-attacker priority remains in effect. Validated with 360 integration tests; live gameplay confirmation is still pending."}, {"version": "1.2.102", "title": "Fix false blocked-target rejections on normal terrain", "items": ["Removed a two-metre height-difference rejection from the horizontal collision query. Ordinary slopes no longer make nearby monsters look unreachable.", "Missing maps, search limits and failed initial route queries preserve the game's normal approach and targeting. A no-route abandonment now requires fresh state showing an actual sustained lack of movement and confirmed damage.", "Failed-approach memory applies only to the same monster. A failed enemy no longer excludes a different nearby enemy or a party-engaged target beside it."], "note": "This corrects the 1.2.101 targeting regression. Collision-checked detours and confirmed escape recovery remain enabled; live tree-interior recovery still needs gameplay validation."}, {"version": "1.2.101", "title": "Safer obstacle pursuit and confirmed escape recovery", "items": ["Blocked enemies are evaluated before repeated attack approaches. Failed routes retain movement control, stop and release the target, and use bounded retries with short-lived failed-approach memory.", "Detours use cached routes and short collision-checked steps. Party damage and position jitter no longer count as a successful detour, and ranged skills get a bounded trial instead of an assumed walking line-of-sight rule.", "Escape uses validated breadcrumbs or legal nearby steps, retries refused local sends, and requires fresh, stable arrival followed by a second move before resuming. No legal exit means a bounded stop instead of blind movement.", "Settings adds optional recovery recall and local detailed escape diagnostics, both off by default. Recovery recall completes town services and stops in town rather than reversing into the trap."], "note": "Live tree-contact recovery still needs controlled gameplay validation. This release does not change OpenSRO collision rules or provide a server-side teleport."}, {"version": "1.2.100", "title": "Alchemy helper stones: a simple Use switch for each", "items": ["Luck, Steady, Immortal and Astral now each have a Use switch. When it is ticked, the bot fuses a stone automatically before every attempt at or above the plus you set whenever the item has fewer charges than you asked it to keep, so the stones are used while enhancing without any extra clicking.", "Before, a helper only ran when its count was set above zero and the counts started at zero, which made it look as if the stones were never used. The counts now start at 1 and mean how many charges to keep, and old settings keep their helpers switched on.", "The Alchemy tab says which helpers it will use, from which plus and how many charges it keeps, or says that none are ticked."]}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -7762,7 +7785,7 @@ const Diagnostics = {
     return {
       action: this.main(), partyStatus: this.party(), petStatus: this.pet(), townStatus: this.town(), townDetail: this.townDetail(), townReason: this.townReason(),
       navigationReady: !!Navigation.scene, navigationError: String(Navigation.error || '').slice(0, 80),
-      buffGearActive: !!BuffGear.run, buffGearRestoring: !!BuffGear.run?.restoring, buffGearMovePending: !!BuffGear.run?.pending, buffGearRecovery: !!BuffGear.recovery,
+      buffGearStatus: BuffGear.cfg().buffSwap ? String(BuffGear.status()).slice(0, 600) : '', buffGearActive: !!BuffGear.run, buffGearRestoring: !!BuffGear.run?.restoring, buffGearMovePending: !!BuffGear.run?.pending, buffGearRecovery: !!BuffGear.recovery,
       alchemyActive: !!Alchemy.run, alchemyPending: !!Alchemy.pending, alchemyAttempts: this.number(Alchemy.result?.attempts),
       alchemyTarget: this.number(Alchemy.run?.cfg.target), alchemySuccesses: this.number(Alchemy.result?.successes),
       alchemyFailures: this.number(Alchemy.result?.failures), alchemyElixirsUsed: this.number(Alchemy.result?.elixirs),

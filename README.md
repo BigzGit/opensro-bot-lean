@@ -69,6 +69,8 @@ In **Combat → Buffs & imbue**, equip your buff weapon and optional shield, nam
 
 Assign each selected buff to its set and enable **Swap weapons for assigned buffs**. While hunting, the bot equips each needed set, casts its buffs and restores your original combat weapon and off-hand. Keep one bag slot free. Assigned buffs are skipped while swapping is off.
 
+The Buffs & imbue page shows, for each buff assigned to a set, how long it has left and what the swap is waiting for, and says why when a buff is due but the swap cannot start (for example a saved weapon that cannot be found in the bag). The swap happens when a buff is about to end, not when you start hunting. A buff whose cast was only unconfirmed is tried again after two minutes.
+
 Some buffs end when their weapon is removed. If observed, the bot skips that buff until its buff settings change. Interrupted or unconfirmed swaps stop hunting; use **Restore combat gear**, or inspect your equipment and choose **Use current gear**. Reloads discard unfinished recovery. Live-server swapping still needs confirmation.
 
 ## Item alchemy

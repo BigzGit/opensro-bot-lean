@@ -3364,6 +3364,28 @@ test('buff gear runs cleric and bard sets and restores arbitrary combat weapon a
   const count=f.commands.length; f.BuffGear.tick(); assert.equal(f.commands.length,count);
 });
 
+test('buff gear says why a due buff is not being swapped in, instead of staying silent', () => {
+  const f = buffGearFixture(), gp = f.World.gp;
+  gp.inventory = gp.inventory.filter(i => i.slot !== 15);
+  assert.equal(f.BuffGear.tick(), false); assert.match(f.BuffGear.status(), /Cannot find the saved set "Bard"/);
+  gp.inventory.push({ slot: 15, refObjId: 300, typeFlags: (14 << 11) | (6 << 7) | 44, plus: 0, variance: '1', durability: 100 }, { slot: 16, refObjId: 300, typeFlags: (14 << 11) | (6 << 7) | 44, plus: 0, variance: '1', durability: 100 });
+  f.BuffGear.tick(); assert.match(f.BuffGear.status(), /Cannot find the saved set "Bard".*identical/s, 'two identical copies cannot be told apart');
+  gp.inventory = gp.inventory.filter(i => i.slot !== 16); f.BuffGear.tick(); assert.equal(f.BuffGear.waiting, '', 'the reason clears once it can start'); f.BuffGear.run = null;
+  f.Settings.profile.macro.buffSets = [];
+  assert.match(f.BuffGear.status(), /no buff set is saved yet/);
+  const g = buffGearFixture(); g.Settings.profile.macro.buffs.forEach(b => b.gearSet = 0);
+  assert.match(g.BuffGear.status(), /no buff skill is assigned/);
+});
+test('buff gear status lists each assigned buff, and a cast that was only unconfirmed is tried again', () => {
+  const f = buffGearFixture(); f.confirmBuff(20);
+  assert.match(f.BuffGear.status(), /Cleric buff: active, \d+ s left/); assert.match(f.BuffGear.status(), /Bard buff: due now/);
+  const group = f.Settings.profile.macro.buffs[1].group;
+  f.BuffGear.skipped.set(group, { signature: f.BuffGear.signature(), until: f.World.simNow() + 120000, why: 'the cast was not confirmed, trying again in two minutes' });
+  assert.match(f.BuffGear.status(), /Bard buff: skipped because the cast was not confirmed/);
+  assert.equal(f.BuffGear.due(f.Settings.profile.macro.buffs[1]), 0);
+  f.BuffGear.skipped.set(group, { signature: f.BuffGear.signature(), until: 0, why: 'x' });
+  assert.ok(f.BuffGear.due(f.Settings.profile.macro.buffs[1]) > 0, 'the skip has expired'); assert.equal(f.BuffGear.skipped.has(group), false);
+});
 test('buff gear waits for actual inventory confirmation and never casts with stale equipment',()=>{
   const f=buffGearFixture(); f.BuffGear.tick(); f.BuffGear.tick();
   const count=f.commands.length; assert.ok(f.BuffGear.run.pending);

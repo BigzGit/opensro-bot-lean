@@ -1,6 +1,6 @@
 // Confirm every native inventory move before casting or restoring combat gear.
 const BuffGear = {
-  run: null, recovery: null, message: 'Buff weapon swapping off.', skipped: new Map(), started: false,
+  run: null, recovery: null, message: 'Buff weapon swapping off.', skipped: new Map(), waiting: '', started: false,
   cfg() { return Settings.profile.macro; },
   items() { return World.gp?.inventory || []; },
   at(slot) { return this.items().find(i => i.slot === slot) || null; },
@@ -69,7 +69,8 @@ const BuffGear = {
     if (!b.enabled || !b.gearSet) return 0;
     const id = Combat.resolve(b), info = World.skill(id);
     if (!id || !info || info.targetRequired || Combat.blocked(id) || !Cmd.canCast(id) || !Combat.mpOk(id, World.me())) return 0;
-    if (this.skipped.get(b.group) === this.signature()) return 0;
+    const skip = this.skipped.get(b.group);
+    if (skip) { if (skip.signature === this.signature() && now() < skip.until) return 0; this.skipped.delete(b.group); }
     const remaining = World.buffRemaining(id);
     if (remaining > (b.refreshS ?? 3) * 1000) return 0;
     const gap = Math.max(4000, Math.min((info?.durationMs || 20000) * .85, 600000));
@@ -87,16 +88,20 @@ const BuffGear = {
       const buffs = this.cfg().buffs.filter(b => Number(b.gearSet) === set.id).map(b => ({ b, id: this.due(b) })).filter(b => b.id);
       if (buffs.length) queue.push({ set, buffs });
     }
-    if (!queue.length) return false;
+    if (!queue.length) { this.waiting = ''; return false; }
+    // A buff is due, so say why the swap cannot start instead of waiting silently.
+    const wait = text => { this.waiting = text; return false; };
     const home = this.setup();
-    if (!this.weapon(this.at(6))) { this.message = 'Equip your combat weapon before hunting.'; return false; }
+    if (!this.weapon(this.at(6))) return wait('Equip your combat weapon before hunting.');
     for (const set of [home, ...queue.map(q => q.set)]) {
-      if (!this.find(set.weapon) || !this.weapon(this.find(set.weapon)) || set.shield && (!this.find(set.shield) || set !== home && !this.shield(this.find(set.shield)))) {
-        this.message = 'Buff gear missing or ambiguous. Save the sets again.'; return false;
-      }
+      const name = set === home ? 'your combat gear' : 'the saved set "' + set.name + '"';
+      if (!this.find(set.weapon)) return wait(`Cannot find ${name}: its weapon is not in your bag or equipped (or two copies look identical). Save the buff set again.`);
+      if (!this.weapon(this.find(set.weapon))) return wait(`${name} is not a weapon any more. Save the buff set again.`);
+      if (set.shield && (!this.find(set.shield) || set !== home && !this.shield(this.find(set.shield)))) return wait(`Cannot find the shield of ${name} (or two copies look identical). Save the buff set again.`);
     }
     // One free bag slot permits explicit shield removal before two-handed swaps.
-    if (World.freeBagSlots() < 1) { this.message = 'Buff swaps need one free bag slot.'; return false; }
+    if (World.freeBagSlots() < 1) return wait('Buff swaps need one free bag slot.');
+    this.waiting = '';
     if (!Cmd.move(World.pose())) return false;
     Loot.suspend(); Hunt.state = 'buff'; this.run = this.create(home, queue);
     this.message = 'Pausing combat for buff gear.';
@@ -141,7 +146,7 @@ const BuffGear = {
       const p = r.cast, remaining = World.buffRemaining(p.id);
       if (remaining > 0) { p.accepted = true; p.visible = true; }
       if (now() < p.until || World.isCasting()) return true;
-      if (!p.accepted) { if (now() - p.at > 10000) { this.skipped.set(p.group, r.signature); this.cancel(); this.message = 'Buff cast unconfirmed; restoring combat gear.'; r.cast = null; } return true; }
+      if (!p.accepted) { if (now() - p.at > 10000) { this.skipped.set(p.group, { signature: r.signature, until: now() + 120000, why: 'the cast was not confirmed, trying again in two minutes' }); this.cancel(); this.message = 'Buff cast unconfirmed; restoring combat gear.'; r.cast = null; } return true; }
       r.effects.push(p); r.cast = null;
     }
     if (Combat.busy() || gp.inventoryPending || World.isSitting() || World.local()?.mountedOn || Loot.pressed()) return true;
@@ -152,7 +157,7 @@ const BuffGear = {
       if (!r.restoredAt) { r.restoredAt = now(); return true; }
       if (now() - r.restoredAt < 1000) return true;
       for (const p of r.effects) if (p.visible && World.buffRemaining(p.id) <= 0) {
-        this.skipped.set(p.group, r.signature);
+        this.skipped.set(p.group, { signature: r.signature, until: Infinity, why: 'it ended when the weapon changed back, so it stays with your combat weapon until buff settings change' });
         this.message = 'A buff ended after changing weapons; skipped until buff settings change.';
       }
       if (this.message === 'Restoring combat gear.') this.message = 'Combat gear restored.';
@@ -171,9 +176,27 @@ const BuffGear = {
     }
     return true;
   },
+  // The buffs assigned to a saved set that are on, with how long each has left.
+  assigned() {
+    return this.cfg().buffs.filter(b => b.enabled && Number(b.gearSet) && this.cfg().buffSets.some(s => s.id === Number(b.gearSet))).map(b => {
+      const id = Combat.resolve(b);
+      return { name: World.skillName(id || b.id), left: id ? World.buffRemaining(id) : 0, learned: !!id && World.learned(id), skip: this.skipped.get(b.group) };
+    });
+  },
   status() {
-    if (this.run || this.recovery || this.skipped.size) return this.message;
-    return this.cfg().buffSwap ? 'Buff weapon sets ready; used while hunting.' : 'Buff weapon swapping off.';
+    if (this.run || this.recovery) return this.message;
+    if (!this.cfg().buffSwap) return 'Buff weapon swapping off.';
+    const sets = this.cfg().buffSets, list = this.assigned();
+    if (!sets.length) return 'Buff weapon swapping is on, but no buff set is saved yet. Equip the buff weapon and press Save equipped buff set.';
+    if (!list.length) return 'Buff weapon swapping is on, but no buff skill is assigned to a set yet. Use Gear for <skill> under your buffs.';
+    const lines = [];
+    for (const a of list) {
+      if (!a.learned) lines.push(`${a.name}: not learned on this character, so it is never cast.`);
+      else if (a.skip && a.skip.signature === this.signature() && now() < a.skip.until) lines.push(`${a.name}: skipped because ${a.skip.why}.`);
+      else if (a.left > 0) lines.push(`${a.name}: active, ${Math.ceil(a.left / 1000)} s left; the swap happens when it is about to end.`);
+      else lines.push(`${a.name}: due now.`);
+    }
+    return (this.waiting ? this.waiting + '\n' : '') + lines.join('\n');
   },
   draw(parent) {
     const box = UI.group('Buff weapon sets');
