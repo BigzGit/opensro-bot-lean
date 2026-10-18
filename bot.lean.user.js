@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.102
+// @version      1.2.103
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.102';
+const VERSION = '1.2.103';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -1215,22 +1215,40 @@ const Combat = {
       if (/SKILL_?USE_FAIL/.test(String(n?.key || '')) && this.lastCastId && now() - this.lastCastAt < 2000) this.fail(this.lastCastId);
     });
     bus.on('cast', (c) => {
-      if (c.caster === World.localGid()) this.stuck.delete(c.skill);
+      if (c.caster !== World.localGid()) return;
+      this.stuck.delete(c.skill);
+      for (const gid of [c.target, ...(c.results || []).map(r => r.target)]) {
+        if (gid) this.stuck.delete(this.failureKey(c.skill, gid));
+      }
     });
   },
 
   // A skill the server keeps rejecting (range, weapon, mount, ...) is skipped
   // for 5/10/20/40 s so the loop moves on to the next entry or normal attack.
+  failureKey(id, gid = 0) {
+    return gid ? `${id}:${gid}` : id;
+  },
+
+  rejectionReady(id, gid) {
+    if (!gid) return true;
+    const skill = World.skill(id), target = World.ents.get(gid);
+    return !!target && skill?.range > 0 && dist2D(World.pose(), target) <= skill.range &&
+      World.gp.target === gid && !World.gp.targetPending && !World.gp.inventoryPending && !World.gp.pendingMoves;
+  },
+
   blocked(id) {
-    const s = this.stuck.get(id);
+    const global = this.stuck.get(id);
+    if (global && now() < global.until) return true;
+    const s = this.stuck.get(this.failureKey(id, World.gp?.target));
     return !!s && now() < s.until;
   },
 
-  fail(id) {
-    const s = this.stuck.get(id) || { n: 0, until: 0 };
+  fail(id, gid = id === this.lastCastId ? this.lastCastGid : 0) {
+    const key = this.failureKey(id, gid);
+    const s = this.stuck.get(key) || { n: 0, until: 0 };
     s.n = Math.min(s.n + 1, 4);
     s.until = now() + 5000 * 2 ** (s.n - 1);
-    this.stuck.set(id, s);
+    this.stuck.set(this.failureKey(id, gid), s);
     Log.warn('Skill refused, skipping for ' + (s.until - now()) / 1000 + ' s: ' + World.skillName(id));
   },
 
@@ -1256,21 +1274,23 @@ const Combat = {
   cast(id, gid, label) {
     // Silent rejection: the last send of this skill started neither a cooldown
     // nor a cast (canCast passed again), so count it as a miss.
-    if (id === this.lastCastId && now() - this.lastCastAt < 1500 && now() - this.lastCastAt > 700 && World.gp !== this.lastCastState && World.cooldownLeft(id) <= 0 && !World.isCasting()) {
-      const s = this.stuck.get(id) || { n: 0, until: 0, miss: 0 };
+    if (id === this.lastCastId && now() - this.lastCastAt < 1500 && now() - this.lastCastAt > 700 && gid === this.lastCastGid && this.rejectionReady(id, gid) && World.gp !== this.lastCastState && World.cooldownLeft(id) <= 0 && !World.isCasting()) {
+      const s = this.stuck.get(this.failureKey(id, gid)) || { n: 0, until: 0, miss: 0 };
       s.miss = (s.miss || 0) + 1;
       if (s.miss >= 2) {
         s.miss = 0;
-        this.stuck.set(id, s);
+        this.stuck.set(this.failureKey(id, gid), s);
         this.fail(id);
         return false;
       }
-      this.stuck.set(id, s);
+      this.stuck.set(this.failureKey(id, gid), s);
     }
     if (!Cmd.skill(id, gid)) return false;
+    while (this.stuck.size > 256) this.stuck.delete(this.stuck.keys().next().value);
     this.lastCastId = id;
     this.lastCastAt = now();
     this.lastCastState = World.gp;
+    this.lastCastGid = gid;
     Stats.count('casts');
     return true;
   },
@@ -7356,7 +7376,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.102", "title": "Fix false blocked-target rejections on normal terrain", "items": ["Removed a two-metre height-difference rejection from the horizontal collision query. Ordinary slopes no longer make nearby monsters look unreachable.", "Missing maps, search limits and failed initial route queries preserve the game's normal approach and targeting. A no-route abandonment now requires fresh state showing an actual sustained lack of movement and confirmed damage.", "Failed-approach memory applies only to the same monster. A failed enemy no longer excludes a different nearby enemy or a party-engaged target beside it."], "note": "This corrects the 1.2.101 targeting regression. Collision-checked detours and confirmed escape recovery remain enabled; live tree-interior recovery still needs gameplay validation."}, {"version": "1.2.101", "title": "Safer obstacle pursuit and confirmed escape recovery", "items": ["Blocked enemies are evaluated before repeated attack approaches. Failed routes retain movement control, stop and release the target, and use bounded retries with short-lived failed-approach memory.", "Detours use cached routes and short collision-checked steps. Party damage and position jitter no longer count as a successful detour, and ranged skills get a bounded trial instead of an assumed walking line-of-sight rule.", "Escape uses validated breadcrumbs or legal nearby steps, retries refused local sends, and requires fresh, stable arrival followed by a second move before resuming. No legal exit means a bounded stop instead of blind movement.", "Settings adds optional recovery recall and local detailed escape diagnostics, both off by default. Recovery recall completes town services and stops in town rather than reversing into the trap."], "note": "Live tree-contact recovery still needs controlled gameplay validation. This release does not change OpenSRO collision rules or provide a server-side teleport."}, {"version": "1.2.100", "title": "Alchemy helper stones: a simple Use switch for each", "items": ["Luck, Steady, Immortal and Astral now each have a Use switch. When it is ticked, the bot fuses a stone automatically before every attempt at or above the plus you set whenever the item has fewer charges than you asked it to keep, so the stones are used while enhancing without any extra clicking.", "Before, a helper only ran when its count was set above zero and the counts started at zero, which made it look as if the stones were never used. The counts now start at 1 and mean how many charges to keep, and old settings keep their helpers switched on.", "The Alchemy tab says which helpers it will use, from which plus and how many charges it keeps, or says that none are ticked."]}, {"version": "1.2.99", "title": "Alchemy tab: every gear kind, rules from +N, odds and a results log", "items": ["The Alchemy tab now enhances weapons, shields, armour and accessories, each with its own elixir (the A and B elixirs of its kind). Before, only weapons worked.", "Rules from a plus: use lucky powder from +N, and Luck, Steady, Immortal and Astral stones from +N. A missing charge is fused automatically from stones of the item's degree before the attempt, so you do not have to fuse them by hand. The defaults follow the server: Steady and Immortal from +5, where a failure can start to destroy or damage the item.", "The tab shows the real odds taken from the server's data: the chance of the next attempt (with powder and Luck counted like the server does) and how many elixirs you should expect to need to reach your target, and the chance of getting there without a single failure.", "A results panel with attempts, successes, failures, destroyed items, the highest plus reached, the success rate, what was used, and a timestamped log of each attempt and fusion."]}, {"version": "1.2.98", "title": "Auto skill upgrades can cover every learned skill", "items": ["New dropdown Skills to upgrade under Settings → Auto mastery and skills: Only skills in my rotations, buffs and imbue (the default, as before) or All skills I have learned. With All, the skills you use are raised first and then every other skill line you already have.", "It still only raises the next level of skills you have already learned, within the game's own rules (mastery level, strength, intelligence, prerequisites, skill points and your reserve). It never learns brand-new skills.", "The status line lists at most the first eight reasons, so a long skill list does not flood it."]}, {"version": "1.2.97", "title": "Auto skill upgrades say what they see", "items": ["The auto mastery and skills status now names each skill it is not raising and why: not learned yet, already at its highest level, mastery or strength too low, a prerequisite missing, or not enough skill points. It also says when your rotations, buffs and imbue hold no skills yet, and when the skills switch is off.", "The skill upgrades only cover skills you already learned that are in your attack rotations, buffs or imbue on the Combat tab. The dropdown that was called Spend skill points on is now Order when both are ticked, because it does nothing unless both switches are on.", "The bug report now includes this status line."]}, {"version": "1.2.96", "title": "Waits for a party resurrection before reviving itself", "items": ["Fixed: with Accept resurrection from party members on, the bot was meant to wait 20 seconds before reviving itself when a party member is around, but the check for a living helper was the wrong way round, so it only waited when the helper was dead. It now waits the 20 seconds whenever a living party member is in view.", "A helper seen in the last 15 seconds still counts, so a moment out of view does not cut the wait short.", "The Activity log now says what it is doing when the character dies, for example Died: waiting 20 s for a party member to resurrect before reviving."]}, {"version": "1.2.95", "title": "Notices a character that cannot move", "items": ["A character that should be walking (chasing, returning or picking up) but has not moved at all for 20 seconds, with nothing being damaged, is now treated as stuck, for example inside a tree. It first steps back to where it just was, then walks to the nearest open ground.", "If both fail, hunting stops with an alert chime and a clear message, instead of the character standing there for minutes. It does not use a return scroll on its own.", "When it happens the Activity log says whether the collision data thinks the character's tile is blocked, and the bug report shows the same, to help find why characters get stuck in trees.", "Settings → Obstacles switches it off or changes the 20 seconds. Tested on the simulated game only; not yet seen on the live server."]}];
+const RELEASE_NOTES = [{"version": "1.2.103", "title": "Fix attack retries carrying over to other monsters", "items": ["Fixed skills being falsely paused while the character was still approaching a monster outside skill reach.", "Attack rejection pauses now apply to the affected monster, so a failed target does not leave skills paused against the next one.", "Silent rejection checks now require the same selected target, known skill reach and fresh game state without pending movement, selection or inventory work."], "note": "The existing weaker-attacker priority remains in effect. Validated with 360 integration tests; live gameplay confirmation is still pending."}, {"version": "1.2.102", "title": "Fix false blocked-target rejections on normal terrain", "items": ["Removed a two-metre height-difference rejection from the horizontal collision query. Ordinary slopes no longer make nearby monsters look unreachable.", "Missing maps, search limits and failed initial route queries preserve the game's normal approach and targeting. A no-route abandonment now requires fresh state showing an actual sustained lack of movement and confirmed damage.", "Failed-approach memory applies only to the same monster. A failed enemy no longer excludes a different nearby enemy or a party-engaged target beside it."], "note": "This corrects the 1.2.101 targeting regression. Collision-checked detours and confirmed escape recovery remain enabled; live tree-interior recovery still needs gameplay validation."}, {"version": "1.2.101", "title": "Safer obstacle pursuit and confirmed escape recovery", "items": ["Blocked enemies are evaluated before repeated attack approaches. Failed routes retain movement control, stop and release the target, and use bounded retries with short-lived failed-approach memory.", "Detours use cached routes and short collision-checked steps. Party damage and position jitter no longer count as a successful detour, and ranged skills get a bounded trial instead of an assumed walking line-of-sight rule.", "Escape uses validated breadcrumbs or legal nearby steps, retries refused local sends, and requires fresh, stable arrival followed by a second move before resuming. No legal exit means a bounded stop instead of blind movement.", "Settings adds optional recovery recall and local detailed escape diagnostics, both off by default. Recovery recall completes town services and stops in town rather than reversing into the trap."], "note": "Live tree-contact recovery still needs controlled gameplay validation. This release does not change OpenSRO collision rules or provide a server-side teleport."}, {"version": "1.2.100", "title": "Alchemy helper stones: a simple Use switch for each", "items": ["Luck, Steady, Immortal and Astral now each have a Use switch. When it is ticked, the bot fuses a stone automatically before every attempt at or above the plus you set whenever the item has fewer charges than you asked it to keep, so the stones are used while enhancing without any extra clicking.", "Before, a helper only ran when its count was set above zero and the counts started at zero, which made it look as if the stones were never used. The counts now start at 1 and mean how many charges to keep, and old settings keep their helpers switched on.", "The Alchemy tab says which helpers it will use, from which plus and how many charges it keeps, or says that none are ticked."]}, {"version": "1.2.99", "title": "Alchemy tab: every gear kind, rules from +N, odds and a results log", "items": ["The Alchemy tab now enhances weapons, shields, armour and accessories, each with its own elixir (the A and B elixirs of its kind). Before, only weapons worked.", "Rules from a plus: use lucky powder from +N, and Luck, Steady, Immortal and Astral stones from +N. A missing charge is fused automatically from stones of the item's degree before the attempt, so you do not have to fuse them by hand. The defaults follow the server: Steady and Immortal from +5, where a failure can start to destroy or damage the item.", "The tab shows the real odds taken from the server's data: the chance of the next attempt (with powder and Luck counted like the server does) and how many elixirs you should expect to need to reach your target, and the chance of getting there without a single failure.", "A results panel with attempts, successes, failures, destroyed items, the highest plus reached, the success rate, what was used, and a timestamped log of each attempt and fusion."]}, {"version": "1.2.98", "title": "Auto skill upgrades can cover every learned skill", "items": ["New dropdown Skills to upgrade under Settings → Auto mastery and skills: Only skills in my rotations, buffs and imbue (the default, as before) or All skills I have learned. With All, the skills you use are raised first and then every other skill line you already have.", "It still only raises the next level of skills you have already learned, within the game's own rules (mastery level, strength, intelligence, prerequisites, skill points and your reserve). It never learns brand-new skills.", "The status line lists at most the first eight reasons, so a long skill list does not flood it."]}, {"version": "1.2.97", "title": "Auto skill upgrades say what they see", "items": ["The auto mastery and skills status now names each skill it is not raising and why: not learned yet, already at its highest level, mastery or strength too low, a prerequisite missing, or not enough skill points. It also says when your rotations, buffs and imbue hold no skills yet, and when the skills switch is off.", "The skill upgrades only cover skills you already learned that are in your attack rotations, buffs or imbue on the Combat tab. The dropdown that was called Spend skill points on is now Order when both are ticked, because it does nothing unless both switches are on.", "The bug report now includes this status line."]}, {"version": "1.2.96", "title": "Waits for a party resurrection before reviving itself", "items": ["Fixed: with Accept resurrection from party members on, the bot was meant to wait 20 seconds before reviving itself when a party member is around, but the check for a living helper was the wrong way round, so it only waited when the helper was dead. It now waits the 20 seconds whenever a living party member is in view.", "A helper seen in the last 15 seconds still counts, so a moment out of view does not cut the wait short.", "The Activity log now says what it is doing when the character dies, for example Died: waiting 20 s for a party member to resurrect before reviving."]}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {

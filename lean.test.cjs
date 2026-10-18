@@ -1376,15 +1376,74 @@ test('combat uses the rotation skill when it can, and explains every normal atta
   f.advance(9000); assert.equal(f.Combat.fallbackNote(), '', 'the reason expires once skills are used again');
   assert.ok(f.Combat.fallbackNote(true), 'but the log wording stays available');
 });
+test('approaching a monster outside skill reach does not poison the rotation', () => {
+  const f = combatFixture();
+  f.World.catalog.get(500).range = 50;
+  f.World.ents.get(30).x = 300;
+  for (let i = 0; i < 8; i++) {
+    f.Combat.fight(f.World.ents.get(30));
+    f.advance(800); f.World.applyGameplay({ ...f.World.gp });
+  }
+  assert.equal(f.Combat.blocked(500), false);
+  assert.ok(f.commands.every(c => c.kind === 'skill'));
+});
+
+test('a rejected attack on one monster does not pause skills against the next monster', () => {
+  const f = combatFixture();
+  f.Combat.cast(500, 30); f.Combat.fail(500);
+  assert.equal(f.Combat.blocked(500), true);
+  f.World.ents.set(31, { ...f.World.ents.get(30), gid: 31 });
+  f.World.applyGameplay({ ...f.World.gp, target: 31 }); f.advance(800);
+  f.Combat.fight(f.World.ents.get(31));
+  assert.equal(f.commands.at(-1).kind, 'skill');
+  assert.equal(f.commands.at(-1).gid, 31);
+  f.World.applyGameplay({ ...f.World.gp, target: 30 });
+  assert.equal(f.Combat.blocked(500), true, 'the failed monster retains its backoff');
+});
+
+test('unknown reach and pending movement cannot establish silent attack rejection', () => {
+  for (const change of [f => {}, f => { f.World.catalog.get(500).range = 50; f.World.gp.pendingMoves = 1; }]) {
+    const f = combatFixture(); change(f);
+    for (let i = 0; i < 5; i++) {
+      assert.equal(f.Combat.cast(500, 30), true);
+      f.advance(800); f.World.applyGameplay({ ...f.World.gp });
+    }
+    assert.equal(f.Combat.blocked(500), false);
+  }
+});
+
+test('confirmed local casts clear the matching target failure and preserve self-skill backoff', () => {
+  const f = combatFixture(); f.Combat.init();
+  f.Combat.cast(500, 30); f.Combat.fail(500);
+  f.bus.emit('cast', { caster: 2, skill: 500, target: 30, results: [] });
+  assert.equal(f.Combat.blocked(500), true, 'another player cannot confirm our skill');
+  f.bus.emit('cast', { caster: 1, skill: 500, results: [{ target: 30, impacts: [] }] });
+  assert.equal(f.Combat.blocked(500), false);
+  f.advance(800); f.Combat.cast(500, 0); f.Combat.fail(500);
+  f.World.applyGameplay({ ...f.World.gp, target: 31 });
+  assert.equal(f.Combat.blocked(500), true, 'self-skill failures still apply across targets');
+});
+
+test('silent rejection evidence never transfers between monsters', () => {
+  const f = combatFixture(); f.World.catalog.get(500).range = 50;
+  f.World.ents.set(31, { ...f.World.ents.get(30), gid: 31 });
+  f.Combat.cast(500, 30);
+  f.advance(800); f.World.applyGameplay({ ...f.World.gp }); f.Combat.cast(500, 30);
+  f.advance(800); f.World.applyGameplay({ ...f.World.gp, target: 31 });
+  assert.equal(f.Combat.cast(500, 31), true);
+  assert.equal(f.Combat.blocked(500), false);
+});
+
 test('a skill is not blamed for a slow game snapshot, only for a real rejection', () => {
   const f = combatFixture(), target = f.World.ents.get(30);
+  f.World.catalog.get(500).range = 50;
   assert.equal(f.Combat.cast(500, 30), true);
   f.advance(400); f.World.applyGameplay({ ...f.World.gp }); assert.equal(f.Combat.cast(500, 30), true);
-  assert.ok(!f.Combat.stuck.get(500)?.miss, 'under 700 ms after a send is never a rejection');
+  assert.ok(!f.Combat.stuck.get(f.Combat.failureKey(500, 30))?.miss, 'under 700 ms after a send is never a rejection');
   f.advance(1000); assert.equal(f.Combat.cast(500, 30), true);
-  assert.ok(!f.Combat.stuck.get(500)?.miss, 'without a newer snapshot nothing can be concluded');
+  assert.ok(!f.Combat.stuck.get(f.Combat.failureKey(500, 30))?.miss, 'without a newer snapshot nothing can be concluded');
   f.advance(800); f.World.applyGameplay({ ...f.World.gp }); assert.equal(f.Combat.cast(500, 30), true);
-  assert.equal(f.Combat.stuck.get(500)?.miss, 1);
+  assert.equal(f.Combat.stuck.get(f.Combat.failureKey(500, 30))?.miss, 1);
   f.advance(800); f.World.applyGameplay({ ...f.World.gp }); assert.equal(f.Combat.cast(500, 30), false);
   assert.equal(f.Combat.blocked(500), true, 'two real rejections still pause the skill');
 });

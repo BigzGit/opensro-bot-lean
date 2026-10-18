@@ -81,10 +81,38 @@ combat = combat.replace(attack_old, """      if (M.imbueBeforeAttack && this.imb
       }""")
 silent_old = "    if (id === this.lastCastId && now() - this.lastCastAt < 1500 && World.cooldownLeft(id) <= 0 && !World.isCasting()) {"
 assert silent_old in combat
-combat = combat.replace(silent_old, "    if (id === this.lastCastId && now() - this.lastCastAt < 1500 && now() - this.lastCastAt > 700 && World.gp !== this.lastCastState && World.cooldownLeft(id) <= 0 && !World.isCasting()) {")
+combat = combat.replace(silent_old, "    if (id === this.lastCastId && now() - this.lastCastAt < 1500 && now() - this.lastCastAt > 700 && gid === this.lastCastGid && this.rejectionReady(id, gid) && World.gp !== this.lastCastState && World.cooldownLeft(id) <= 0 && !World.isCasting()) {")
 send_old = "    this.lastCastId = id;\n    this.lastCastAt = now();"
 assert send_old in combat
-combat = combat.replace(send_old, "    this.lastCastId = id;\n    this.lastCastAt = now();\n    this.lastCastState = World.gp;")
+combat = combat.replace(send_old, "    this.lastCastId = id;\n    this.lastCastAt = now();\n    this.lastCastState = World.gp;\n    this.lastCastGid = gid;")
+# Attack failures belong to the selected entity. A skill send also asks the
+# native client to approach; no cooldown while outside reach is not a rejection.
+combat = combat.replace("  blocked(id) {", """  failureKey(id, gid = 0) {
+    return gid ? `${id}:${gid}` : id;
+  },
+
+  rejectionReady(id, gid) {
+    if (!gid) return true;
+    const skill = World.skill(id), target = World.ents.get(gid);
+    return !!target && skill?.range > 0 && dist2D(World.pose(), target) <= skill.range &&
+      World.gp.target === gid && !World.gp.targetPending && !World.gp.inventoryPending && !World.gp.pendingMoves;
+  },
+
+  blocked(id) {""")
+combat = combat.replace("    const s = this.stuck.get(id);", """    const global = this.stuck.get(id);
+    if (global && now() < global.until) return true;
+    const s = this.stuck.get(this.failureKey(id, World.gp?.target));""", 1)
+combat = combat.replace("  fail(id) {", "  fail(id, gid = id === this.lastCastId ? this.lastCastGid : 0) {")
+combat = combat.replace("    const s = this.stuck.get(id) || { n: 0, until: 0 };", "    const key = this.failureKey(id, gid);\n    const s = this.stuck.get(key) || { n: 0, until: 0 };")
+combat = combat.replace("    this.stuck.set(id, s);", "    this.stuck.set(this.failureKey(id, gid), s);")
+combat = combat.replace("      const s = this.stuck.get(id) || { n: 0, until: 0, miss: 0 };", "      const s = this.stuck.get(this.failureKey(id, gid)) || { n: 0, until: 0, miss: 0 };")
+combat = combat.replace("      if (c.caster === World.localGid()) this.stuck.delete(c.skill);", """      if (c.caster !== World.localGid()) return;
+      this.stuck.delete(c.skill);
+      for (const gid of [c.target, ...(c.results || []).map(r => r.target)]) {
+        if (gid) this.stuck.delete(this.failureKey(c.skill, gid));
+      }""")
+combat = combat.replace("    this.lastCastId = id;", """    while (this.stuck.size > 256) this.stuck.delete(this.stuck.keys().next().value);
+    this.lastCastId = id;""")
 helper_old = "  // One step of fighting the given monster."
 assert helper_old in combat
 combat = combat.replace(helper_old, """  // Why the last normal attack replaced a skill (counts only: no names), for the panel and bug reports.
@@ -171,7 +199,7 @@ skin += '\nconst LEAN_CSS = ' + __import__('json').dumps((base / 'lean-skin.css'
 header = '''// ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.102
+// @version      1.2.103
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -192,7 +220,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.102';
+const VERSION = '1.2.103';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
