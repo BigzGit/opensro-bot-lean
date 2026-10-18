@@ -1727,6 +1727,17 @@ test('a wrong saved arrival point is replaced by where the return scroll actuall
   g.World.gp.returnScroll = false; g.Town.tick(); g.advance(4000); g.Town.tick();
   assert.equal(g.Town.cfg().arrival.x, g.World.gp.pose.x + 760, 'outside any known town the saved point is left alone');
 });
+test('a town can be chosen and set up from anywhere, with the arrival point where its return scroll lands', () => {
+  const f = fixture(), c = f.Town.cfg();
+  f.World.gp.pose = { regionId: 1, x: 100, y: 0, z: 100 };
+  assert.equal(f.Town.autoSetup(false, 'KT') && c.arrival.regionId, 23687, 'chosen town is set up although the character is far away');
+  assert.deepEqual([c.arrival.x, c.arrival.y, c.arrival.z], [1138, 250, 153], 'Hotan arrival is the recall spawn from the server data');
+  assert.equal(c.storage.refObjId, 2083); assert.equal(c.gate.refObjId, 2096); assert.equal(f.Town.validate().includes('Save missing town services'), false);
+  const other = f.Town.autoSetup(true, 'CH');
+  assert.equal(other.town, 'Jangan'); assert.deepEqual([c.arrival.regionId, c.arrival.x, c.arrival.z], [25000, 969, 1369]); assert.equal(c.vendor.refObjId, 2005);
+  for (const town of f.Town.towns) assert.ok(town.arrival && Number.isFinite(town.arrival.x), town.name + ' has an arrival point');
+  assert.equal(f.Town.autoSetup(true, 'nowhere'), null);
+});
 test('automatic town setup detects the town and fills only what is missing', () => {
   const f = fixture(), c = f.Town.cfg(), at = (regionId, x, z) => ({ regionId, x, y: 243, z });
   assert.deepEqual(JSON.parse(JSON.stringify(f.Town.towns.map(t => t.name))), ['Constantinople', 'Donwhang', 'Hotan', 'Jangan', 'Samarkand']);

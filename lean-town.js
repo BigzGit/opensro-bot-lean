@@ -145,19 +145,21 @@ const Town = {
     return { point: first, verified: false };
   },
   // Fills the arrival point and the four services from the town table. Only empty entries are filled unless
-  // `overwrite` is set; an arrival point that belongs to another town replaces everything.
-  autoSetup(overwrite = false) {
+  // `overwrite` is set; an arrival point that belongs to another town replaces everything. A town can be chosen by key:
+  // the arrival point is where its return scroll always lands, so it needs no standing in town; without a key the town
+  // around the character is used.
+  autoSetup(overwrite = false, key = '') {
     if (Hunt.running || this.trip || Restock.recording || !World.inWorld()) { UI.toast('Stop hunting and route recording before setting up the town.', 'warn'); return null; }
     const c = this.cfg(), here = World.pose();
     if (!here) return null;
-    const town = this.detect(here);
+    const town = key ? this.towns.find(t => t.key === key) : this.detect(here);
     if (!town) {
       this.message = 'Automatic setup: no known town around you. Use a return scroll, then press the button where it puts you.';
       UI.toast(this.message, 'warn', 6000); return null;
     }
     if (!(c.arrival && this.detect(c.arrival)?.key === town.key)) overwrite = true;
     const saved = [];
-    if (overwrite || !c.arrival) { c.arrival = { ...here }; saved.push('arrival point'); }
+    if (overwrite || !c.arrival) { c.arrival = { ...(town.arrival || here) }; saved.push('arrival point'); }
     let unverified = 0;
     for (const [role, label] of [['storage', 'warehouse'], ['vendor', 'potion merchant'], ['smith', 'repair merchant'], ['gate', 'world statue']]) {
       if (c[role] && !overwrite) continue;
