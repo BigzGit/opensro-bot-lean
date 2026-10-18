@@ -12,6 +12,22 @@ const STONES = {
   astral: { label: 'Astral', option: 'MATTR_ASTRAL', base: 6883 },
 };
 const STONE_MAX = 6;
+// The attributes an item's stat percentages come from, in the order the server keeps them (alchemy stones.go
+// attributes()): the index is the item's 5-bit variance field. Durability has no stone.
+const ATTRIBUTES = {
+  weapon: ['NATTR_DUR', 'NATTR_PASTR', 'NATTR_MAINT', 'NATTR_HR', 'NATTR_PA', 'NATTR_MA', 'NATTR_CRITICAL'],
+  armor: ['NATTR_DUR', 'NATTR_PDSTR', 'NATTR_MDINT', 'NATTR_PD', 'NATTR_MD', 'NATTR_ER'],
+  shield: ['NATTR_DUR', 'NATTR_PDSTR', 'NATTR_MDINT', 'NATTR_BR', 'NATTR_PD', 'NATTR_MD'],
+  accessory: ['NATTR_PAR', 'NATTR_MAR'],
+};
+const ATTRIBUTE_LABEL = {
+  NATTR_PASTR: 'Phy. reinforce', NATTR_MAINT: 'Mag. reinforce', NATTR_PDSTR: 'Phy. reinforce', NATTR_MDINT: 'Mag. reinforce', NATTR_HR: 'Attack rating',
+  NATTR_PA: 'Phy. attack power', NATTR_MA: 'Mag. attack power', NATTR_CRITICAL: 'Critical', NATTR_PD: 'Phy. defense', NATTR_MD: 'Mag. defense',
+  NATTR_ER: 'Parry rate', NATTR_BR: 'Block rate', NATTR_PAR: 'Phy. absorption', NATTR_MAR: 'Mag. absorption',
+};
+// A fusion rolls a new value in six steps (alchemy stones.go varianceValue). The step is the lowest of four rolls (the
+// item's own magic limit caps it), so the value is one of these; each step needs every roll to reach it.
+const ATTRIBUTE_STEPS = [[7, 22], [13, 41], [19, 61], [25, 80], [31, 100]];
 const STONE_FAILED = 0x23;
 const Alchemy = {
   windowOwner: null, selected: null, run: null, pending: null, result: null, message: 'Select an item from your bag to begin.', started: false,
@@ -54,6 +70,30 @@ const Alchemy = {
   attributesKnown(item) {
     const refs = item?.magicReferences || [];
     return (item?.magic || []).every(encoded => refs.some(r => r.paramId === Number(toBigInt(encoded) & 65535n)));
+  },
+  // Attribute percentages. `index` is the attribute's place in the server's list, which is also its 5-bit slot in the item's variance.
+  attributes(kind) { return (ATTRIBUTES[kind] || []).map((name, index) => ({ name, index })).filter(a => ALCHEMY_DATA.attrStones[a.name] && ATTRIBUTE_LABEL[a.name]); },
+  attrValue(item, index) { return item?.variance === undefined ? 0 : Number((toBigInt(item.variance) >> BigInt(index * 5)) & 31n); },
+  attrValues(item) { return Object.fromEntries(this.attributes(this.kind(item)).map(a => [a.name, this.attrValue(item, a.index)])); },
+  attrTarget(name, cfg = this.cfg()) { return Math.min(31, Math.max(0, Math.floor(Number(cfg.attr?.targets?.[name])) || 0)); },
+  attrPercent(value) { return Math.floor(value * 100 / 31); },
+  // The first attribute below its wanted value, with a bag stone of the item's degree.
+  nextAttr(item, cfg = this.cfg()) {
+    const degree = this.degree(item);
+    for (const a of this.attributes(this.kind(item))) {
+      const target = this.attrTarget(a.name, cfg);
+      if (!target || this.attrValue(item, a.index) >= target) continue;
+      const ref = ALCHEMY_DATA.attrStones[a.name] + degree - 1;
+      const stone = World.items().find(i => i.refObjId === ref && (i.typeFlags & 0xfffe) === 0x15ec && i.quantity > 0 && i.slot >= 13);
+      return stone ? { attr: a, item: stone } : { missing: `No ${ATTRIBUTE_LABEL[a.name]} stone of degree ${degree} in the bag.` };
+    }
+    return null;
+  },
+  // About how many stones one wanted value takes: a fusion works half the time (the stone's own chance, before skill and
+  // avatar bonuses) and then the new value reaches step k only when all four rolls do, ((6 - k) / 6)^4, if the item allows it.
+  attrExpected(target) {
+    const k = ATTRIBUTE_STEPS.findIndex(s => s[0] >= target) + 1;
+    return k > 0 ? 1 / (.5 * Math.pow((6 - k) / 6, 4)) : 0;
   },
   // The helpers switched on, and how many charges of each to keep on the item (1 to 6).
   wanted(cfg = this.cfg()) { return Object.keys(STONES).filter(kind => !!cfg.use?.[kind]); },
@@ -149,12 +189,32 @@ const Alchemy = {
     this.result = this.run; this.message = 'Preparing alchemy.';
     this.note(stonesOnly ? 'Started fusing stones.' : `Started: ${item.name || Items.name(item.refObjId)} +${item.plus} to +${c.target}.`);
   },
+  // Fuse attribute stones until every wanted percentage is reached (or the stones or the limit run out).
+  startAttributes() {
+    if (this.run) return;
+    if (this.pending) return UI.toast('Previous attempt is unconfirmed. Wait for its result; reload if the game cannot settle it.', 'warn');
+    const error = this.blocked(), gp = World.gp, item = this.item(), c = this.cfg();
+    const reject = text => { this.message = text; UI.toast(text, 'warn'); };
+    if (error) return reject(error);
+    if (gp.inventoryPending || !gp.alchemy || gp.alchemy.pending) return reject('Wait for known, settled inventory and alchemy state.');
+    if (!this.gear(item) || this.fingerprint(item) !== this.selected?.fingerprint) return reject('Item changed or moved. Select it again.');
+    if (!this.degree(item)) return reject('Item degree is unknown; cannot choose matching stones.');
+    if (item.variance === undefined) return reject('The item\'s stats are not loaded yet. Try again in a moment.');
+    if (!this.attributes(this.kind(item)).some(a => this.attrTarget(a.name, c))) return reject('Pick at least one attribute percentage to aim for first.');
+    if (!this.nextAttr(item, c)) return reject('The item already has every wanted percentage.');
+    this.run = { kind: 'attr', slot: item.slot, identity: this.identity(item), shape: JSON.stringify([item.slot, item.refObjId, item.typeFlags]), fingerprint: this.fingerprint(item), stonesOnly: false,
+      cfg: JSON.parse(JSON.stringify(c)), config: JSON.stringify(c), manualAt: Manual.lastAt, character: World.charName,
+      attempts: 0, successes: 0, failures: 0, destroyed: 0, highest: item.plus, elixirs: 0, powders: 0, stoneAttempts: 0, stoneFailures: 0, attrFused: 0,
+      stonesUsed: { luck: 0, steady: 0, immortal: 0, astral: 0 }, nextAt: now(), opening: null };
+    this.result = this.run; this.message = 'Preparing attribute stones.';
+    this.note(`Started attribute stones on ${item.name || Items.name(item.refObjId)}.`);
+  },
   stop(reason = 'Alchemy stopped. An attempt already sent may still finish.') {
     if (this.run) { this.note(reason); this.run = null; this.message = reason; }
     // Close only a session we opened/used, on the same character. Native close
     // does not cancel reinforcement; keep the pending result until confirmed.
     const owner = this.windowOwner; this.windowOwner = null;
-    if (owner && owner.character === World.charName && World.inWorld() && ['reinforce', 'magic'].includes(World.gp?.alchemy?.mode))
+    if (owner && owner.character === World.charName && World.inWorld() && ['reinforce', 'magic', 'attribute'].includes(World.gp?.alchemy?.mode))
       Cmd.raw({ kind: 'alchemy-close' }, 'Close alchemy');
   },
   init() {
@@ -169,7 +229,7 @@ const Alchemy = {
     const p = this.pending, gp = World.gp, a = gp?.alchemy;
     if (!p || !a || gp === p.state) return;
     if (a.pending) {
-      if (a.mode !== (p.stone ? 'magic' : 'reinforce') || a.slot !== p.run.slot) this.stop('Alchemy state changed unexpectedly. Wait for the outstanding result.');
+      if (a.mode !== (p.mode || (p.stone ? 'magic' : 'reinforce')) || a.slot !== p.run.slot) this.stop('Alchemy state changed unexpectedly. Wait for the outstanding result.');
       return;
     }
     if (a !== p.before && a.error !== null && a.error !== undefined) {
@@ -212,7 +272,22 @@ const Alchemy = {
       0x22: 'the weapon is at 6 of that stone or has no free magic option slot', 0x24: 'an Astral stone needs more Immortal charges' }[code];
     return `Stone fusion refused by the game (code ${code}${why ? ': ' + why : ''}).`;
   },
+  // An attribute fusion is confirmed the same way: one stone leaves the bag. The item's own percentages change, so only its shape is checked.
+  observeAttribute(p, gp, failed = false) {
+    if (gp.inventoryPending || Restock.count(p.stone.ref) !== p.stone.before - 1) return;
+    const item = World.items().find(i => i.slot === p.run.slot);
+    if (!this.gear(item) || JSON.stringify([item.slot, item.refObjId, item.typeFlags]) !== p.run.shape) { this.stop('Item changed. Outstanding result requires manual review.'); return; }
+    const label = ATTRIBUTE_LABEL[p.stone.attr], before = p.stone.values, after = this.attrValues(item);
+    this.pending = null; p.run.attrFused++; if (failed) p.run.stoneFailures++;
+    const shown = n => this.attrPercent(n) + '%', others = Object.keys(after).filter(k => k !== p.stone.attr && after[k] !== before[k]).map(k => `${ATTRIBUTE_LABEL[k]} ${shown(before[k])} → ${shown(after[k])}`);
+    this.note(failed ? `${label} stone failed and was used up` : `${label}: ${shown(before[p.stone.attr])} → ${shown(after[p.stone.attr])}` + (others.length ? ` (also changed: ${others.join(', ')})` : ''));
+    p.run.fingerprint = this.fingerprint(item); this.selected = { slot: item.slot, fingerprint: p.run.fingerprint };
+    p.run.nextAt = now() + 1000;
+    if (this.run !== p.run) return;
+    this.message = failed ? `The ${label} fusion failed and the stone was used up.` : `${label} is now ${shown(after[p.stone.attr])}.`;
+  },
   observeStone(p, gp, failed = false) {
+    if (p.stone.kind === 'attr') return this.observeAttribute(p, gp, failed);
     if (gp.inventoryPending || Restock.count(p.stone.ref) !== p.stone.before - 1) return;
     const item = World.items().find(i => i.slot === p.run.slot), label = STONES[p.stone.kind].label;
     if (!this.gear(item) || this.identity(item) !== p.run.identity) { this.stop('Weapon identity changed. Outstanding result requires manual review.'); return; }
@@ -234,7 +309,7 @@ const Alchemy = {
     if (this.pending) { this.message = 'Attempt ' + r.attempts + ': waiting for server result.'; return; }
     const item = World.items().find(i => i.slot === r.slot);
     if (!this.gear(item) || this.fingerprint(item) !== r.fingerprint) return this.stop('Weapon changed or moved. Select it again.');
-    if (!r.stonesOnly && (r.attempts >= r.cfg.limit || item.plus >= r.cfg.target)) return this.stop('Target or attempt limit reached.');
+    if (r.kind !== 'attr' && !r.stonesOnly && (r.attempts >= r.cfg.limit || item.plus >= r.cfg.target)) return this.stop('Target or attempt limit reached.');
     if (!gp.alchemy) return this.stop('Alchemy state unavailable.');
     if (gp.inventoryPending || gp.alchemy.pending || Loot.pressed()) { this.message = 'Alchemy waiting for inventory or potion use.'; return; }
     if (!gp.alchemy.visible) {
@@ -246,6 +321,23 @@ const Alchemy = {
     }
     if (r.opening !== null) r.opening = null;
     if (now() < r.nextAt || !Cmd.spaced('alchemy-start')) return;
+    if (r.kind === 'attr') {
+      const next = this.nextAttr(item, r.cfg);
+      if (!next) return this.stop('Every wanted percentage is reached.');
+      if (next.missing) return this.stop(next.missing);
+      const cap = Math.max(1, Math.floor(Number(r.cfg.attr?.limit) || 100));
+      if (r.stoneAttempts >= cap) return this.stop(`Stopped after ${cap} attribute stones (your limit).`);
+      const slots = [item.slot, next.item.slot];
+      if (slots.some(slot => !Number.isInteger(slot) || slot < 13 || slot > 255) || new Set(slots).size !== slots.length) return this.stop('Invalid material slots.');
+      if (Cmd.raw({ kind: 'alchemy-start', mode: 'attribute', slots }, 'Alchemy: fuse a ' + ATTRIBUTE_LABEL[next.attr.name] + ' stone')) {
+        this.windowOwner = { character: r.character };
+        r.stoneAttempts++;
+        this.pending = { run: r, state: gp, before: gp.alchemy, at: now(), plus: item.plus, mode: 'attribute',
+          stone: { kind: 'attr', attr: next.attr.name, ref: next.item.refObjId, before: Restock.count(next.item.refObjId), values: this.attrValues(item) } };
+        this.message = `Fusing a ${ATTRIBUTE_LABEL[next.attr.name]} stone: waiting for the server result.`;
+      }
+      return;
+    }
     const need = this.nextStone(item, r.cfg, r.stonesOnly ? Infinity : item.plus);
     if (need?.missing) return this.stop(`No ${STONES[need.missing].label} stone of degree ${this.degree(item)} in the bag.`);
     if (need) {
@@ -300,11 +392,28 @@ const Alchemy = {
     stones.append(UI.row(UI.button('Fuse stones now', () => this.start(true)), UI.button('Stop', () => this.stop())),
       el('p', 'Each stone adds a charge to the item, up to 6. Tick Use for the stones you want. Before every attempt at or above the plus you set, if the item has fewer charges than you asked to keep, one is fused automatically from a stone of the item\'s degree in your bag. Luck adds 5% to the chance, Steady stops the durability damage and Immortal stops the destruction when an enhancement fails from +5, and Astral keeps +4 instead of resetting to 0 (it needs Immortal charges). A fusion can fail and use up the stone. Stops if a stone is missing, the game refuses, or when it reaches the fusion limit above (off by default). Fuse stones now ignores the plus and only fills the charges.', 'muted'));
     UI.pane.append(stones);
+    const attrs = UI.group('Item attributes (stat percentages)');
+    UI.attrRows = el('div'); UI.attrNote = el('p', '', 'muted'); attrs.append(UI.attrRows, UI.attrNote);
+    attrs.append(UI.number('Stop after this many attribute stones', () => c().attr.limit, n => c().attr.limit = n, 1, 1000),
+      UI.row(UI.button('Fuse attribute stones', () => this.startAttributes()), UI.button('Stop', () => this.stop())),
+      el('p', 'Pick the lowest percentage you want for each stat of the item selected above, then start. The bot fuses attribute stones of the item\'s degree until every picked stat reaches its target, working down the list. Every successful fusion rolls the stat again, so it can also come out lower, and it can re-roll another stat of the item. The chance is 50% per stone before bonuses, and the higher steps get rare fast: 80% and 100% can take hundreds of stones. The item\'s own limit may stop it ever reaching the higher steps, so set a stone limit.', 'muted'));
+    UI.pane.append(attrs);
     const results = UI.group('Results');
     UI.alchemyStats = el('p', '', 'muted'); UI.alchemyLog = el('p', '', 'muted');
     results.append(UI.alchemyStats, UI.alchemyLog, UI.button('Clear results', () => { this.result = null; this.log.length = 0; this.refresh(); }));
     UI.pane.append(results);
+    this.drawAttributes();
     this.refresh();
+  },
+  drawAttributes() {
+    const item = this.item(), c = this.cfg();
+    if (!UI.attrRows) return;
+    UI.attrRows.replaceChildren();
+    if (!this.gear(item)) { UI.attrRows.append(el('p', 'Select an item above to choose its percentages.', 'muted')); return; }
+    for (const a of this.attributes(this.kind(item))) {
+      const options = [[0, 'Leave alone'], ...ATTRIBUTE_STEPS.map(([value, percent]) => [value, `${percent}% or better`])];
+      UI.attrRows.append(UI.select(`${ATTRIBUTE_LABEL[a.name]} (now ${this.attrPercent(this.attrValue(item, a.index))}%)`, options, () => this.attrTarget(a.name, c), v => { c.attr.targets[a.name] = Number(v); this.refresh(); }));
+    }
   },
   refresh() {
     if (UI.current !== 'Alchemy' || !UI.alchemyNote) return;
@@ -325,9 +434,16 @@ const Alchemy = {
     if (UI.alchemyStats) {
       UI.alchemyStats.textContent = r
         ? `Attempts ${r.attempts} · Success ${r.successes} · Failed ${r.failures} · Destroyed ${r.destroyed || 0} · Highest + ${r.highest ?? 0}` + (r.attempts ? ` · Success rate ${Math.round(r.successes / r.attempts * 100)}%` : '') +
-          `\nUsed: elixirs ${r.elixirs} · powder ${r.powders} · stones ${Object.entries(STONES).map(([k, s]) => `${s.label} ${r.stonesUsed?.[k] || 0}`).join(' / ')}`
+          `\nUsed: elixirs ${r.elixirs} · powder ${r.powders} · attribute stones ${r.attrFused || 0} · stones ${Object.entries(STONES).map(([k, s]) => `${s.label} ${r.stonesUsed?.[k] || 0}`).join(' / ')}`
         : 'No results yet.';
       UI.alchemyLog.textContent = this.log.slice(-12).map(l => new Date(l.at).toLocaleTimeString('en-GB') + '  ' + l.text).join('\n');
+    }
+    // The attribute rows show the item's current percentages, so they are rebuilt when its stats change.
+    const attrKey = item ? JSON.stringify([item.slot, item.refObjId, item.variance]) : '';
+    if (UI.attrRows && UI.attrRows.dataset.key !== attrKey) { UI.attrRows.dataset.key = attrKey; this.drawAttributes(); }
+    if (UI.attrNote) {
+      const wanted = item && this.gear(item) ? this.attributes(this.kind(item)).filter(a => this.attrTarget(a.name, c)) : [];
+      UI.attrNote.textContent = wanted.length ? 'Aiming for: ' + wanted.map(a => `${ATTRIBUTE_LABEL[a.name]} ${this.attrPercent(this.attrTarget(a.name, c))}%+ (about ${Math.round(this.attrExpected(this.attrTarget(a.name, c)))} stones)`).join(' · ') : '';
     }
     const key = item ? item.refObjId + ':' + item.plus + ':' + item.slot : '';
     if (UI.alchemyPreview.dataset.item !== key) {

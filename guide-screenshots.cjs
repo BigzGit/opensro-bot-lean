@@ -54,6 +54,7 @@ const gameplay = { localGid: 1, target: 0, targetPending: false, inventoryPendin
     { slot: 6, refObjId: 10, typeFlags: (2 << 11) | (6 << 7) | 44, plus: 7, name: 'Main weapon' },
     potion(13, 8, 2284, 187, 'HP potion (X-Large)', 900), potion(14, 15, 4332, 342, 'MP potion (X-Large)', 600),
     potion(15, 22, (3 << 11) | 236, 64, 'Vigor potion (X-Large)', 900),
+    { slot: 18, refObjId: 300, typeFlags: 44 | (6 << 7), plus: 4, durability: 100, variance: String(19n << 20n | 7n << 5n), magic: [], quantity: 1, name: 'Dragon Blade', tooltip: { fields: { itemClass: 25 } } },
     { slot: 16, refObjId: 200, typeFlags: 0x09ec, quantity: 5, name: 'Return scroll' }, { slot: 17, refObjId: 201, typeFlags: 0x19ec, quantity: 5, name: 'Reverse return scroll' },
   ],
   inventorySlotCount: 45, equipmentSlotCount: 13, skills: skills.map(s => s.id), vitals: [{ gid: 1, hp: 2900, mp: 1500, maxHp: 3200, maxMp: 1800 }],
@@ -121,7 +122,7 @@ const gameplay = { localGid: 1, target: 0, targetPending: false, inventoryPendin
     await jump('Potion restock'); await snap('07-restock');
     await tab('Town'); await snap('08-town-triggers');
     await jump('Scroll town cycle'); await snap('08-town-cycle');
-    await tab('Alchemy'); await snap('09-alchemy'); await jump('Stones that help and protect'); await snap('09b-alchemy-stones');
+    await tab('Alchemy'); await page.locator('#sro-bot-lean select').first().selectOption({ index: 1 }); await page.waitForTimeout(300); await snap('09-alchemy'); await jump('Stones that help and protect'); await snap('09b-alchemy-stones'); await jump('Item attributes'); await snap('09c-alchemy-attributes');
     await tab('Party'); await snap('13-party');
     await tab('Settings'); await snap('10-settings');
     await jump('Anti-stuck'); await snap('11-anti-stuck');

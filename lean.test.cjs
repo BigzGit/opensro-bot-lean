@@ -2944,6 +2944,62 @@ test('alchemy fuses stones before the elixirs, in order, and stops when a stone 
   assert.equal(g.Alchemy.run, null); assert.match(g.Alchemy.message, /No Steady stone of degree 9 in the bag/);
   assert.equal(g.commands.filter(c => c.mode === 'reinforce').length, 0);
 });
+function attributeFixture(targets = { NATTR_PA: 19 }, limit = 100) {
+  const f = alchemyFixture(); const a = f.Settings.profile.alchemy;
+  f.World.gp.inventory = f.World.gp.inventory.map(i => i.slot === 13 ? { ...i, variance: '0' } : i);
+  f.World.gp.inventory.push({ slot: 16, refObjId: 6903, typeFlags: 0x15ec, quantity: 5 }, { slot: 17, refObjId: 6915, typeFlags: 0x15ec, quantity: 5 });
+  a.attr.targets = { ...targets }; a.attr.limit = limit; f.Alchemy.select(13);
+  // The game fuses one stone: the bag loses it and the item's percentages change (variance is five bits per attribute).
+  f.fuse = (slot, values, error = null) => {
+    const gp = f.World.gp, variance = String(Object.entries(values).reduce((n, [index, v]) => n | BigInt(v) << BigInt(index * 5), 0n));
+    const inventory = gp.inventory.map(i => i.slot === slot ? { ...i, quantity: i.quantity - 1 } : i.slot === 13 ? { ...i, variance } : i);
+    f.World.applyGameplay({ ...gp, inventory, inventoryPending: false, alchemy: { ...gp.alchemy, pending: false, mode: 'attribute', flags: error === null ? 0x10 : 0, slot: 13, error } });
+    f.Controller.tick();
+  };
+  return f;
+}
+const sent = f => JSON.parse(JSON.stringify(f.commands.at(-1)));
+test('attribute stones: fuses the wanted attribute until its percentage is reached, then stops', () => {
+  const f = attributeFixture();
+  assert.equal(f.Alchemy.attrValue(f.Alchemy.item(), 4), 0);
+  f.Alchemy.startAttributes(); f.Controller.tick();
+  assert.deepEqual(sent(f), { kind: 'alchemy-start', mode: 'attribute', slots: [13, 16] }, 'the Phy. attack power stone of the item degree');
+  for (let n = 0; n < 8; n++) { f.advance(100); f.Controller.tick(); }
+  assert.equal(f.commands.length, 1, 'nothing more is sent before the result');
+  f.fuse(16, { 4: 7 }); assert.match(f.Alchemy.message, /Phy\. attack power is now 22%/);
+  f.advance(1500); f.Controller.tick(); assert.equal(f.commands.length, 2, 'still below 61%, so another follows');
+  f.fuse(16, { 4: 3 }); f.advance(1500); f.Controller.tick(); assert.equal(f.commands.length, 3, 'a lower roll is rolled again');
+  f.fuse(16, { 4: 19 }); f.advance(1500); f.Controller.tick();
+  assert.equal(f.Alchemy.run, null); assert.match(f.Alchemy.message, /wanted percentage is reached/); assert.equal(f.commands.at(-1).kind, 'alchemy-close');
+  assert.equal(f.Alchemy.result.attrFused, 3);
+});
+test('attribute stones: a failed fusion is used up and the loop goes on', () => {
+  const f = attributeFixture(); f.Alchemy.startAttributes(); f.Controller.tick();
+  f.fuse(16, {}, 0x23); assert.match(f.Alchemy.message, /fusion failed/); assert.equal(f.Alchemy.result.stoneFailures, 1);
+  f.advance(1500); f.Controller.tick(); assert.equal(f.commands.length, 2);
+});
+test('attribute stones: several attributes are worked down the list and a changed other stat is logged', () => {
+  const f = attributeFixture({ NATTR_PASTR: 7, NATTR_PA: 13 });
+  f.Alchemy.startAttributes(); f.Controller.tick();
+  assert.deepEqual(sent(f), { kind: 'alchemy-start', mode: 'attribute', slots: [13, 17] }, 'Phy. reinforce comes before Phy. attack power');
+  f.fuse(17, { 1: 7, 4: 25 }); assert.match(f.Alchemy.log.at(-1).text, /Phy\. reinforce: 0% → 22% \(also changed: Phy\. attack power 0% → 80%\)/);
+  f.advance(1500); f.Controller.tick(); assert.equal(f.Alchemy.run, null, 'the other stat already reached its target');
+});
+test('attribute stones: need a target, a matching stone and respect the stone limit', () => {
+  const none = attributeFixture({}); none.Alchemy.startAttributes(); assert.equal(none.Alchemy.run, null); assert.match(none.Alchemy.message, /at least one attribute/);
+  const missing = attributeFixture(); missing.World.gp.inventory = missing.World.gp.inventory.filter(i => i.slot !== 16);
+  missing.Alchemy.startAttributes(); missing.Controller.tick(); assert.equal(missing.Alchemy.run, null); assert.match(missing.Alchemy.message, /No Phy\. attack power stone of degree 9/);
+  const capped = attributeFixture({ NATTR_PA: 25 }, 1); capped.Alchemy.startAttributes(); capped.Controller.tick(); capped.fuse(16, { 4: 7 }); capped.advance(1500); capped.Controller.tick();
+  assert.equal(capped.Alchemy.run, null); assert.match(capped.Alchemy.message, /Stopped after 1 attribute stones/);
+  assert.equal(capped.commands.filter(c => c.mode === 'attribute').length, 1);
+});
+test('attribute stones: the tab lists the item stats and gives a rough stone count', () => {
+  const f = attributeFixture();
+  assert.deepEqual([...f.Alchemy.attributes('accessory').map(a => a.name)], ['NATTR_PAR', 'NATTR_MAR']);
+  assert.equal([...f.Alchemy.attributes('weapon').map(a => a.name)].includes('NATTR_DUR'), false, 'durability has no stone');
+  assert.ok(f.Alchemy.attrExpected(7) < f.Alchemy.attrExpected(19) && f.Alchemy.attrExpected(19) < f.Alchemy.attrExpected(31));
+  assert.equal(f.Alchemy.attrPercent(31), 100); assert.equal(f.Alchemy.attrPercent(7), 22);
+});
 test('the stone fusion limit is optional: off by default, and a set limit stops the run', () => {
   const f = stoneFixture(); f.Alchemy.start(true); assert.equal(f.Alchemy.run.cfg.stoneLimit, 0);
   f.Alchemy.run.stoneAttempts = 500; f.advance(1500); f.Controller.tick();

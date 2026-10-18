@@ -10,10 +10,16 @@ from pathlib import Path
 folder = Path(sys.argv[1] if len(sys.argv) > 1 else r'C:\sroserver\opensro\apps\server\.generated\game-data\1.150\server\textdata')
 ELIXIRS = {'weapon': (3675, 3679), 'shield': (3676, 3680), 'armor': (3677, 3681), 'accessory': (3678, 3682)}
 rows = {}
+stones = {}  # attribute name -> {degree: item id}
 for path in sorted(glob.glob(str(folder / 'itemdata_*.txt'))):
     for line in open(path, encoding='utf-16', errors='replace'):
         a = line.rstrip('\r\n').split('\t')
-        if len(a) < 128 or a[0] != '1' or not a[2].startswith('ITEM_ETC_ARCHEMY_REINFORCE_'):
+        if len(a) < 128 or a[0] != '1':
+            continue
+        if a[2].startswith('ITEM_ETC_ARCHEMY_ATTRSTONE_'):
+            stones.setdefault(a[119], {})[int(a[118])] = int(a[1])
+            continue
+        if not a[2].startswith('ITEM_ETC_ARCHEMY_REINFORCE_'):
             continue
         params = [int(a[118 + 2 * i]) & 0xffffffff for i in range(5)]
         rows[int(a[1])] = (a[2], params)
@@ -21,7 +27,12 @@ for path in sorted(glob.glob(str(folder / 'itemdata_*.txt'))):
 def chances(params):
     return [params[1 + p // 4] >> ((3 - p % 4) * 8) & 255 for p in range(12)]
 
-data = {'elixirs': {}, 'powders': {}, 'kinds': {k: list(v) for k, v in ELIXIRS.items()}}
+# Attribute stones (item type 3,3,11,2): one item per degree 1..12 in consecutive ids, so the first id is enough.
+attr = {}
+for name, byDegree in stones.items():
+    assert sorted(byDegree) == list(range(1, 13)) and all(byDegree[d] == byDegree[1] + d - 1 for d in byDegree), name
+    attr[name] = byDegree[1]
+data = {'attrStones': attr, 'elixirs': {}, 'powders': {}, 'kinds': {k: list(v) for k, v in ELIXIRS.items()}}
 for ids in ELIXIRS.values():
     for i in ids:
         data['elixirs'][i] = chances(rows[i][1])

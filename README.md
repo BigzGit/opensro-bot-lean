@@ -79,6 +79,10 @@ Under **Stones that help and protect** tick **Use Luck / Steady / Immortal / Ast
 
 Stops at the target, attempt limit or missing materials. Failures can reduce +, damage or destroy the weapon. **Stop alchemy**, **Stop all** or **F8** prevents further attempts; a sent attempt can still finish. Unconfirmed results pause without retrying.
 
+### Item attributes
+
+Under **Item attributes (stat percentages)** pick, for the item selected above, the lowest percentage you want for each stat (for a weapon: Phy. reinforce, Mag. reinforce, attack rating, Phy. and Mag. attack power, critical; armour, shields and accessories have their own list). Press **Fuse attribute stones**: the bot fuses attribute stones of the item's degree, working down the list, until every picked stat reaches its target. A successful fusion rolls the stat again, so it can come out lower, and it can re-roll another stat of the item, so the bot keeps checking all picked stats. The stone chance is 50% before bonuses and the high steps (80%, 100%) are rare, so set **Stop after this many attribute stones** (100 by default). It stops if a stone of the right kind is missing from the bag.
+
 ## Healing and buffing the party
 
 On the **Party** page tick **Buff and heal party members** (off by default). The bot then supports the party with your own skills, one cast at a time, in this order:
