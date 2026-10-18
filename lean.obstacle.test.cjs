@@ -509,6 +509,15 @@ module.exports = function runObstacleTests( { fixture, combatFixture, navProduct
 		assert.equal( began, 1 );
 		assert.equal( f.Hunt.running, false );
 	});
+	test("a recall trip that does not start still stops hunting", () => {
+		const f = trapped();
+		f.Settings.profile.hunt.trap.recall = true;
+		f.Town.cfg().enabled = true;
+		f.Town.validate = () => "";
+		f.Town.begin = () => {};
+		f.Trap.fail( "blocked" );
+		assert.equal( f.Hunt.running, false );
+	});
 	test("manual takeover, stop and epoch changes discard stale escape movement", () => {
 		for (
 			const cancel of [ f => f.Manual.lastAt = 200000, f => f.Hunt.stop(), f => {

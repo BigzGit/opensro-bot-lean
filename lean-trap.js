@@ -202,8 +202,10 @@ const Trap = {
 			Town.begin();
 			// A recovery trip ends in town. Automatically reversing would reenter
 			// the same blocked origin, so this safety trip never spends a reverse.
-			if ( Town.trip ) Town.trip.recovery = true;
-			return;
+			if ( Town.trip ) {
+				Town.trip.recovery = true;
+				return;
+			}
 		}
 		Hunt.stop( "character cannot move (trapped): " + reason );
 	},
