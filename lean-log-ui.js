@@ -79,7 +79,7 @@ UI.showActivityExport = function() {
 		} );
 		this.activityExportRefresh = refresh;
 		this.activityExportBox = this.windowFrame( "Activity export", () => { this.activityExportBox.hidden = true; },
-			el( "p", "Standard export omits message text, names and locations. Raw local export may contain private details. Review before sharing. Nothing is uploaded.", "muted" ),
+			el( "p", "Standard export omits message text, names and locations. It includes retained refusal diagnostics even when filters hide them. Raw local export may contain private details. Review before sharing. Nothing is uploaded.", "muted" ),
 			this.field( "Include raw local messages", raw ), this.field( "Export format", format ), preview,
 			this.row( this.button( "Refresh preview", refresh ), this.button( "Select preview to copy", () => { preview.focus(); preview.select(); } ), download ) );
 		this.activityExportBox.classList.add( "activity-export" );

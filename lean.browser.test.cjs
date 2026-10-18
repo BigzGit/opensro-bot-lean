@@ -875,6 +875,20 @@ const server = http.createServer((req, res) => {
       await navigator.clipboard.writeText(window.clipboardBeforeLogTest);
       delete window.clipboardBeforeLogTest;
     });
+    await page.evaluate(() => {
+      for (let i = 0; i < 5; i++) SROLean.activity.refusal('Cast rejected: 5');
+      SROLean.ui.updateSession();
+    });
+    const notReady = settingsHistory.locator('li').filter({ hasText: 'Skill not ready yet.' });
+    assert.equal(await notReady.count(), 1);
+    assert.equal(await notReady.locator('.activity-repeat').innerText(), '×5');
+    assert.doesNotMatch(await notReady.innerText(), /Warning:|couldn’t complete the request/);
+    await activityPanel.getByRole('button', { name: 'Export preview', exact: true }).click();
+    const refusalExport = JSON.parse(await activityPreview.inputValue()).events.find(entry => entry.code === 'cast-not-ready');
+    assert.equal(refusalExport.failure.source, 'cast');
+    assert.match(refusalExport.failure.explanation, /cooling down.*recovering/);
+    assert.equal(refusalExport.repeatCount, 5);
+    await page.getByRole('button', { name: 'Close activity export', exact: true }).click();
     assert.deepEqual(errors,[]);
     // All reporting traffic is intercepted; capture uses a synthetic canvas, never the user's screen.
     await page.setViewportSize({width:1200,height:1000});

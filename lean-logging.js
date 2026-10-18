@@ -61,6 +61,7 @@ const Activity = {
 				sessionId: this.session, epoch: Number.isSafeInteger( World.epoch ) ? World.epoch : null,
 				operationId: Number.isSafeInteger( event.operationId ) ? event.operationId : null, details, repeatCount: 1 };
 			entry.userText = event.userText ? String( event.userText ).slice( 0, ACTIVITY_LIMIT.text ) : null;
+			if ( event.failure && this.safeFailure ) entry.failure = this.safeFailure( event.failure );
 			if ( entry.code === "target-selected" ) {
 				const name = World.ents.get( details.monsterId )?.name || "a monster";
 				entry.userText = "Targeting " + name + (details.attackingPlayer ? " — it’s attacking you." : ".");
@@ -69,11 +70,12 @@ const Activity = {
 				entry.userText = "Couldn’t reach " + (World.ents.get( details.monsterId )?.name || "the monster") + "; looking for another target.";
 			}
 			if ( entry.userText ) entry.userText = entry.userText.slice( 0, ACTIVITY_LIMIT.text );
-			const rows = level === "cmd" ? this.commands : Log.lines;
+			const rows = event.diagnosticOnly ? this.refusals : level === "cmd" ? this.commands : Log.lines;
 			const previous = rows[rows.length - 1];
 			if ( previous && previous.code === entry.code && previous.text === text && previous.level === level &&
 				previous.category === category && previous.userText === entry.userText && previous.operationId === entry.operationId && previous.sessionId === entry.sessionId &&
 				previous.epoch === entry.epoch && previous.outcome === entry.outcome &&
+				JSON.stringify( previous.failure ) === JSON.stringify( entry.failure ) &&
 				JSON.stringify( previous.details ) === JSON.stringify( details ) && entry.mono - previous.lastMono < ACTIVITY_LIMIT.repeatMs ) {
 				previous.repeatCount++;
 				previous.lastAt = entry.at;
@@ -83,7 +85,7 @@ const Activity = {
 			}
 			entry.lastMono = entry.mono;
 			rows.push( entry );
-			const limit = level === "cmd" ? ACTIVITY_LIMIT.commands : ACTIVITY_LIMIT.normal;
+			const limit = event.diagnosticOnly ? 400 : level === "cmd" ? ACTIVITY_LIMIT.commands : ACTIVITY_LIMIT.normal;
 			if ( rows.length > limit ) rows.splice( 0, rows.length - limit );
 			this.revision++;
 			bus.emit( "log", entry );
@@ -137,16 +139,17 @@ const Activity = {
 		this.filters.detailed = enabled;
 		this.emit( { category: "settings", code: "capture-changed", text: enabled ? "Detailed command capture enabled for 10 minutes; kept locally." : "Detailed command capture stopped." } );
 	},
-	visible() {
+	visible( exporting = false ) {
 		const search = this.filters.search.toLowerCase();
-		return [ ...Log.lines, ...(this.filters.detailed ? this.commands : []) ].sort( ( a, b ) => a.id - b.id ).filter( entry =>
-			(this.filters.category === "all" || entry.category === this.filters.category) &&
+		return [ ...Log.lines, ...(this.filters.detailed ? this.commands : []), ...this.refusals ].sort( ( a, b ) => a.id - b.id ).filter( entry =>
+			(exporting && entry.failure) || (this.filters.category === "all" || entry.category === this.filters.category) &&
 			(this.filters.level === "all" || entry.level === this.filters.level) &&
 			(!search || (this.userMessage( entry ) + " " + entry.text + " " + entry.code).toLowerCase().includes( search )) );
 	},
 	clear() {
 		Log.lines.length = 0;
 		this.commands.length = 0;
+		this.refusals.length = 0; this.refusalGroups.clear();
 		this.revision++;
 	},
 
@@ -190,13 +193,13 @@ const Activity = {
 	================
 	*/
 	export( raw = false, format = "json" ) {
-		const events = this.visible().map( entry => ( { id: entry.id, at: entry.at, lastAt: entry.lastAt,
+		const events = this.visible( true ).map( entry => ( { id: entry.id, at: entry.at, lastAt: entry.lastAt,
 			level: entry.level, category: entry.category, code: entry.code, outcome: entry.outcome,
 			sessionId: entry.sessionId, epoch: entry.epoch, operationId: entry.operationId,
-			repeatCount: entry.repeatCount, details: entry.details, ...(raw ? { text: entry.text, userMessage: this.userMessage( entry ) } : {}) } ) );
+			repeatCount: entry.repeatCount, details: entry.details, ...(entry.failure ? { failure: entry.failure, failureSamples: entry.failureSamples || [] } : {}), ...(raw ? { text: entry.text, userMessage: this.userMessage( entry ) } : {}) } ) );
 		if ( format === "text" ) return events.map( entry => new Date( entry.at ).toISOString() + " [" + entry.level + "] [" + entry.category + "] " +
-			(entry.outcome || "event") + " " + entry.code + " ×" + entry.repeatCount + (raw ? ": " + entry.text : "") + " " + JSON.stringify( entry.details ) ).join( "\n" );
-		return JSON.stringify( { version: VERSION, schema: 2, distanceUnits: "game units (10 per metre)", raw, events }, null, 2 );
+			(entry.outcome || "event") + " " + entry.code + " ×" + entry.repeatCount + (raw ? ": " + entry.text : "") + " " + JSON.stringify( entry.details ) + (entry.failure ? " " + JSON.stringify( { failure: entry.failure, failureSamples: entry.failureSamples || [] } ) : "") ).join( "\n" );
+		return JSON.stringify( { version: VERSION, schema: 3, distanceUnits: "game units (10 per metre)", raw, events }, null, 2 );
 	},
 
 	/*
@@ -231,8 +234,7 @@ Log.add = function( level, text ) {
 	return Activity.emit( { level, text, outcome: level === "cmd" ? "requested" : null } );
 };
 bus.on( "game-error", text => {
-	Activity.emit( { category: "engine", level: "warn", code: "game-refusal", outcome: "refused", text: "Game reported: " + text,
-		details: { errorCode: Number( String( text ).match( /(?:rejected:|error:)\s*(\d+)/i )?.[1] ) || undefined } } );
+	Activity.refusal( text );
 } );
 bus.on( "hunt", running => {
 	if ( running ) {

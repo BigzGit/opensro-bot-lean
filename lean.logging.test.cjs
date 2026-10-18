@@ -7,6 +7,77 @@ Tests activity independently of gameplay decisions using the bot fixture.
 */
 module.exports = function loggingTests( { test, fixture, townFixture } ) {
 	const assert = require( "node:assert/strict" );
+	test( "routine refusals keep one count while retaining changing skill evidence", () => {
+		const f = fixture();
+		for ( let id = 500; id < 510; id++ ) {
+			f.bus.emit( "command", { kind: "skill", skillId: id } );
+			f.bus.emit( "game-error", "Cast rejected: 5" ); f.advance( 10 );
+		}
+		assert.equal( f.Activity.refusals.length, 1 );
+		assert.equal( f.Activity.refusals[0].repeatCount, 10 );
+		const exported = JSON.parse( f.Activity.export() ).events[0];
+		assert.equal( exported.failureSamples.length, 8 );
+		assert.equal( exported.failure.recentCommands.at( -1 ).skillId, 509 );
+	} );
+	test( "routine cast cooldown refusals use one informational row and retain export evidence", () => {
+		const f = fixture();
+		for ( let i = 0; i < 12; i++ ) {
+			f.bus.emit( "game-error", "Cast rejected: 5" ); f.Log.info( "Other activity " + i ); f.advance( 1000 );
+		}
+		assert.equal( f.Log.lines.filter( entry => entry.level === "warn" ).length, 0 );
+		assert.equal( f.Activity.refusals.length, 1 );
+		assert.equal( f.Activity.refusals[0].repeatCount, 12 );
+		assert.equal( f.Activity.visible().filter( entry => entry.code === "cast-not-ready" ).length, 1 );
+		const entry = JSON.parse( f.Activity.export() ).events.find( entry => entry.code === "cast-not-ready" );
+		assert.equal( entry.failure.source, "cast" );
+		assert.equal( entry.failure.reason, "cooldown-or-action-recovery" );
+		assert.match( entry.failure.explanation, /cooling down.*recovering/ );
+		assert.equal( entry.details.errorCode, 5 );
+		assert.equal( entry.failure.nativeErrorCode, 0x3005 );
+		assert.match( f.Activity.export( false, "text" ), /cooldown-or-action-recovery/ );
+		f.Activity.filters.category = "loot"; f.Activity.filters.level = "warn";
+		assert.match( f.Activity.export(), /cooldown-or-action-recovery/ );
+	} );
+	test( "cast refusal exports show recent commands without claiming an exact request match", () => {
+		const f = fixture();
+		f.World.ents.set( 77, { gid: 77, kind: "monster", name: "Private name" } );
+		f.bus.emit( "command", { kind: "skill", skillId: 500, gid: 77 } );
+		f.advance( 100 ); f.bus.emit( "game-error", "Cast rejected: 5" );
+		const entry = JSON.parse( f.Activity.export() ).events[0];
+		assert.equal( entry.failure.recentCommands[0].skillId, 500 );
+		assert.equal( entry.failure.recentCommands[0].monsterId, 77 );
+		assert.equal( entry.failure.recentCommands[0].ageMs, 100 );
+		assert.match( entry.failure.correlation, /not-a-request-match/ );
+		assert.doesNotMatch( f.Activity.export(), /Private name/ );
+		f.advance( 3100 ); f.bus.emit( "game-error", "Cast rejected: 5" );
+		assert.equal( f.Activity.refusals.at( -1 ).failure.recentCommands.length, 0 );
+	} );
+	test( "inventory code 5 is never decoded as cast cooldown and zero error codes are preserved", () => {
+		const f = fixture();
+		f.bus.emit( "game-error", "Inventory rejected: 5" );
+		const entry = f.Log.lines[0];
+		assert.equal( entry.level, "warn" ); assert.equal( entry.failure.source, "inventory" );
+		assert.equal( entry.failure.reason, "unmapped-error" );
+		f.bus.emit( "game-error", "Cast rejected: 0" );
+		assert.equal( f.Log.lines.at( -1 ).details.errorCode, 0 );
+	} );
+	test( "cast progress prevents readiness stall warnings and persistent stalls are rate limited", () => {
+		const f = fixture(); f.Hunt.running = true;
+		f.bus.emit( "game-error", "Cast rejected: 5" ); f.advance( 16000 );
+		f.bus.emit( "cast", { caster: 1, skill: 500 } );
+		f.bus.emit( "game-error", "Cast rejected: 5" );
+		assert.equal( f.Log.lines.filter( entry => entry.code === "cast-readiness-stalled" ).length, 0 );
+		f.advance( 16000 ); f.bus.emit( "game-error", "Cast rejected: 5" );
+		assert.equal( f.Log.lines.filter( entry => entry.code === "cast-readiness-stalled" ).length, 1 );
+		f.advance( 1000 ); f.bus.emit( "game-error", "Cast rejected: 5" );
+		assert.equal( f.Log.lines.filter( entry => entry.code === "cast-readiness-stalled" ).length, 1 );
+	} );
+	test( "world resets prevent old commands from being attached to new refusals", () => {
+		const f = fixture(); f.bus.emit( "command", { kind: "skill", skillId: 500 } );
+		f.bus.emit( "reset" ); f.World.epoch++; f.bus.emit( "game-error", "Cast rejected: 5" );
+		assert.equal( f.Activity.refusals[0].failure.recentCommands.length, 0 );
+		f.Activity.clear(); assert.equal( JSON.parse( f.Activity.export() ).events.length, 0 );
+	} );
 	test( "friendly target messages retain technical selection evidence for export", () => {
 		const f = fixture();
 		const target = { gid: 466785, name: "Mangyang", kind: "monster", regionId: 1, x: 130, y: 0, z: 100, attackFlags: 16, appearanceState: [0] };

@@ -53,7 +53,11 @@ UI.renderActivity = function( log ) {
 		const row = el( "li", null, entry.level );
 		row.entry = entry;
 		row.append( el( "time", new Date( entry.at ).toLocaleTimeString( "en-GB" ) ),
-			el( "span", (entry.level === "warn" ? "Warning: " : entry.level === "error" ? "Error: " : "") + Activity.userMessage( entry ) + (entry.repeatCount > 1 ? " ×" + entry.repeatCount : "") ) );
+			el( "span", (entry.level === "warn" ? "Warning: " : entry.level === "error" ? "Error: " : "") + Activity.userMessage( entry ), "activity-message" ) );
+		if ( entry.repeatCount > 1 ) {
+			const repeat = el( "span", "×" + entry.repeatCount, "activity-repeat" );
+			repeat.setAttribute( "aria-label", "Reported " + entry.repeatCount + " times" ); row.append( repeat );
+		}
 		return row;
 	} );
 	log.replaceChildren( ...rows );

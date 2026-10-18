@@ -166,3 +166,4 @@ fieldset>input[type=search]{width:100%;margin:2px 0 6px}
 .session-window .dialog-body{max-height:calc(100vh - 100px)}:host(.wide) .session-window .body{display:block}.session-window .field{margin:3px 0}.session-window .session-values{padding-bottom:6px}
 .activity-panel[hidden]{display:none}.activity-panel>.row{display:flex;flex-wrap:wrap;gap:4px}.activity-panel select{max-width:160px}.activity-panel input[type=search]{box-sizing:border-box;width:100%;margin:4px 0}.activity-panel .field{white-space:normal}.activity-export .dialog-body{display:block}.activity-export textarea{box-sizing:border-box;width:100%;font:11px monospace}:host(.wide) .activity-export .body{display:block}
 .activity-history,.activity-history *{user-select:text;-webkit-user-select:text}
+.activity-history .activity-message{flex:1}.activity-history .activity-repeat{flex:0 0 auto;margin-left:auto;white-space:nowrap;color:#b9a878}
