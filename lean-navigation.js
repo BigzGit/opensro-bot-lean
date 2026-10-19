@@ -154,6 +154,67 @@ const Navigation = {
     }
     return result;
   },
+  // The game publishes collision data only for the 3x3 regions around the
+  // character, so a long walk is planned in short legs. A point on the straight
+  // line towards the goal is kept inside the loaded window; walking to it
+  // crosses a region border, which makes the game publish the next window.
+  legPoint(from, to, length) {
+    if (!this.scene) return null;
+    const delta = regionDelta(from, to), start = this.local(from);
+    const total = delta ? Math.hypot(delta[0], delta[1]) : Infinity;
+    if (!start || !Number.isFinite(total) || total <= 0) return null;
+    for (let reach = Math.min(length, total); reach >= 100; reach *= 0.5) {
+      const local = { x: start.x + delta[0] / total * reach, z: start.z + delta[1] / total * reach };
+      if (this.covered(local.x, local.z)) return this.pose(local, from.y);
+    }
+    return null;
+  },
+  // Nearest walkable grid tile around a blocked leg end, searched outwards.
+  snap(point, radius = 240) {
+    if (!this.scene) return null;
+    const p = this.local(point);
+    if (!p) return null;
+    if (this.open(p.x, p.z)) return { ...point };
+    for (let r = 20; r <= radius; r += 20) {
+      const steps = Math.max(8, Math.ceil(2 * Math.PI * r / 20));
+      for (let i = 0; i < steps; i++) {
+        const angle = i * 2 * Math.PI / steps;
+        const x = p.x + Math.cos(angle) * r, z = p.z + Math.sin(angle) * r;
+        if (this.open(x, z)) return this.pose({ x, z }, point.y);
+      }
+    }
+    return null;
+  },
+  // A blocked leg end is replaced by a snapped or slightly turned leg of the same
+  // approximate length, so the next leg can continue towards the goal. Only a
+  // route that really reaches the candidate is accepted.
+  detour(from, goal, length, options = {}) {
+    if (!this.scene) return null;
+    const start = this.local(from), delta = regionDelta(from, goal);
+    const total = delta ? Math.hypot(delta[0], delta[1]) : Infinity;
+    if (!start || !Number.isFinite(total) || total <= 0) return null;
+    const reach = Math.min(length, total), base = Math.atan2(delta[1], delta[0]);
+    const point = angle => {
+      const local = { x: start.x + Math.cos(angle) * reach, z: start.z + Math.sin(angle) * reach };
+      return this.covered(local.x, local.z) ? this.pose(local, from.y) : null;
+    };
+    const candidates = [], straight = point(base);
+    const snapped = straight && this.snap(straight, options.radius ?? 240);
+    if (snapped) candidates.push(snapped);
+    if (reach > 200) {
+      const local = { x: start.x + Math.cos(base) * reach * .5, z: start.z + Math.sin(base) * reach * .5 };
+      if (this.covered(local.x, local.z)) candidates.push(this.pose(local, from.y));
+    }
+    for (const turn of [.5, -.5, 1, -1, 1.5, -1.5]) {
+      const turned = point(base + turn);
+      if (turned) candidates.push(turned);
+    }
+    for (const candidate of candidates) {
+      const route = this.plan(from, candidate, 0, { maxNodes: options.maxNodes ?? 20000 });
+      if (route?.length && dist2D(route[route.length - 1], candidate) <= 15) return candidate;
+    }
+    return null;
+  },
   next(owner, destination, recorded = false, arrivalRadius = 0) {
     const pose = World.pose(), previous = owner.travel;
     if (!this.scene || (pose.regionId & DUNGEON)) {

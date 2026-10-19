@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Route, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -216,6 +216,69 @@ function navProduct(objects = [], blocked = new Uint8Array(9216)) {
   return { regionId: 1, complete: true, objects,
     navmesh: { regionSize: 1920, tileSize: 20, tilesPerAxis: 96,
       regions: [{ dx: 0, dz: 0, cells: { count: 1 }, blockedTiles: Buffer.from(blocked).toString('base64'), tileCellIds: Buffer.alloc(36864).toString('base64') }] } };
+}
+// The game publishes collision coverage for the 3x3 regions around the player.
+function navWindow(regionId = 1, blocked = new Uint8Array(9216), objects = []) {
+  const regions = [];
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++)
+    regions.push({ dx, dz, cells: { count: 1 }, blockedTiles: Buffer.from(blocked).toString('base64'), tileCellIds: Buffer.alloc(36864).toString('base64') });
+  return { regionId, complete: true, objects,
+    navmesh: { regionSize: 1920, tileSize: 20, tilesPerAxis: 96, regions } };
+}
+// Synthetic NVL1 route data, matching tools/convert-navdata.py.
+function navBinary(nodes, edges, { originX = 0, originZ = 0, flags = 0 } = {}) {
+  const count = nodes.length, adjacency = Array.from({ length: count }, () => new Set());
+  for (const [a, b] of edges) if (a !== b) { adjacency[a].add(b); adjacency[b].add(a); }
+  let arcs = 0; for (const row of adjacency) arcs += row.size;
+  const buffer = Buffer.alloc(24 + count * 6 + (count + 1) * 4 + arcs * 2);
+  buffer.write('NVL1', 0, 'ascii'); buffer[4] = 1; buffer[5] = flags; buffer.writeUInt16LE(0, 6);
+  buffer.writeInt32LE(originX, 8); buffer.writeInt32LE(originZ, 12);
+  buffer.writeUInt32LE(count, 16); buffer.writeUInt32LE(arcs, 20);
+  nodes.forEach((node, i) => {
+    const at = 24 + i * 6;
+    buffer.writeInt16LE(Math.round((node.x - originX) / 10), at);
+    buffer.writeInt16LE(Math.round((node.z - originZ) / 10), at + 2);
+    buffer.writeInt16LE(node.y || 0, at + 4);
+  });
+  let arc = 0;
+  const offsets = [];
+  for (const row of adjacency) { offsets.push(arc); arc += row.size; }
+  offsets.push(arc);
+  const offsetsAt = 24 + count * 6;
+  offsets.forEach((value, i) => buffer.writeUInt32LE(value, offsetsAt + i * 4));
+  const arcsAt = offsetsAt + (count + 1) * 4;
+  adjacency.forEach((row, i) => { let k = 0; for (const value of row) buffer.writeUInt16LE(value, arcsAt + (offsets[i] + k++) * 2); });
+  return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+}
+function navArea(name, nodes, buffer, extra = {}) {
+  const xs = nodes.map(n => n.x), zs = nodes.map(n => n.z);
+  return { name, file: name + '.bin', minX: Math.min(...xs), maxX: Math.max(...xs),
+    minZ: Math.min(...zs), maxZ: Math.max(...zs), nodes: nodes.length, cell: 19.2,
+    dungeon: false, rev: name, ...extra };
+}
+function navPose(x, z, y = 0) {
+  const rx = Math.floor(x / 1920), rz = Math.floor(z / 1920);
+  return { regionId: (rz << 8) | rx, x: x - rx * 1920, y, z: z - rz * 1920 };
+}
+function navAbs(p) { return { x: (p.regionId & 255) * 1920 + p.x, z: (p.regionId >>> 8) * 1920 + p.z }; }
+function navGrid(x0, z0, columns, rows, step = 200, omit = () => false) {
+  const nodes = [], index = new Map();
+  for (let row = 0; row < rows; row++) for (let column = 0; column < columns; column++) {
+    const x = x0 + column * step, z = z0 + row * step;
+    if (omit(x, z)) continue;
+    index.set(column + ',' + row, nodes.length);
+    nodes.push({ x, z, y: 0 });
+  }
+  const edges = [];
+  for (let row = 0; row < rows; row++) for (let column = 0; column < columns; column++) {
+    const here = index.get(column + ',' + row);
+    if (here === undefined) continue;
+    for (const [dx, dz] of [[1, 0], [0, 1], [1, 1], [1, -1]]) {
+      const next = index.get((column + dx) + ',' + (row + dz));
+      if (next !== undefined) edges.push([here, next]);
+    }
+  }
+  return { nodes, edges, index };
 }
 const asyncTests = [];
 // An async test is awaited before the total is printed, so a failure inside it can never be lost.
@@ -483,6 +546,175 @@ test('walk-back follows collision waypoints and permits detours away from the de
   f.WalkBack.start(); f.Controller.tick();
   assert.ok(f.commands.at(-1).destination.z > 100);
   for (let n = 0; n < 4; n++) { f.World.gp.pose.z += 50; f.advance(7000); f.Controller.tick(); assert.ok(f.WalkBack.active); }
+});
+test('walk-back chains short legs across regions and starts hunting 10 km away', () => {
+  const f = fixture();
+  f.Settings.profile.hunt.center = { regionId: 6, x: 500, y: 0, z: 100 };
+  f.Navigation.install(navWindow(1));
+  f.WalkBack.start(true);
+  assert.ok(f.WalkBack.active); assert.ok(f.WalkBack.active.totalLegs >= 5);
+  assert.match(f.WalkBack.status(), /leg 1\/\d+/);
+  let scene = 1, pending = 0, wait = 0;
+  for (let n = 0; n < 400 && f.WalkBack.active; n++) {
+    f.Controller.tick();
+    const move = [...f.commands].reverse().find(c => c.kind === 'move');
+    if (move) f.World.gp.pose = { ...move.destination };
+    f.advance(800);
+    const region = f.World.pose().regionId;
+    // The game publishes a new 3x3 window when the player's region changes; the
+    // asset/worker round trip takes a few ticks, so the old window is used first.
+    if (region !== scene) { pending = region; if (++wait >= 4) { f.Navigation.install(navWindow(pending)); scene = pending; wait = 0; } }
+  }
+  assert.equal(f.WalkBack.active, null, 'the character arrived');
+  assert.equal(f.Hunt.running, true, 'hunting started on arrival');
+  assert.equal(f.notices.some(n => /Use Return & hunt when ready/.test(n)), false, 'no manual steps requested');
+  assert.ok(f.commands.filter(c => c.kind === 'move').length > 8, 'it walked in several legs');
+  const legLog = f.Log.lines.find(e => e.code === 'walk-leg');
+  assert.ok(legLog, 'leg progress is logged'); assert.match(f.Activity.userMessage(legLog), /^Walking to the hunting spot: leg \d+ of about \d+\.$/);
+});
+test('a blocked leg end is snapped to a nearby walkable tile and the walk continues', () => {
+  const f = fixture();
+  f.Settings.profile.hunt.center = { regionId: 6, x: 500, y: 0, z: 100 };
+  const blocked = new Uint8Array(9216);
+  blocked[5 * 96 + 29] = 1; // the straight leg end, about (2500, 100) from the start
+  f.Navigation.install(navWindow(1, blocked));
+  f.WalkBack.start(true); f.WalkBack.tick();
+  assert.ok(f.WalkBack.active, 'the walk is not cancelled');
+  assert.equal(f.WalkBack.active.legTries, 1, 'the blocked end was replaced');
+  const local = f.Navigation.local(f.WalkBack.active.leg.target);
+  assert.equal(f.Navigation.open(local.x, local.z), true, 'the new leg end is walkable');
+  f.advance(1000); f.WalkBack.tick();
+  assert.equal(f.commands.at(-1).kind, 'move');
+});
+test('resume hunting walks to a far spot instead of asking for manual steps', () => {
+  const f = fixture();
+  f.Settings.profile.hunt.center = { regionId: 6, x: 500, y: 0, z: 100 };
+  assert.equal(f.Controller.resumeHunting('After a revive'), 'walking');
+  assert.ok(f.WalkBack.active);
+  assert.equal(f.notices.some(n => /Use Return & hunt when ready/.test(n)), false);
+});
+test('walk-back refuses a spot beyond its safety cap and Stop all cancels a chained walk', () => {
+  let f = fixture();
+  f.Settings.profile.hunt.center = { regionId: 100, x: 500, y: 0, z: 100 };
+  f.WalkBack.start(true);
+  assert.equal(f.WalkBack.active, null); assert.ok(f.notices.some(n => /too far to walk/.test(n)));
+  f = fixture();
+  f.Settings.profile.hunt.center = { regionId: 6, x: 500, y: 0, z: 100 };
+  f.Navigation.install(navWindow(1)); f.WalkBack.start(true); f.Controller.tick();
+  assert.ok(f.WalkBack.active); f.stopAll(); assert.equal(f.WalkBack.active, null);
+});
+test('navdata route format decodes nodes, edges and rejects malformed data', () => {
+  const f = fixture();
+  const nodes = [{ x: 5000, z: 5000, y: 10 }, { x: 5200, z: 5000, y: 12 }, { x: 5000, z: 5200, y: 14 }];
+  const buffer = navBinary(nodes, [[0, 1], [1, 2]], { originX: 5000, originZ: 5000, flags: 0 });
+  const area = f.Route.decode(buffer, { name: 'synthetic', file: 'synthetic.bin' });
+  assert.equal(area.count, 3); assert.equal(area.dungeon, false);
+  assert.deepEqual([area.x[0], area.z[0], area.y[0]], [5000, 5000, 10]);
+  assert.deepEqual([area.x[2], area.z[2], area.y[2]], [5000, 5200, 14]);
+  assert.equal(area.offsets[3], 4); assert.equal(area.neighbours.length, 4);
+  assert.throws(() => f.Route.decode(buffer.slice(0, 20)), /short|size/i);
+  const bad = Buffer.from(new Uint8Array(buffer)); bad.write('XXXX', 0, 'ascii');
+  assert.throws(() => f.Route.decode(bad.buffer.slice(bad.byteOffset, bad.byteOffset + bad.byteLength)), /Unsupported/);
+});
+test('navdata A* goes around a wall instead of straight through it', async () => {
+  const f = fixture();
+  const grid = navGrid(5000, 5000, 6, 6, 200, (x, z) => x === 5400 && z <= 5600);
+  const buffer = navBinary(grid.nodes, grid.edges, { originX: 5000, originZ: 5000 });
+  const meta = navArea('wall', grid.nodes, buffer);
+  f.Route.setAreas([meta]); f.Route.setLoader(() => buffer);
+  const from = navPose(5000, 5000), to = navPose(5800, 5000);
+  assert.equal(await f.Route.ensure(from, to), true);
+  const route = f.Route.plan(from, to);
+  assert.ok(route, f.Route.message);
+  assert.ok(route.length > 1200, 'the wall adds distance');
+  assert.ok(route.points.some(point => navAbs(point).z >= 5780), 'the route passes the open gap');
+  assert.ok(f.Route.plan(navPose(5100, 5100), navPose(5800, 5000)), 'a start near the graph snaps to it');
+  assert.equal(f.Route.plan(navPose(9000, 9000), navPose(9500, 9000)), null, 'no area means no route');
+  assert.equal(f.Route.plan(navPose(5000, 7000), navPose(5800, 5000)), null, 'an out-of-area start means no route');
+});
+test('walk-back follows a navdata route and starts hunting on arrival', async () => {
+  const f = fixture();
+  const grid = navGrid(5000, 5000, 15, 1, 200);
+  const buffer = navBinary(grid.nodes, grid.edges, { originX: 5000, originZ: 5000 });
+  const meta = navArea('line', grid.nodes, buffer);
+  f.Route.setAreas([meta]); f.Route.setLoader(() => buffer);
+  const from = navPose(5000, 5000), to = navPose(7700, 5000);
+  assert.equal(await f.Route.ensure(from, to), true);
+  f.World.gp.pose = { ...from }; f.Settings.profile.hunt.center = { ...to };
+  f.Navigation.install(navWindow(from.regionId));
+  f.WalkBack.start(true);
+  assert.equal(f.WalkBack.active.source, 'navdata');
+  assert.match(f.WalkBack.status(), /waypoint 1\//);
+  let scene = from.regionId;
+  for (let n = 0; n < 200 && f.WalkBack.active; n++) {
+    f.Controller.tick();
+    const move = [...f.commands].reverse().find(c => c.kind === 'move');
+    if (move) f.World.gp.pose = { ...move.destination };
+    f.advance(800);
+    const region = f.World.gp.pose.regionId;
+    if (region !== scene) { f.Navigation.install(navWindow(region)); scene = region; }
+  }
+  assert.equal(f.WalkBack.active, null, 'the character arrived');
+  assert.equal(f.Hunt.running, true, 'hunting started on arrival');
+  assert.ok(f.Log.lines.some(entry => /using navdata \(line\)/.test(entry.text)), 'the log names the route source');
+});
+test('walk-back falls back to legs without route data or between different areas', async () => {
+  let f = fixture();
+  f.Route.setAreas([]);
+  f.World.gp.pose = navPose(5000, 5000); f.Settings.profile.hunt.center = navPose(7700, 5000);
+  f.WalkBack.start(true);
+  assert.equal(f.WalkBack.active.source, 'legs'); assert.ok(f.WalkBack.active);
+  f = fixture();
+  const a = navGrid(5000, 5000, 6, 1, 200), b = navGrid(9000, 5000, 6, 1, 200);
+  const ab = navBinary(a.nodes, a.edges, { originX: 5000, originZ: 5000 });
+  const bb = navBinary(b.nodes, b.edges, { originX: 9000, originZ: 5000 });
+  const ma = navArea('left', a.nodes, ab), mb = navArea('right', b.nodes, bb);
+  f.Route.setAreas([ma, mb]); f.Route.setLoader(name => name === 'left' ? ab : bb);
+  f.World.gp.pose = navPose(5000, 5000); f.Settings.profile.hunt.center = navPose(9600, 5000);
+  assert.equal(await f.Route.ensure(navPose(5000, 5000), navPose(9600, 5000)), false);
+  assert.match(f.Route.message, /covers both/);
+  const overlap = navGrid(5500, 5000, 6, 1, 200);
+  const mc = navArea('overlap', overlap.nodes, navBinary(overlap.nodes, overlap.edges, { originX: 5500, originZ: 5000 }));
+  f.Route.setAreas([ma, mc, mb]);
+  assert.equal(f.Route.commonArea(navPose(5600, 5000), navPose(5000, 5000)).name, 'left', 'one area covering both ends wins');
+  f.WalkBack.start(true);
+  for (let n = 0; n < 5; n++) await Promise.resolve();
+  assert.ok(f.WalkBack.active); assert.equal(f.WalkBack.active.source, 'legs');
+  assert.ok(f.notices.some(n => /Walking back to the hunting spot/.test(n)));
+  assert.ok(f.Log.lines.some(entry => /walking in legs/.test(entry.text)), 'the log names the fallback source');
+});
+test('a stuck navdata route re-plans once, then hands over to the leg fallback', async () => {
+  const f = fixture();
+  const grid = navGrid(5000, 5000, 15, 1, 200);
+  const buffer = navBinary(grid.nodes, grid.edges, { originX: 5000, originZ: 5000 });
+  const meta = navArea('stuck', grid.nodes, buffer);
+  f.Route.setAreas([meta]); f.Route.setLoader(() => buffer);
+  const from = navPose(5000, 5000), to = navPose(7700, 5000);
+  await f.Route.ensure(from, to);
+  f.World.gp.pose = { ...from }; f.Settings.profile.hunt.center = { ...to };
+  f.Navigation.install(navWindow(from.regionId));
+  f.WalkBack.start(true);
+  assert.equal(f.WalkBack.active.source, 'navdata');
+  f.Navigation.next = () => ({ error: 'No walkable route found through the loaded collision map.' });
+  f.WalkBack.tick();                                // consume the start waypoint
+  f.advance(1000); f.WalkBack.tick();               // the next hop fails, so re-plan
+  assert.equal(f.WalkBack.active.source, 'navdata'); assert.equal(f.WalkBack.active.navReplans, 1);
+  f.Route.plan = () => null;
+  f.advance(21000); f.WalkBack.tick();               // the re-planned start is at the current pose
+  f.advance(21000); f.WalkBack.tick();               // no progress now, so the leg fallback takes over
+  assert.ok(f.WalkBack.active); assert.equal(f.WalkBack.active.source, 'legs', 'the leg fallback takes over');
+});
+test('Stop all cancels a walk while route data is still loading', () => {
+  const f = fixture();
+  const grid = navGrid(5000, 5000, 15, 1, 200);
+  const buffer = navBinary(grid.nodes, grid.edges, { originX: 5000, originZ: 5000 });
+  f.Route.setAreas([navArea('slow', grid.nodes, buffer)]);
+  f.Route.setLoader(() => new Promise(() => {}));
+  f.World.gp.pose = navPose(5000, 5000); f.Settings.profile.hunt.center = navPose(7700, 5000);
+  f.WalkBack.start(true);
+  assert.equal(f.WalkBack.active.source, 'planning');
+  f.stopAll();
+  assert.equal(f.WalkBack.active, null);
 });
 test('Thunderdragon Force level 13 appears as the highest learned imbue and is cast', () => {
   const f = fixture();
@@ -1818,9 +2050,12 @@ test('resurrection resume is only for accepted resurrections, expires, and respe
   assert.equal(t.f.Hunt.running, false, 'a bot that was not hunting stays stopped');
   t = deathFixture('stop'); t.die(); t.offer(); t.f.Controller.tick(); t.live(); t.f.World.gp.pose = { ...t.f.World.gp.pose, x: 100 + 3000 }; t.f.advance(300); t.f.Controller.tick(); t.f.advance(2500); t.f.Controller.tick();
   assert.equal(t.f.Hunt.running, false); assert.ok(t.f.WalkBack.active, 'a little way off, it walks back to the hunting spot first');
-  t = deathFixture('stop'); t.die(); t.offer(); t.f.Controller.tick(); t.live(); t.f.World.gp.pose = { ...t.f.World.gp.pose, regionId: 999, x: 100 }; t.f.advance(300); t.f.Controller.tick(); t.f.advance(2500); t.f.Controller.tick();
-  assert.equal(t.f.Hunt.running, false); assert.equal(t.f.WalkBack.active, null, 'elsewhere it stays stopped');
+  t = deathFixture('stop'); t.die(); t.offer(); t.f.Controller.tick(); t.live(); t.f.World.gp.pose = { ...t.f.World.gp.pose, regionId: 32769, x: 100 }; t.f.advance(300); t.f.Controller.tick(); t.f.advance(2500); t.f.Controller.tick();
+  assert.equal(t.f.Hunt.running, false); assert.equal(t.f.WalkBack.active, null, 'another world or dungeon stays stopped');
   assert.ok(t.f.notices.some(n => /not at the hunting spot/.test(n)));
+  t = deathFixture('stop'); t.die(); t.offer(); t.f.Controller.tick(); t.live(); t.f.World.gp.pose = { ...t.f.World.gp.pose, regionId: 100, x: 100 }; t.f.advance(300); t.f.Controller.tick(); t.f.advance(2500); t.f.Controller.tick();
+  assert.equal(t.f.Hunt.running, false); assert.equal(t.f.WalkBack.active, null, 'a spot beyond the safety cap stays stopped');
+  assert.ok(t.f.notices.some(n => /too far to walk/.test(n)));
 });
 test('with Accept resurrection on and a helper in view the bot waits before reviving itself, never during an open offer', () => {
   const rebirths = f => f.commands.filter(c => c.kind === 'rebirth').length;

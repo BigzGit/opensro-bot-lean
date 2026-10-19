@@ -148,7 +148,8 @@ const Diagnostics = {
       if (/^(walk|open)-/.test(Town.trip.phase) && Town.message) return Town.message;
       return 'Town services: ' + (phases[Town.trip.phase] || 'travelling between or opening services') + '.';
     }
-    if (WalkBack.active || Restock.trip || Resurrect.trip) return 'Travelling; waiting to reach the destination.';
+    if (WalkBack.active) return WalkBack.status();
+    if (Restock.trip || Resurrect.trip) return 'Travelling; waiting to reach the destination.';
     if (!Hunt.running) return 'Bot stopped.';
     if (now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000) return 'Hunting paused after manual control.';
     if (Restock.activeShop() || World.gp?.storage) return 'Hunting paused: close shop or storage.';

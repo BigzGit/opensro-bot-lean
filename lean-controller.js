@@ -153,12 +153,13 @@ const Controller = {
       return false;
     }
   },
-  // Start hunting again after an interruption, but only where that is safe: at the hunting spot it just starts, a
-  // little way off (within 600 m) it walks back first, anywhere else it stays stopped. Returns 'started', 'walking' or 'stopped'.
+  // Start hunting again after an interruption, but only where that is safe: at the hunting spot it just starts,
+  // otherwise it walks back. WalkBack first tries the navdata corridor and falls back to short legs; its own caps
+  // refuse a spot that is too far. Returns 'started', 'walking' or 'stopped'.
   resumeHunting(prefix) {
     const H = Hunt.cfg(), pose = World.pose(), distance = H.center && pose ? dist2D(pose, H.center) : Infinity;
     if (Number.isFinite(distance) && distance <= Math.max(H.radius * 1.5, 600)) { UI.toast(prefix + '; resuming hunting.', 'info', 4000); Hunt.start(); return 'started'; }
-    if (distance <= 6000) { UI.toast(prefix + '; walking back to the hunting spot.', 'info', 4000); WalkBack.start(true); return 'walking'; }
+    if (Number.isFinite(distance)) { UI.toast(prefix + '; walking back to the hunting spot.', 'info', 4000); WalkBack.start(true); return WalkBack.active ? 'walking' : 'stopped'; }
     UI.toast(prefix + ', but not at the hunting spot. Use Return & hunt when ready.', 'warn', 6000);
     return 'stopped';
   },

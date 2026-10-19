@@ -30,6 +30,7 @@ Activity.userMessage = function( entry ) {
 	// Capture history must describe its original event, not today's filter state.
 	if ( entry.code === "capture-changed" ) return /enabled/.test( entry.text ) ? "Detailed logging enabled for 10 minutes." : "Detailed logging stopped.";
 	if ( messages[entry.code] ) return messages[entry.code];
+	if ( entry.code === "walk-leg" ) return "Walking to the hunting spot: leg " + entry.details.leg + " of about " + entry.details.legs + ".";
 	if ( entry.code === "potion-summary" ) return "Potions used since the last update: " + entry.details.quantity + ".";
 	if ( entry.code === "trip-phase" ) {
 		const phase = entry.text.replace( /^Town phase: /, "" );
