@@ -5,6 +5,7 @@ function toggleBot() {
 }
 
 function boot() {
+  if (Setup.isNew()) UI.current = 'Setup';
   UI.mount(); Stats.init(); Updates.start(); Diagnostics.start();
   const unlockSound = e => {
     if (e.isTrusted && (Settings.profile.hunt.pickup.petFullSound || Settings.profile.hunt.pickup.soxSound)) Sound.unlock();
@@ -66,7 +67,7 @@ function boot() {
   Ticker.start(() => Controller.tick(), 100);
   setInterval(() => { Wardrobe.tick(); UI.update(); }, 500);
   W.SROLean = { version: VERSION, stats: Stats, updates: Updates, diagnostics: Diagnostics, reports: Reports, alchemy: Alchemy, buffGear: BuffGear, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, resurrect: Resurrect,
-    restock: Restock, town: Town, walkBack: WalkBack, antiStuck: AntiStuck, chase: Chase, trap: Trap, autoMastery: AutoMastery, statPoints: StatPoints, share: ProfileShare, reconnect: Reconnect, petPotion: PetPotion, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, ui: UI, map: LeanMap, support: Support, items: ItemRules, stop: stopAll, log: Log };
+    restock: Restock, town: Town, walkBack: WalkBack, antiStuck: AntiStuck, chase: Chase, trap: Trap, autoMastery: AutoMastery, statPoints: StatPoints, share: ProfileShare, setup: Setup, reconnect: Reconnect, petPotion: PetPotion, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, ui: UI, map: LeanMap, support: Support, items: ItemRules, stop: stopAll, log: Log };
   Log.info('nixxane bot ready. F8 starts/stops; F7 folds; the × minimises; Shift+F7 hides/shows the window.');
 }
 

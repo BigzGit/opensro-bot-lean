@@ -18,7 +18,7 @@ const images = ['ic_attack', 'ic_recovery', 'ic_autoget', 'ic_sit'].map((key, i)
 });
 const media = process.argv[4];
 if (media) for (const name of ['action/icon_cha_auto_attack', 'action/icon_cha_autoget', 'action/icon_cha_recovery', 'action/icon_cha_alchemy', 'action/icon_cha_shop',
-  'action/icon_cha_helper', 'action/icon_cha_party', 'item/etc/mall_return_scroll', 'item/etc/mall_warehouse_ticket', 'item/etc/all_potion_03', 'item/etc/mall_repair_hammer',
+  'action/icon_cha_helper', 'action/icon_cha_party', 'action/icon_cha_camp', 'action/icon_cha_sit', 'item/etc/mall_return_scroll', 'item/etc/mall_warehouse_ticket', 'item/etc/all_potion_03', 'item/etc/mall_repair_hammer',
   'item/etc/mall_reverse_return_scroll', '../interface/minimap/mm_map_button']) {
   const raw = fs.readFileSync(path.join(media, 'icon', name + '.png'));
   images.push({ raw, compressed: zlib.gzipSync(raw), path: path.posix.normalize(`/assets/images/Media_extracted/icon/${name}.png`), transport: `/assets/test-icons/real-${images.length}.png.gz` });
@@ -115,6 +115,7 @@ const gameplay = { localGid: 1, target: 0, targetPending: false, inventoryPendin
     }, legend);
     const tab = async name => { await page.getByRole('button', { name, exact: true }).click(); await page.waitForTimeout(200); };
     await snap('01-panel');
+    await tab('Setup'); await snap('00-setup');
     await tab('Hunt area'); await snap('02-hunt-area');
     await tab('Buffs & imbue'); await snap('04-buffs');
     await tab('Loot'); await snap('05-loot');

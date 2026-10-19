@@ -23,7 +23,7 @@ for (const name of ['icon/action/cos_cmd_inventory', 'icon/item/etc/mall_return_
   images.push({ raw, compressed: zlib.gzipSync(raw), path: `/assets/images/Media_extracted/${name}.png`, transport: `/assets/test-icons/${name.replace(/\//g, '-')}.png.gz` });
 }
 // The wide window's page icons (also the game's action icons), each with distinct bytes.
-for (const name of ['autoget', 'recovery', 'alchemy', 'shop', 'helper', 'party']) {
+for (const name of ['autoget', 'recovery', 'alchemy', 'shop', 'helper', 'party', 'camp']) {
   const raw = Buffer.concat([images[0].raw, Buffer.from('nav-' + name)]);
   images.push({ raw, compressed: zlib.gzipSync(raw), path: `/assets/images/Media_extracted/icon/action/icon_cha_${name}.png`, transport: `/assets/test-icons/nav-${name}.png.gz` });
 }
@@ -154,6 +154,20 @@ const server = http.createServer((req, res) => {
       ] } } });
     });
     await page.waitForFunction(() => window.SROLean?.world.inWorld());
+    // A character that was never set up opens on the Setup page, whose checklist names what is missing and fixes the hunting spot in one click.
+    await page.getByText('Ready to hunt?').waitFor();
+    assert.match(await page.locator('#sro-bot-lean').evaluate(host => host.shadowRoot.querySelector('.sx-score').textContent), /\d of \d ready/);
+    await page.getByRole('button', { name: 'Set here', exact: true }).click();
+    assert.equal(await page.evaluate(() => SROLean.settings.profile.hunt.center.x), 100);
+    await page.getByText('Saved, roaming up to').waitFor();
+    await page.getByRole('button', { name: 'Safe AFK', exact: true }).click();
+    await page.getByText(/Safe AFK: \d+ settings? would change/).waitFor();
+    assert.equal(await page.evaluate(() => SROLean.settings.profile.hunt.playerAlert.enabled), false);
+    await page.getByRole('button', { name: 'Apply', exact: true }).click();
+    assert.equal(await page.evaluate(() => SROLean.settings.profile.hunt.playerAlert.enabled), true);
+    await page.getByRole('button', { name: 'Undo last change', exact: true }).click();
+    assert.equal(await page.evaluate(() => SROLean.settings.profile.hunt.playerAlert.enabled), false);
+    await page.getByRole('button', { name: 'Combat', exact: true }).click();
     await page.getByRole('button', { name: 'Hunt area', exact: true }).click();
     await page.getByRole('button', { name: 'Set hunting spot here', exact: true }).click();
     assert.equal(await page.evaluate(() => SROLean.settings.profile.hunt.center.x), 100);

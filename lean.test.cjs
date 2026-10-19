@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -1379,6 +1379,45 @@ test('an import is parsed as data: wrong files, prototype keys, wrong types and 
   const old = await f.ProfileShare.preview(JSON.stringify({ app: 'sro-bot-lean', version: '1.2.0', profile: { ...plain(f.Settings.profile), hunt: { ...plain(f.Settings.profile.hunt), radius: 123 } } }));
   assert.equal(old.next.hunt.radius, 123, 'an old full export still imports');
   const unicode = 'Jäger 狩猎 ✓'; assert.equal(f.ProfileShare.string(f.ProfileShare.fromBase64(f.ProfileShare.toBase64(f.ProfileShare.bytes(unicode)))), unicode);
+});
+test('the setup checklist reads the real state and each row says what is missing', () => {
+  const f = fixture(), state = id => f.Setup.steps().find(s => s.id === id);
+  f.Settings.profile.hunt.center = null; f.Settings.profile.macro.rotations.normal = [];
+  assert.equal(state('spot').state, 'bad'); assert.equal(state('skills').state, 'warn', 'normal attacks still work, so it is a warning');
+  f.Settings.profile.macro.normalAttack = false; assert.equal(state('skills').state, 'bad');
+  assert.ok(f.Setup.nextFix(), 'something to fix first'); assert.equal(f.Setup.nextFix().state, 'bad');
+  f.World.gp.pose = { regionId: 1, x: 100, y: 0, z: 100 }; state('spot').action.run(); assert.equal(state('spot').state, 'ok');
+  f.Settings.profile.macro.rotations.normal = [{ id: 5, group: 5 }]; assert.equal(state('skills').state, 'ok'); assert.match(state('skills').text, /1 skill in/);
+  f.Settings.profile.potion.enabled = false; assert.equal(state('potions').state, 'warn'); state('potions').action.run(); assert.equal(f.Settings.profile.potion.enabled, true);
+  f.Settings.profile.hunt.pickup.enabled = false; assert.equal(state('pickup').state, 'warn'); state('pickup').action.run(); assert.equal(f.Settings.profile.hunt.pickup.enabled, true);
+  f.Town.cfg().enabled = true; assert.equal(state('town').state, 'bad'); assert.ok(state('town').text.length > 10, 'the town row says what is missing');
+  f.World.gp.inventory = [{ slot: 6, refObjId: 100, typeFlags: 44 | (6 << 7), name: 'Test blade' }];
+  assert.match(state('character').text, /Test blade/); f.World.gp.inventory = []; assert.match(state('character').text, /no weapon equipped/);
+  assert.ok(f.Setup.steps().every(s => s.title && s.text && ['ok', 'warn', 'bad'].includes(s.state)));
+});
+test('setup of a chosen town fills the town and only turns town trips on when nothing is missing', () => {
+  const f = fixture(); f.Setup.townPick = 'KT';
+  f.Setup.setupTown(); assert.equal(f.Town.cfg().vendor.refObjId, 2074); assert.equal(f.Town.cfg().arrival.regionId, 23687);
+  assert.equal(f.Town.cfg().enabled, Boolean(!f.Town.validate()), 'town trips are on only when validation passes');
+});
+test('starter settings are previewed, laid over your settings, applied once and undone', () => {
+  const f = fixture(), p = f.Settings.profile;
+  p.hunt.center = { regionId: 5, x: 1, y: 0, z: 2 }; p.macro.rotations.normal = [{ id: 5, group: 5 }]; p.hunt.playerAlert.enabled = false;
+  f.Setup.choose('safe'); assert.ok(f.Setup.preview.rows.some(r => r.path === 'hunt.playerAlert.enabled' && r.to === 'true'));
+  assert.equal(p.hunt.playerAlert.enabled, false, 'a preview changes nothing');
+  assert.equal(f.ProfileShare.apply(), true);
+  const now = f.Settings.profile; assert.equal(now.hunt.playerAlert.enabled, true); assert.equal(now.hunt.stopInvFull, true);
+  assert.equal(now.hunt.center.regionId, 5, 'your hunting spot stays'); assert.equal(now.macro.rotations.normal[0].id, 5, 'your skills stay');
+  assert.equal(f.ProfileShare.undo(), true); assert.equal(f.Settings.profile.hunt.playerAlert.enabled, false);
+  f.Setup.choose('levelup'); assert.ok(f.Setup.preview.rows.some(r => r.path === 'hunt.pickup.potions')); f.ProfileShare.apply();
+  assert.equal(f.Settings.profile.hunt.pickup.potions, false); assert.equal(f.Settings.profile.hunt.classes.giant, true);
+  f.Setup.choose('drops'); f.ProfileShare.apply(); assert.equal(f.Settings.profile.hunt.pickup.potions, true); assert.equal(f.Settings.profile.hunt.classes.elite, true);
+  f.Setup.choose('drops'); assert.equal(f.Setup.preview.rows.length, 0, 'applying the same preset again changes nothing');
+});
+test('the setup page opens first only for a character that has never been set up', () => {
+  const f = fixture(); f.Settings.profile.hunt.center = null; f.Settings.profile.macro.rotations.normal = [];
+  assert.equal(f.Setup.isNew(), true);
+  f.Settings.profile.hunt.center = { regionId: 5, x: 1, y: 0, z: 2 }; assert.equal(f.Setup.isNew(), false);
 });
 function skillFixture(extra = {}, learned = [1001]) {
   const f = masteryFixture(extra); f.Settings.profile.mastery.enabled = false; f.Settings.profile.mastery.skills = true;

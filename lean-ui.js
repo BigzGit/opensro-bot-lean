@@ -196,8 +196,8 @@ const UI = {
     this.nav = el('nav'); this.nav.setAttribute('aria-label', 'Bot settings');
     // Page icons are the game's own action-bar icons; they show only in the wide window's page list.
     const navIcons = { Items: 'action\\cos_cmd_inventory', Party: 'action\\icon_cha_party', Combat: 'action\\icon_cha_auto_attack', Loot: 'action\\icon_cha_autoget', Supplies: 'action\\icon_cha_recovery', Town: 'item\\etc\\mall_return_scroll',
-      Alchemy: 'action\\icon_cha_alchemy', Wardrobe: 'action\\icon_cha_shop', Settings: 'action\\icon_cha_helper' };
-    for (const name of ['Map', 'Combat', 'Party', 'Loot', 'Items', 'Supplies', 'Town', 'Alchemy', 'Wardrobe', 'Settings']) {
+      Alchemy: 'action\\icon_cha_alchemy', Wardrobe: 'action\\icon_cha_shop', Settings: 'action\\icon_cha_helper', Setup: 'action\\icon_cha_camp' };
+    for (const name of ['Setup', 'Map', 'Combat', 'Party', 'Loot', 'Items', 'Supplies', 'Town', 'Alchemy', 'Wardrobe', 'Settings']) {
       const tab = this.button(name, () => { this.current = name; this.draw(); });
       if (name === 'Map') this.paintPath(tab, MAP_ART + 'interface/minimap/mm_map_button.png');
       else Icons.paint(tab, navIcons[name] + '.ddj');
@@ -766,6 +766,8 @@ const UI = {
         el('p', 'Works during hunting and while stopped. Walks into skill range for visible dead members within the maximum radius, casts Rebirth, then returns. During hunting the radius is measured from the saved hunt spot; while stopped it uses your starting position. Collision data is required for walking. Travel stops after 30 seconds or 12 seconds without progress per leg. The member must accept the revival. Travel, shopping and manual control take priority.', 'muted')));
     } else if (this.current === 'Items') {
       this.drawItems();
+    } else if (this.current === 'Setup') {
+      Setup.draw(this.pane);
     } else if (this.current === 'Map') {
       LeanMap.draw(this.pane);
     } else if (this.current === 'Alchemy') {
@@ -926,7 +928,7 @@ const UI = {
   },
   update() {
     Stats.sample(); Stats.render();
-    Alchemy.refresh();
+    Alchemy.refresh(); Setup.refresh();
     if (this.current === 'Combat' && this.combatTab === 'Buffs & imbue' && BuffGear.note) BuffGear.note.textContent = BuffGear.status();
     Reports.render();
     const diagnosticState = Diagnostics.sample();

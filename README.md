@@ -15,6 +15,10 @@ A compact OpenSRO bot for hunting, potions, pet loot and automatic town trips.
 
 Settings are saved separately for each character. The bot checks for updates on load and every 15 minutes; click **Update** beside the version when it appears, install, then reload when ready.
 
+## Setup page
+
+The **Setup** page is the first page and opens by itself for a character that has no hunting spot or attack skills yet. It is a live checklist: character and weapon, hunting spot, attack skills, potions, what to pick up, town trips, pet, and what happens on death. Each row says what is missing and has one button (**Set here**, **Pick skills**, **Turn on**, **Set up town**, **Safe preset**). **Fix the next thing** jumps to the first red item. **Starter settings** (**Level up**, **Farm drops**, **Safe AFK**) are laid over your current settings, so your skills, hunting spot and town stay; the page lists every change first, applies nothing until **Apply**, and **Undo last change** brings your old settings back. The page only reads the game and your settings until you press a button.
+
 ## Item rules
 
 The **Items** page lists every item in the game with sBot-style filters (group, race, gender, type, degree, search, only items with a rule). Per item choose **Pick** always/never and one action: **Store** (warehouse on town trips), **Sell** (pet loot at the repair merchant), **Keep**, or **Drop** (thrown away from your bag or the pet while hunting, never picked up again). Click a cell, right-click a row, or use the bulk buttons for everything shown (second click confirms). Rules come first; other items follow the Loot switches. Your own bag is never sold, and supplies the town trip needs are never stored from it.

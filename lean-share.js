@@ -66,6 +66,8 @@ const ProfileShare = {
     const own = this.personal(Settings.profile);
     return this.restore(botProfile(this.conform(DEFAULT_PROFILE, imported)), own);
   },
+  // Starter settings: changes laid over the current settings (arrays are replaced, everything else you have stays).
+  overlay(settings) { return botProfile(deepMerge(this.clone(Settings.profile), settings)); },
   text(share = true) {
     const profile = this.diff(share ? this.strip(Settings.profile) : Settings.profile, DEFAULT_PROFILE) || {};
     return JSON.stringify({ app: SHARE.apps[0], format: SHARE.format, version: VERSION, profile }, null, share ? 0 : 2);
@@ -152,7 +154,7 @@ const ProfileShare = {
     const p = this.pending;
     if (!p) return false;
     if (Hunt.running) { UI.toast('Stop hunting before importing settings.', 'warn'); return false; }
-    const next = this.build(p.imported);
+    const next = p.preset ? this.overlay(p.preset) : this.build(p.imported);
     Store.set(this.backupKey(), { at: Date.now(), profile: this.clone(Settings.profile) });
     stopAll();
     Settings.profile = next; Settings.saveProfile();

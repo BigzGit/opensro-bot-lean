@@ -159,3 +159,9 @@ nav button{min-width:0;padding:0 3px}
 /* Ten pages: two rows of five tabs in the compact window. The wide window keeps its page list. */
 nav button{flex:1 0 calc(20% - 2px)}
 fieldset>input[type=search]{width:100%;margin:2px 0 6px}
+.sx-score{margin:0 0 6px;color:#fff;font-weight:bold}
+.sx-rows{display:block}.sx-row{display:flex;gap:8px;align-items:center;padding:6px 0;border-top:1px solid #3a321c}.sx-row:first-child{border-top:0}
+.sx-text{flex:1;min-width:0}.sx-text strong{display:block;color:#fff}.sx-text .muted{display:block;margin-top:1px}
+.sx-ico{--c:#8a8a8a;overflow:visible}.sx-ico:after{content:'';position:absolute;right:-4px;bottom:-4px;width:11px;height:11px;border-radius:50%;border:1px solid #000;background:var(--c)}
+.sx-ok .sx-ico{--c:#7fd08a}.sx-warn .sx-ico{--c:#f0b64a}.sx-bad .sx-ico{--c:#e8776a}
+.sx-row button{flex:0 0 auto;min-width:64px}
