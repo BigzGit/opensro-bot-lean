@@ -126,6 +126,10 @@ Under **Settings → Auto mastery and skills** the bot can spend skill points fo
 
 It works while hunting is stopped and does nothing while you are dead or during a town trip. If the server refuses a level (for example its mastery total limit) the bot waits a minute before trying that one again.
 
+## Auto stat points
+
+Under **Settings → Stat points** tick **Spend stat points automatically** and the bot spends your unspent stat points on Strength and Intelligence as you level up, one point at a time, each confirmed by your unspent count going down. **Strength share** and **Intelligence share** are a ratio: 1 and 0 puts everything into Strength, 0 and 1 everything into Intelligence, 2 and 1 spends two Strength points for every Intelligence point (counted from the points this bot spent since it loaded). **Keep this many points unspent** holds some back. A point the game does not accept is not resent for a minute. It does nothing while you are dead and is off by default.
+
 ## When the character uses normal attacks instead of skills
 
 The main panel's status line now says why, for example "Combat: normal attack (1 cooling down)". The reasons are: not learned, paused after a server rejection (the bot skips a skill the game keeps refusing, for 5 to 40 seconds), cooling down, not enough MP, MP below your configured minimum, or no skills in the rotation for that monster class. The same reason is written to Settings → Recent activity (at most every 30 seconds) and included in bug reports as counts only, never skill names. A skill is only treated as rejected after a newer game update arrived and its cooldown still had not started.

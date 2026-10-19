@@ -202,6 +202,7 @@ const Controller = {
       Party.tick();
       Party.resumeTick();
       AutoMastery.tick();
+      StatPoints.tick();
       Potion.tick();
       ItemRules.dropTick();
       Loot.checkPetFull();

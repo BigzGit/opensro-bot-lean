@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.107
+// @version      1.2.108
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.107';
+const VERSION = '1.2.108';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -193,6 +193,7 @@ const DEFAULT_PROFILE = {
     from: { powder: 0, luck: 0, steady: 5, immortal: 5, astral: 4 },
     // Attribute percentages: the lowest variance value (0 to 31) wanted per NATTR_ name, 0 or missing = leave it alone.
     attr: { targets: {}, limit: 100 } },
+  statPoints: { enabled: false, str: 1, int: 0, reserve: 0 },
   mastery: { enabled: false, ids: [], gap: 0, skills: false, scope: 'rotation', reserve: 0, order: 'masteries' },
   party: { autoAcceptMatching: false, autoRecruit: false, autoRes: false, acceptRes: false, resRadius: 300, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true,
     support: { enabled: false, whileStopped: false, range: 30, heal: { id: 0, group: 0, pct: 60, self: false }, group: { id: 0, group: 0, pct: 60, count: 2 }, buffs: [] } },
@@ -4242,6 +4243,7 @@ const Controller = {
       Party.tick();
       Party.resumeTick();
       AutoMastery.tick();
+      StatPoints.tick();
       Potion.tick();
       ItemRules.dropTick();
       Loot.checkPetFull();
@@ -5386,6 +5388,68 @@ const AutoMastery = {
 for (const [name, owner, method] of [['Party', Party, 'tick'], ['Party resurrection', Party, 'acceptResurrection'], ['Party resume', Party, 'resumeTick'], ['Auto mastery', AutoMastery, 'tick'], ['SoX alerts', Stats, 'soxFound']]) {
   const original = owner[method];
   owner[method] = function (...args) { return Controller.guard(name, () => original.apply(this, args)); };
+}
+
+
+// Spends the character's unspent stat points on Strength and Intelligence, one confirmed point at a time. The game's
+// own stat button sends one point per press (the "stat-increase" command); a point is confirmed when the unspent count
+// goes down, never because the command was sent. The split is a ratio, kept by counting what the bot itself spent.
+const StatPoints = {
+  pending: null, blockedUntil: 0, lastAt: -Infinity, spent: { str: 0, int: 0 }, message: 'Auto stat points off.', note: null,
+  cfg() { return Settings.profile.statPoints; },
+  weight(stat) { const w = Math.floor(Number(this.cfg()[stat])); return Number.isFinite(w) ? Math.min(10, Math.max(0, w)) : 0; },
+  reserve() { const r = Math.floor(Number(this.cfg().reserve)); return Number.isFinite(r) ? Math.max(0, r) : 0; },
+  reset() { this.pending = null; this.blockedUntil = 0; this.spent = { str: 0, int: 0 }; this.message = this.cfg().enabled ? 'Waiting for character data.' : 'Auto stat points off.'; },
+  // The stat furthest behind its share; with equal progress Strength goes first. Null when both weights are zero.
+  pick() {
+    const s = this.weight('str'), i = this.weight('int');
+    if (!s && !i) return null;
+    if (!i) return 'str';
+    if (!s) return 'int';
+    return this.spent.str * i <= this.spent.int * s ? 'str' : 'int';
+  },
+  tick() {
+    const c = this.cfg(), progression = World.gp?.progression;
+    if (!c.enabled) { this.pending = null; this.message = 'Auto stat points off.'; return; }
+    if (!World.inWorld() || World.isDead() || !progression) { this.message = 'Waiting for a living character.'; return; }
+    const points = progression.statPoints;
+    if (!Number.isInteger(points)) { this.message = 'Stat points are not known yet.'; return; }
+    const p = this.pending;
+    if (p) {
+      if (points < p.before) {
+        this.spent[p.stat]++; this.pending = null;
+        this.message = `+1 ${p.stat === 'str' ? 'Strength' : 'Intelligence'} (${points} point${points === 1 ? '' : 's'} left).`;
+      } else if (now() - p.at > 5000) {
+        // Never resend blindly: the server may have refused (for example at a stat limit).
+        this.pending = null; this.blockedUntil = now() + 60000;
+        this.message = `The ${p.stat === 'str' ? 'Strength' : 'Intelligence'} point was not accepted; trying again in a minute.`;
+      } else return;
+    }
+    if (now() < this.blockedUntil) return;
+    if (!points) { this.message = 'No stat points to spend.'; return; }
+    if (points <= this.reserve()) { this.message = `Keeping ${points} stat point${points === 1 ? '' : 's'} unspent (your reserve is ${this.reserve()}).`; return; }
+    const stat = this.pick();
+    if (!stat) { this.message = 'Set a Strength or Intelligence share above zero.'; return; }
+    if (now() - this.lastAt < 500 || !Cmd.spaced('stat-increase')) return;
+    if (Cmd.raw({ kind: 'stat-increase', stat }, 'Stat point: +1 ' + (stat === 'str' ? 'Strength' : 'Intelligence'))) {
+      this.pending = { stat, before: points, at: now() }; this.lastAt = now();
+      this.message = `Adding a ${stat === 'str' ? 'Strength' : 'Intelligence'} point; waiting for the game to confirm.`;
+    }
+  },
+  status() { return this.message; },
+  draw(parent) {
+    const box = UI.group('Stat points', UI.check('Spend stat points automatically', () => this.cfg().enabled, v => { this.cfg().enabled = v; this.pending = null; this.blockedUntil = 0; }));
+    box.append(UI.number('Strength share', () => this.cfg().str, v => this.cfg().str = v, 0, 10),
+      UI.number('Intelligence share', () => this.cfg().int, v => this.cfg().int = v, 0, 10),
+      UI.number('Keep this many points unspent', () => this.cfg().reserve, v => this.cfg().reserve = v, 0, 65535));
+    this.note = el('p', this.message, 'muted');
+    box.append(this.note, el('p', 'Spends one point at a time and waits for the game to confirm it. The shares are a ratio: 1 and 0 puts everything into Strength, 0 and 1 everything into Intelligence, 2 and 1 spends two Strength points for every Intelligence point. The ratio counts only points this bot spent since it loaded, so points you added yourself do not change it.', 'muted'));
+    parent.append(box);
+  },
+};
+for (const [name, method] of [['Auto stat points', 'tick']]) {
+  const original = StatPoints[method];
+  StatPoints[method] = function (...args) { return Controller.guard(name, () => original.apply(this, args)); };
 }
 
 
@@ -7521,7 +7585,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.107", "title": "Buff weapon swapping explains itself", "items": ["The Buffs & imbue page now lists every buff assigned to a weapon set and what it is waiting for: how many seconds an active buff has left (the swap only happens when it is about to end), that it is due now, that the skill is not learned, or why it was skipped.", "When a buff is due but the swap cannot start, the page says why instead of staying silent: a saved set whose weapon or shield cannot be found in the bag (or two copies look identical), a missing combat weapon, no free bag slot, no saved set, or no buff assigned to a set.", "A buff whose cast was only unconfirmed is tried again after two minutes. Before, it was skipped until you changed buff settings, so a single missed confirmation could stop swaps for good.", "The buff weapon status is part of the diagnostics export, so a bug report shows what the swap was waiting for."]}, {"version": "1.2.106", "title": "Town setup: pick your town, no need to stand in it", "items": ["The Town page has a Town list and a Set up this town button. Pick Hotan, Jangan, Donwhang, Constantinople or Samarkand and one click fills the arrival point, warehouse, potion merchant, repair merchant and world statue. You no longer have to use a return scroll and stand where it lands first.", "The arrival point is now a preset too. Each town's return scroll always lands on the same spot, so the bot knows it from the server's own data instead of using wherever you happened to be standing.", "Auto-set town services and Redo all automatically still work for the town you are in, and now also use the preset arrival point."]}, {"version": "1.2.105", "title": "Alchemy: aim for stat percentages with attribute stones", "items": ["New Item attributes group in the Alchemy tab. Pick an item, choose the lowest percentage you want for each of its stats (Phy. reinforce, Mag. reinforce, attack rating, attack power, critical, defense, block, absorption and so on, depending on the kind of item) and press Fuse attribute stones. The bot fuses attribute stones of the item's degree until every picked stat reaches its target.", "Every successful fusion rolls the stat again, so it can come out lower, and it can re-roll another stat of the item; the bot keeps going until all picked stats are at or above their targets, and the log names any other stat that changed.", "The tab shows each stat's current percentage and a rough number of stones each target takes (the chance is 50% per stone before bonuses and the top steps get rare fast), and a stone limit (100 by default) stops it. It stops with a message if a stone of the right kind is missing from the bag."]}, {"version": "1.2.104", "title": "Fix: stuck-character recall that fails to start", "items": ["If the optional recovery recall could not start a town trip, hunting kept running and the stuck check repeated forever. Hunting now stops with the alert, as it does when recall is off.", "Fixed a missing full stop in the Obstacles help text."], "note": "Reviewed the 1.2.101 to 1.2.103 obstacle and attack-retry changes: 360 integration tests, the obstacle suite, the browser test and the native navigation comparison all pass."}, {"version": "1.2.103", "title": "Fix attack retries carrying over to other monsters", "items": ["Fixed skills being falsely paused while the character was still approaching a monster outside skill reach.", "Attack rejection pauses now apply to the affected monster, so a failed target does not leave skills paused against the next one.", "Silent rejection checks now require the same selected target, known skill reach and fresh game state without pending movement, selection or inventory work."], "note": "The existing weaker-attacker priority remains in effect. Validated with 360 integration tests; live gameplay confirmation is still pending."}, {"version": "1.2.102", "title": "Fix false blocked-target rejections on normal terrain", "items": ["Removed a two-metre height-difference rejection from the horizontal collision query. Ordinary slopes no longer make nearby monsters look unreachable.", "Missing maps, search limits and failed initial route queries preserve the game's normal approach and targeting. A no-route abandonment now requires fresh state showing an actual sustained lack of movement and confirmed damage.", "Failed-approach memory applies only to the same monster. A failed enemy no longer excludes a different nearby enemy or a party-engaged target beside it."], "note": "This corrects the 1.2.101 targeting regression. Collision-checked detours and confirmed escape recovery remain enabled; live tree-interior recovery still needs gameplay validation."}, {"version": "1.2.101", "title": "Safer obstacle pursuit and confirmed escape recovery", "items": ["Blocked enemies are evaluated before repeated attack approaches. Failed routes retain movement control, stop and release the target, and use bounded retries with short-lived failed-approach memory.", "Detours use cached routes and short collision-checked steps. Party damage and position jitter no longer count as a successful detour, and ranged skills get a bounded trial instead of an assumed walking line-of-sight rule.", "Escape uses validated breadcrumbs or legal nearby steps, retries refused local sends, and requires fresh, stable arrival followed by a second move before resuming. No legal exit means a bounded stop instead of blind movement.", "Settings adds optional recovery recall and local detailed escape diagnostics, both off by default. Recovery recall completes town services and stops in town rather than reversing into the trap."], "note": "Live tree-contact recovery still needs controlled gameplay validation. This release does not change OpenSRO collision rules or provide a server-side teleport."}, {"version": "1.2.100", "title": "Alchemy helper stones: a simple Use switch for each", "items": ["Luck, Steady, Immortal and Astral now each have a Use switch. When it is ticked, the bot fuses a stone automatically before every attempt at or above the plus you set whenever the item has fewer charges than you asked it to keep, so the stones are used while enhancing without any extra clicking.", "Before, a helper only ran when its count was set above zero and the counts started at zero, which made it look as if the stones were never used. The counts now start at 1 and mean how many charges to keep, and old settings keep their helpers switched on.", "The Alchemy tab says which helpers it will use, from which plus and how many charges it keeps, or says that none are ticked."]}];
+const RELEASE_NOTES = [{"version": "1.2.108", "title": "Auto stat points (Strength and Intelligence)", "items": ["New Stat points group in Settings: tick Spend stat points automatically and the bot spends your unspent stat points on Strength and Intelligence, one point at a time, as you level up.", "The split is a ratio. 1 and 0 puts everything into Strength, 0 and 1 everything into Intelligence, 2 and 1 spends two Strength points for every Intelligence point. A reserve keeps some points unspent.", "Each point is confirmed by your unspent count going down before the next is sent. A point the game does not accept is not resent for a minute. It is off by default and the status line says what it is doing."]}, {"version": "1.2.107", "title": "Buff weapon swapping explains itself", "items": ["The Buffs & imbue page now lists every buff assigned to a weapon set and what it is waiting for: how many seconds an active buff has left (the swap only happens when it is about to end), that it is due now, that the skill is not learned, or why it was skipped.", "When a buff is due but the swap cannot start, the page says why instead of staying silent: a saved set whose weapon or shield cannot be found in the bag (or two copies look identical), a missing combat weapon, no free bag slot, no saved set, or no buff assigned to a set.", "A buff whose cast was only unconfirmed is tried again after two minutes. Before, it was skipped until you changed buff settings, so a single missed confirmation could stop swaps for good.", "The buff weapon status is part of the diagnostics export, so a bug report shows what the swap was waiting for."]}, {"version": "1.2.106", "title": "Town setup: pick your town, no need to stand in it", "items": ["The Town page has a Town list and a Set up this town button. Pick Hotan, Jangan, Donwhang, Constantinople or Samarkand and one click fills the arrival point, warehouse, potion merchant, repair merchant and world statue. You no longer have to use a return scroll and stand where it lands first.", "The arrival point is now a preset too. Each town's return scroll always lands on the same spot, so the bot knows it from the server's own data instead of using wherever you happened to be standing.", "Auto-set town services and Redo all automatically still work for the town you are in, and now also use the preset arrival point."]}, {"version": "1.2.105", "title": "Alchemy: aim for stat percentages with attribute stones", "items": ["New Item attributes group in the Alchemy tab. Pick an item, choose the lowest percentage you want for each of its stats (Phy. reinforce, Mag. reinforce, attack rating, attack power, critical, defense, block, absorption and so on, depending on the kind of item) and press Fuse attribute stones. The bot fuses attribute stones of the item's degree until every picked stat reaches its target.", "Every successful fusion rolls the stat again, so it can come out lower, and it can re-roll another stat of the item; the bot keeps going until all picked stats are at or above their targets, and the log names any other stat that changed.", "The tab shows each stat's current percentage and a rough number of stones each target takes (the chance is 50% per stone before bonuses and the top steps get rare fast), and a stone limit (100 by default) stops it. It stops with a message if a stone of the right kind is missing from the bag."]}, {"version": "1.2.104", "title": "Fix: stuck-character recall that fails to start", "items": ["If the optional recovery recall could not start a town trip, hunting kept running and the stuck check repeated forever. Hunting now stops with the alert, as it does when recall is off.", "Fixed a missing full stop in the Obstacles help text."], "note": "Reviewed the 1.2.101 to 1.2.103 obstacle and attack-retry changes: 360 integration tests, the obstacle suite, the browser test and the native navigation comparison all pass."}, {"version": "1.2.103", "title": "Fix attack retries carrying over to other monsters", "items": ["Fixed skills being falsely paused while the character was still approaching a monster outside skill reach.", "Attack rejection pauses now apply to the affected monster, so a failed target does not leave skills paused against the next one.", "Silent rejection checks now require the same selected target, known skill reach and fresh game state without pending movement, selection or inventory work."], "note": "The existing weaker-attacker priority remains in effect. Validated with 360 integration tests; live gameplay confirmation is still pending."}, {"version": "1.2.102", "title": "Fix false blocked-target rejections on normal terrain", "items": ["Removed a two-metre height-difference rejection from the horizontal collision query. Ordinary slopes no longer make nearby monsters look unreachable.", "Missing maps, search limits and failed initial route queries preserve the game's normal approach and targeting. A no-route abandonment now requires fresh state showing an actual sustained lack of movement and confirmed damage.", "Failed-approach memory applies only to the same monster. A failed enemy no longer excludes a different nearby enemy or a party-engaged target beside it."], "note": "This corrects the 1.2.101 targeting regression. Collision-checked detours and confirmed escape recovery remain enabled; live tree-interior recovery still needs gameplay validation."}, {"version": "1.2.101", "title": "Safer obstacle pursuit and confirmed escape recovery", "items": ["Blocked enemies are evaluated before repeated attack approaches. Failed routes retain movement control, stop and release the target, and use bounded retries with short-lived failed-approach memory.", "Detours use cached routes and short collision-checked steps. Party damage and position jitter no longer count as a successful detour, and ranged skills get a bounded trial instead of an assumed walking line-of-sight rule.", "Escape uses validated breadcrumbs or legal nearby steps, retries refused local sends, and requires fresh, stable arrival followed by a second move before resuming. No legal exit means a bounded stop instead of blind movement.", "Settings adds optional recovery recall and local detailed escape diagnostics, both off by default. Recovery recall completes town services and stops in town rather than reversing into the trap."], "note": "Live tree-contact recovery still needs controlled gameplay validation. This release does not change OpenSRO collision rules or provide a server-side teleport."}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -7818,7 +7882,7 @@ const Diagnostics = {
         hpTarget: this.number(Restock.cfg().hp.target), mpTarget: this.number(Restock.cfg().mp.target),
         buyCure: !!Restock.cfg().cure.on, cureTarget: this.number(Restock.cfg().cure.target), cureLow: this.number(Restock.cfg().cure.low),
         hpLow: this.number(Restock.cfg().hp.low), mpLow: this.number(Restock.cfg().mp.low),
-        collectDrops: !!c.hunt.pickup.enabled, petCollector: Loot.petMode(), autoMastery: AutoMastery.active() ? String(AutoMastery.message).slice(0, 600) : '', trapStage: Trap.stage, trapTile: Trap.stage ? Trap.tile : '', characterCollects: Loot.categories.some(k => c.hunt.pickup[k] && Loot.collectorFor(k) === 'character'), pickupRadius: this.number(c.hunt.pickup.radius / 10),
+        collectDrops: !!c.hunt.pickup.enabled, petCollector: Loot.petMode(), autoStatPoints: Settings.profile.statPoints.enabled ? String(StatPoints.status()).slice(0, 200) : '', autoMastery: AutoMastery.active() ? String(AutoMastery.message).slice(0, 600) : '', trapStage: Trap.stage, trapTile: Trap.stage ? Trap.tile : '', characterCollects: Loot.categories.some(k => c.hunt.pickup[k] && Loot.collectorFor(k) === 'character'), pickupRadius: this.number(c.hunt.pickup.radius / 10),
         finishFight: !!c.hunt.pickup.afterKillOnly, speedScroll: !!c.potion.speedScroll }
     };
   },
@@ -9172,6 +9236,7 @@ const UI = {
         this.stuckNote,
         el('p', 'Progress means a confirmed kill, XP, gold, a pickup, or damage to your target. Resting, buffing, looting, shopping and town trips do not count against you. First recovery drops the current target; the next ones walk back to the saved hunting spot; after the last one hunting stops.', 'muted')));
       AutoMastery.draw(this.pane);
+      StatPoints.draw(this.pane);
       this.pane.append(this.group('Profiles', el('p', 'Settings are saved separately for each character.', 'muted'),
         this.button('Export nixxane bot settings', () => {
           const url = URL.createObjectURL(new Blob([JSON.stringify({ app: 'sro-bot-lean', version: VERSION, profile: Settings.profile }, null, 2)], { type: 'application/json' }));
@@ -9303,6 +9368,7 @@ const UI = {
     this.updateOrb(); this.updateWide();
     if (this.townNote) this.townNote.textContent = Town.status();
     if (this.current === 'Settings' && AutoMastery.note) AutoMastery.note.textContent = AutoMastery.status();
+    if (this.current === 'Settings' && StatPoints.note) StatPoints.note.textContent = StatPoints.status();
     if (this.current === 'Settings' && this.stuckNote) this.stuckNote.textContent = AntiStuck.status();
     if (this.current === 'Party' && this.partyNote) {
       const notes = [Settings.profile.party.autoRecruit ? Party.message : 'Auto-recruit off.'];
@@ -9360,7 +9426,7 @@ function boot() {
     const key = name ? 'profile:' + name : 'profile:default';
     if (key !== Settings.profileKey) { Town.lastScrollPoint = null; stopAll(); Settings.useCharacter(name); }
   });
-  bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); BuffGear.reset(); Town.lastScrollPoint = null; SpeedScroll.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
+  bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); StatPoints.reset(); BuffGear.reset(); Town.lastScrollPoint = null; SpeedScroll.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
   bus.on('phase', phase => {
     if (phase !== 'world') {
       BuffGear.interrupt('World transition interrupted buff swaps.');
@@ -9399,7 +9465,7 @@ function boot() {
   Ticker.start(() => Controller.tick(), 100);
   setInterval(() => { Wardrobe.tick(); UI.update(); }, 500);
   W.SROLean = { version: VERSION, stats: Stats, updates: Updates, diagnostics: Diagnostics, reports: Reports, alchemy: Alchemy, buffGear: BuffGear, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, resurrect: Resurrect,
-    restock: Restock, town: Town, walkBack: WalkBack, antiStuck: AntiStuck, chase: Chase, trap: Trap, autoMastery: AutoMastery, reconnect: Reconnect, petPotion: PetPotion, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, ui: UI, map: LeanMap, support: Support, items: ItemRules, stop: stopAll, log: Log };
+    restock: Restock, town: Town, walkBack: WalkBack, antiStuck: AntiStuck, chase: Chase, trap: Trap, autoMastery: AutoMastery, statPoints: StatPoints, reconnect: Reconnect, petPotion: PetPotion, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, ui: UI, map: LeanMap, support: Support, items: ItemRules, stop: stopAll, log: Log };
   Log.info('nixxane bot ready. F8 starts/stops; F7 folds; the × minimises; Shift+F7 hides/shows the window.');
 }
 

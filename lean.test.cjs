@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -1278,6 +1278,41 @@ test('auto mastery can leave a gap below the character level', () => {
   f.Settings.profile.mastery.ids = [257]; f.Settings.profile.mastery.gap = -5; f.Controller.tick(); assert.deepEqual(trains(f), [257]);
   f = masteryFixture({ masteries: [{ id: 257, level: 29 }] }); f.Stats.levels = { 29: { masteryTrainSpCost: 5 } };
   f.Settings.profile.mastery.ids = [257]; f.Settings.profile.mastery.gap = 'x'; f.Controller.tick(); assert.deepEqual(trains(f), [257]);
+});
+function statFixture(points = 3, weights = { str: 1, int: 0 }, extra = {}) {
+  const f = fixture(), c = f.Settings.profile.statPoints;
+  Object.assign(c, { enabled: true, reserve: 0, ...weights, ...extra });
+  f.World.applyGameplay({ ...f.World.gp, progression: { ...f.World.gp.progression, statPoints: points } });
+  f.spend = () => f.World.applyGameplay({ ...f.World.gp, progression: { ...f.World.gp.progression, statPoints: f.World.gp.progression.statPoints - 1 } });
+  return f;
+}
+const statSends = f => f.commands.filter(c => c.kind === 'stat-increase').map(c => c.stat);
+test('auto stat points spends one point at a time and confirms each by the unspent count going down', () => {
+  const f = statFixture(2);
+  f.Controller.tick(); assert.deepEqual(statSends(f), ['str']);
+  for (let n = 0; n < 6; n++) { f.advance(200); f.Controller.tick(); }
+  assert.deepEqual(statSends(f), ['str'], 'nothing more is sent before the game confirms');
+  f.spend(); f.advance(600); f.Controller.tick(); assert.deepEqual(statSends(f), ['str', 'str']);
+  f.spend(); f.advance(600); f.Controller.tick(); assert.deepEqual(statSends(f), ['str', 'str']); assert.match(f.StatPoints.status(), /No stat points to spend/);
+});
+test('auto stat points follows the Strength and Intelligence ratio and the reserve', () => {
+  const f = statFixture(6, { str: 2, int: 1 });
+  const order = [];
+  for (let n = 0; n < 6; n++) { f.Controller.tick(); order.push(statSends(f).at(-1)); f.spend(); f.advance(600); f.Controller.tick(); f.advance(600); }
+  assert.deepEqual(order, ['str', 'int', 'str', 'str', 'int', 'str']);
+  const g = statFixture(5, { str: 0, int: 1 }); g.Controller.tick(); assert.deepEqual(statSends(g), ['int']);
+  const h = statFixture(3, { str: 1, int: 0 }, { reserve: 3 }); h.Controller.tick(); assert.deepEqual(statSends(h), []); assert.match(h.StatPoints.status(), /Keeping 3 stat points unspent/);
+  const z = statFixture(3, { str: 0, int: 0 }); z.Controller.tick(); assert.deepEqual(statSends(z), []); assert.match(z.StatPoints.status(), /share above zero/);
+});
+test('auto stat points is off by default, waits for a living character and never resends an unconfirmed point', () => {
+  const off = fixture(); off.World.applyGameplay({ ...off.World.gp, progression: { ...off.World.gp.progression, statPoints: 5 } });
+  assert.equal(off.Settings.profile.statPoints.enabled, false); off.Controller.tick(); assert.deepEqual(statSends(off), []);
+  const f = statFixture(2); f.Controller.tick(); assert.equal(statSends(f).length, 1);
+  f.advance(6000); f.Controller.tick(); assert.match(f.StatPoints.status(), /not accepted; trying again in a minute/);
+  f.advance(10000); f.Controller.tick(); assert.equal(statSends(f).length, 1, 'blocked for a minute');
+  f.advance(60000); f.Controller.tick(); assert.equal(statSends(f).length, 2);
+  const unknown = statFixture(0); unknown.World.applyGameplay({ ...unknown.World.gp, progression: { ...unknown.World.gp.progression, statPoints: undefined } });
+  unknown.Controller.tick(); assert.deepEqual(statSends(unknown), []); assert.match(unknown.StatPoints.status(), /not known yet/);
 });
 function skillFixture(extra = {}, learned = [1001]) {
   const f = masteryFixture(extra); f.Settings.profile.mastery.enabled = false; f.Settings.profile.mastery.skills = true;

@@ -199,7 +199,7 @@ const Diagnostics = {
         hpTarget: this.number(Restock.cfg().hp.target), mpTarget: this.number(Restock.cfg().mp.target),
         buyCure: !!Restock.cfg().cure.on, cureTarget: this.number(Restock.cfg().cure.target), cureLow: this.number(Restock.cfg().cure.low),
         hpLow: this.number(Restock.cfg().hp.low), mpLow: this.number(Restock.cfg().mp.low),
-        collectDrops: !!c.hunt.pickup.enabled, petCollector: Loot.petMode(), autoMastery: AutoMastery.active() ? String(AutoMastery.message).slice(0, 600) : '', trapStage: Trap.stage, trapTile: Trap.stage ? Trap.tile : '', characterCollects: Loot.categories.some(k => c.hunt.pickup[k] && Loot.collectorFor(k) === 'character'), pickupRadius: this.number(c.hunt.pickup.radius / 10),
+        collectDrops: !!c.hunt.pickup.enabled, petCollector: Loot.petMode(), autoStatPoints: Settings.profile.statPoints.enabled ? String(StatPoints.status()).slice(0, 200) : '', autoMastery: AutoMastery.active() ? String(AutoMastery.message).slice(0, 600) : '', trapStage: Trap.stage, trapTile: Trap.stage ? Trap.tile : '', characterCollects: Loot.categories.some(k => c.hunt.pickup[k] && Loot.collectorFor(k) === 'character'), pickupRadius: this.number(c.hunt.pickup.radius / 10),
         finishFight: !!c.hunt.pickup.afterKillOnly, speedScroll: !!c.potion.speedScroll }
     };
   },

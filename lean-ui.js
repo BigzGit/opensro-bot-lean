@@ -801,6 +801,7 @@ const UI = {
         this.stuckNote,
         el('p', 'Progress means a confirmed kill, XP, gold, a pickup, or damage to your target. Resting, buffing, looting, shopping and town trips do not count against you. First recovery drops the current target; the next ones walk back to the saved hunting spot; after the last one hunting stops.', 'muted')));
       AutoMastery.draw(this.pane);
+      StatPoints.draw(this.pane);
       this.pane.append(this.group('Profiles', el('p', 'Settings are saved separately for each character.', 'muted'),
         this.button('Export nixxane bot settings', () => {
           const url = URL.createObjectURL(new Blob([JSON.stringify({ app: 'sro-bot-lean', version: VERSION, profile: Settings.profile }, null, 2)], { type: 'application/json' }));
@@ -932,6 +933,7 @@ const UI = {
     this.updateOrb(); this.updateWide();
     if (this.townNote) this.townNote.textContent = Town.status();
     if (this.current === 'Settings' && AutoMastery.note) AutoMastery.note.textContent = AutoMastery.status();
+    if (this.current === 'Settings' && StatPoints.note) StatPoints.note.textContent = StatPoints.status();
     if (this.current === 'Settings' && this.stuckNote) this.stuckNote.textContent = AntiStuck.status();
     if (this.current === 'Party' && this.partyNote) {
       const notes = [Settings.profile.party.autoRecruit ? Party.message : 'Auto-recruit off.'];
