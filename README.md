@@ -130,6 +130,10 @@ Under **Settings → Auto mastery and skills** the bot can spend skill points fo
 
 It works while hunting is stopped and does nothing while you are dead or during a town trip. If the server refuses a level (for example its mastery total limit) the bot waits a minute before trying that one again.
 
+## Following a party member
+
+Under **Party → Follow a party member**, tick **Follow a party member while hunting**, choose the member (the default is the party leader) and **Stay within (m)**. While hunting, the bot stays within that distance of the member and hunts around them instead of around your saved hunting spot. The game tells the party where each member is, so it also follows them across the map, up to 300 m, walking around obstacles when collision data is loaded and stopping beside them. **Fight monsters that attack on the way** lets it defend itself instead of walking on. Your saved hunting spot is never changed; it is used again whenever following is off or the member is not in the party, dead, in another area or too far. It does not follow into a dungeon or another area. The stuck check does not count waiting for the member. The status line says what it is doing.
+
 ## Auto stat points
 
 Under **Settings → Stat points** tick **Spend stat points automatically** and the bot spends your unspent stat points on Strength and Intelligence as you level up, one point at a time, each confirmed by your unspent count going down. **Strength share** and **Intelligence share** are a ratio: 1 and 0 puts everything into Strength, 0 and 1 everything into Intelligence, 2 and 1 spends two Strength points for every Intelligence point (counted from the points this bot spent since it loaded). **Keep this many points unspent** holds some back. A point the game does not accept is not resent for a minute. It does nothing while you are dead and is off by default.

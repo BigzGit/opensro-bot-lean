@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -1418,6 +1418,52 @@ test('the setup page opens first only for a character that has never been set up
   const f = fixture(); f.Settings.profile.hunt.center = null; f.Settings.profile.macro.rotations.normal = [];
   assert.equal(f.Setup.isNew(), true);
   f.Settings.profile.hunt.center = { regionId: 5, x: 1, y: 0, z: 2 }; assert.equal(f.Setup.isNew(), false);
+});
+function traceFixture(offset = 500, member = {}) {
+  const f = fixture(), pose = f.World.gp.pose;
+  f.Hunt.running = true; Object.assign(f.Settings.profile.trace, { enabled: true, name: '', distance: 12, fight: true });
+  f.Settings.profile.hunt.center = { regionId: pose.regionId, x: pose.x - 5000, y: 0, z: pose.z };
+  f.World.gp.social = { localName: 'Hunter', self: 10, leader: 11, options: 1, members: [{ id: 10, name: 'Hunter', status: 0x8a, region: pose.regionId, x: pose.x, y: 0, z: pose.z },
+    { id: 11, name: 'Leader', level: 60, status: 0x8a, region: pose.regionId, x: pose.x + offset, y: 0, z: pose.z, ...member }, { id: 12, name: 'Archer', level: 60, status: 0x8a, region: pose.regionId, x: pose.x, y: 0, z: pose.z + 200 }] };
+  f.huntedAround = []; f.Hunt.tick = () => { f.huntedAround.push(f.Settings.profile.hunt.center); };
+  return f;
+}
+const moves = f => f.commands.filter(c => c.kind === 'move');
+test('following walks to a party member who is too far away and keeps the saved hunting spot', () => {
+  const f = traceFixture(500), spot = JSON.stringify(f.Settings.profile.hunt.center), pose = f.World.gp.pose;
+  assert.equal(f.Trace.tick(), true); assert.equal(f.huntedAround.length, 0, 'it walks, it does not hunt yet');
+  const m = moves(f); assert.equal(m.length, 1); assert.ok(m[0].destination.x > pose.x + 100 && m[0].destination.x < pose.x + 500, 'it heads towards the leader and stops short of them');
+  assert.equal(f.Hunt.state, 'follow'); assert.match(f.Trace.status(), /Following Leader: 50 m away/); assert.equal(f.Trace.code, 'walking');
+  assert.equal(JSON.stringify(f.Settings.profile.hunt.center), spot, 'the saved spot is never changed');
+  f.Trace.tick(); assert.equal(moves(f).length, 1, 'one move per second at most'); f.advance(1000); f.Trace.tick(); assert.equal(moves(f).length, 2);
+});
+test('following hunts around the member once close, and restores the saved spot afterwards', () => {
+  const f = traceFixture(60), spot = JSON.stringify(f.Settings.profile.hunt.center), pose = f.World.gp.pose;
+  assert.equal(f.Trace.tick(), true); assert.equal(f.huntedAround.length, 1);
+  assert.equal(f.huntedAround[0].x, pose.x + 60, 'hunting happens around the member'); assert.equal(JSON.stringify(f.Settings.profile.hunt.center), spot);
+  assert.match(f.Trace.status(), /Hunting around Leader/);
+  f.Hunt.tick = () => { throw Error('boom'); }; f.Trace.tick(); assert.equal(JSON.stringify(f.Settings.profile.hunt.center), spot, 'restored even when the hunting step fails');
+});
+test('following picks the chosen member or the leader and leaves the tick to normal hunting when it cannot follow', () => {
+  const off = traceFixture(500); off.Settings.profile.trace.enabled = false; assert.equal(off.Trace.tick(), false); assert.equal(moves(off).length, 0);
+  const named = traceFixture(500); named.Settings.profile.trace.name = 'Archer'; named.Trace.tick(); assert.match(named.Trace.status(), /Following Archer: 20 m away/, 'the chosen member, not the leader');
+  const gone = traceFixture(500); gone.Settings.profile.trace.name = 'Nobody'; assert.equal(gone.Trace.tick(), false); assert.match(gone.Trace.status(), /Nobody is not in your party/); assert.equal(gone.Trace.code, 'no-member');
+  const lead = traceFixture(500); lead.World.gp.social.leader = 10; assert.equal(lead.Trace.tick(), false); assert.match(lead.Trace.status(), /No party leader to follow/);
+  const dead = traceFixture(500, { status: 0x80 }); assert.equal(dead.Trace.tick(), false); assert.equal(dead.Trace.code, 'member-dead');
+  const far = traceFixture(5000); assert.equal(far.Trace.tick(), false); assert.equal(far.Trace.code, 'too-far'); assert.equal(moves(far).length, 0);
+  const blind = traceFixture(500, { region: undefined }); assert.equal(blind.Trace.tick(), false); assert.equal(blind.Trace.code, 'no-position');
+  const stopped = traceFixture(500); stopped.Hunt.running = false; assert.equal(stopped.Trace.tick(), false);
+  const sitting = traceFixture(500); sitting.World.isSitting = () => true; assert.equal(sitting.Trace.tick(), false); assert.equal(moves(sitting).length, 0);
+});
+test('following fights what attacks on the way, never wanders while stuck-checking, and stays out of shares', () => {
+  const f = traceFixture(500); f.Hunt.underAttack = () => true; assert.equal(f.Trace.tick(), true); assert.equal(f.huntedAround.length, 0, 'too far to fight: it keeps walking');
+  const near = traceFixture(300); near.Hunt.underAttack = () => true; near.Trace.tick(); assert.equal(near.huntedAround.length, 1, 'attacked while within three times the distance: it fights');
+  near.Settings.profile.trace.fight = false; near.Trace.tick(); assert.equal(near.huntedAround.length, 1, 'with the option off it keeps walking');
+  const stuck = traceFixture(60); stuck.AntiStuck.idleMs = 5000; stuck.AntiStuck.tick(); assert.equal(stuck.AntiStuck.idleMs, 0, 'waiting for the leader is not being stuck');
+  const share = traceFixture(60); share.Settings.profile.trace.name = 'Leader';
+  assert.equal(JSON.parse(share.ProfileShare.text(true)).profile.trace?.name, undefined); assert.equal(share.ProfileShare.text(true).includes('Leader'), false);
+  assert.equal(share.Settings.profile.trace.name, 'Leader');
+  const loaded = share.botProfile(JSON.parse(JSON.stringify(share.Settings.profile))); assert.equal(loaded.trace.name, 'Leader'); assert.equal(loaded.trace.enabled, true);
 });
 function skillFixture(extra = {}, learned = [1001]) {
   const f = masteryFixture(extra); f.Settings.profile.mastery.enabled = false; f.Settings.profile.mastery.skills = true;

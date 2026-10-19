@@ -115,7 +115,7 @@ const gameplay = { localGid: 1, target: 0, targetPending: false, inventoryPendin
     }, legend);
     const tab = async name => { await page.getByRole('button', { name, exact: true }).click(); await page.waitForTimeout(200); };
     await snap('01-panel');
-    await tab('Setup'); await snap('00-setup');
+    await tab('Setup'); await snap('00-setup'); await tab('Combat');
     await tab('Hunt area'); await snap('02-hunt-area');
     await tab('Buffs & imbue'); await snap('04-buffs');
     await tab('Loot'); await snap('05-loot');
@@ -124,7 +124,7 @@ const gameplay = { localGid: 1, target: 0, targetPending: false, inventoryPendin
     await tab('Town'); await snap('08-town-triggers');
     await jump('Scroll town cycle'); await snap('08-town-cycle');
     await tab('Alchemy'); await page.locator('#sro-bot-lean select').first().selectOption({ index: 1 }); await page.waitForTimeout(300); await snap('09-alchemy'); await jump('Stones that help and protect'); await snap('09b-alchemy-stones'); await jump('Item attributes'); await snap('09c-alchemy-attributes');
-    await tab('Party'); await snap('13-party');
+    await tab('Party'); await snap('13-party'); await jump('Follow a party member'); await snap('13b-follow');
     await tab('Settings'); await snap('10-settings');
     await jump('Share and import settings'); await snap('10b-share'); await jump('Anti-stuck'); await snap('11-anti-stuck');
     await jump('Auto mastery and skills'); await snap('12-mastery');

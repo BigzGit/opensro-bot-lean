@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.111
+// @version      1.2.112
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.111';
+const VERSION = '1.2.112';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -194,6 +194,7 @@ const DEFAULT_PROFILE = {
     // Attribute percentages: the lowest variance value (0 to 31) wanted per NATTR_ name, 0 or missing = leave it alone.
     attr: { targets: {}, limit: 100 } },
   statPoints: { enabled: false, str: 1, int: 0, reserve: 0 },
+  trace: { enabled: false, name: '', distance: 12, fight: true },
   mastery: { enabled: false, ids: [], gap: 0, skills: false, scope: 'rotation', reserve: 0, order: 'masteries' },
   party: { autoAcceptMatching: false, autoRecruit: false, autoRes: false, acceptRes: false, resRadius: 300, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true,
     support: { enabled: false, whileStopped: false, range: 30, heal: { id: 0, group: 0, pct: 60, self: false }, group: { id: 0, group: 0, pct: 60, count: 2 }, buffs: [] } },
@@ -240,7 +241,7 @@ const DEFAULT_PROFILE = {
 function botProfile(input) {
   const result = deepMerge(DEFAULT_PROFILE, {});
   if (!input || typeof input !== 'object') return result;
-  for (const key of ['macro', 'potion', 'hunt', 'wardrobe', 'party', 'alchemy', 'mastery', 'statPoints', 'items']) {
+  for (const key of ['macro', 'potion', 'hunt', 'wardrobe', 'party', 'alchemy', 'mastery', 'statPoints', 'trace', 'items']) {
     if (!input[key] || typeof input[key] !== 'object') continue;
     for (const field of Object.keys(DEFAULT_PROFILE[key])) {
       if (field in input[key]) result[key][field] = deepMerge(DEFAULT_PROFILE[key][field], input[key][field]);
@@ -4261,7 +4262,7 @@ const Controller = {
       }
       if (WalkBack.active) { this.mode = 'returning'; WalkBack.tick(); }
       else if (Restock.recording) this.mode = 'recording';
-      else if (Hunt.running) { Hunt.tick(); this.mode = Restock.trip ? 'shopping' : Hunt.state; }
+      else if (Hunt.running) { if (!Trace.tick()) Hunt.tick(); this.mode = Restock.trip ? 'shopping' : Hunt.state; }
       else this.mode = 'idle';
     } catch (e) {
       stopAll();
@@ -4291,6 +4292,8 @@ const AntiStuck = {
   tick() {
     const c = this.cfg();
     if (!c.enabled || !Hunt.running || !World.inWorld()) { this.lastAt = null; return; }
+    // Following a party member: waiting for them is not being stuck, and recovery would walk away from them.
+    if (Trace.active()) { this.idleMs = 0; this.lastAt = now(); return; }
     const t = now(), gap = this.lastAt === null ? 0 : t - this.lastAt;
     this.lastAt = t;
     // A gap means Hunt.tick did not run (town trip, shopping, walk-back): start counting afresh.
@@ -5453,6 +5456,98 @@ for (const [name, method] of [['Auto stat points', 'tick']]) {
 }
 
 
+// Follow a party member ("trace"). The game tells every party member where the others are (region and position), so the
+// bot always knows where the chosen member is. While hunting it keeps within a set distance of them and hunts around
+// THEM instead of around the saved hunting spot: the saved spot is only swapped for the member's position while the
+// hunting step runs, never stored. Nothing changes unless the switch is on, and a member who is not in the party,
+// is in another area, or is too far away leaves the bot hunting at its own spot.
+const TRACE_LIMIT = { sendMs: 900, farUnits: 3000 };
+const Trace = {
+  message: 'Following off.', code: 'off', sentAt: -Infinity, travel: null, walking: false, note: null,
+  cfg() { return Settings.profile.trace; },
+  active() { return !!this.cfg().enabled && Hunt.running; },
+  social() { return World.gp?.social; },
+  // The member to follow: the chosen name, or the party leader when no name is chosen. Never yourself.
+  member() {
+    const social = this.social(), name = String(this.cfg().name || '').trim();
+    if (!social || !Array.isArray(social.members)) return null;
+    const others = social.members.filter(m => m && m.name && m.name !== social.localName);
+    if (name) return others.find(m => m.name === name) || null;
+    return others.find(m => m.id === social.leader) || null;
+  },
+  position(m) { return Number.isInteger(m?.region) && [m.x, m.z].every(Number.isFinite) ? { regionId: m.region, x: m.x, y: Number(m.y) || 0, z: m.z } : null; },
+  // A point on the line from the member towards us, `keep` units from the member, so we stop beside them, not on them.
+  beside(pos, from, keep) {
+    const d = regionDelta(pos, from), length = Math.hypot(...d);
+    if (!length || length <= keep) return from;
+    const k = keep / length, x = pos.x + d[0] * k, z = pos.z + d[1] * k, sx = Math.floor(x / SECTOR), sz = Math.floor(z / SECTOR);
+    return { regionId: ((pos.regionId & 255) + sx) | (((pos.regionId >>> 8) + sz) << 8), x: x - sx * SECTOR, y: pos.y, z: z - sz * SECTOR };
+  },
+  reset() { this.travel = null; this.walking = false; this.sentAt = -Infinity; this.message = this.cfg().enabled ? 'Waiting for the party.' : 'Following off.'; this.code = this.cfg().enabled ? 'waiting' : 'off'; },
+  say(text, code) { this.message = text; this.code = code; return false; },
+  // True when this tick belonged to the follower (it walked, or hunted around the member); false leaves the tick to the
+  // normal hunting step at the saved spot.
+  tick() {
+    const c = this.cfg();
+    this.walking = false;
+    if (!c.enabled) { this.message = 'Following off.'; this.code = 'off'; return false; }
+    if (!Hunt.running || !World.inWorld() || World.isDead()) return this.say('Waiting for a living character.', 'waiting');
+    const member = this.member();
+    if (!member) return this.say(c.name ? `${c.name} is not in your party; hunting at the saved spot.` : 'No party leader to follow (you lead, or you are not in a party); hunting at the saved spot.', 'no-member');
+    if (member.status !== undefined && (member.status & 15) === 0) return this.say(`${member.name} is dead; hunting at the saved spot until they are back.`, 'member-dead');
+    const pos = this.position(member), me = World.pose();
+    if (!pos || !me) return this.say(`${member.name}'s position is not known yet; hunting at the saved spot.`, 'no-position');
+    const delta = regionDelta(me, pos);
+    if (!delta) return this.say(`${member.name} is in another area; hunting at the saved spot.`, 'other-area');
+    const distance = Math.hypot(...delta), keep = Math.max(30, Number(c.distance) * 10 || 120);
+    if (distance > TRACE_LIMIT.farUnits) return this.say(`${member.name} is ${Math.round(distance / 10)} m away, too far to follow; hunting at the saved spot.`, 'too-far');
+    const attacked = c.fight && Hunt.underAttack() && distance <= keep * 3;
+    // Close enough, or fighting something that attacks us: hunt around the member.
+    if (distance <= keep || attacked) {
+      this.travel = null;
+      const H = Hunt.cfg(), real = H.center;
+      H.center = { regionId: pos.regionId, x: pos.x, y: pos.y, z: pos.z };
+      try { Hunt.tick(); } finally { H.center = real; }
+      this.message = `Hunting around ${member.name} (${Math.round(distance / 10)} m away).`; this.code = 'hunting-around';
+      return true;
+    }
+    // Too far: walk to them. Sitting or casting is left to the hunting step.
+    if (World.isSitting() || World.isCasting()) return false;
+    this.walking = true; Hunt.state = 'follow';
+    if (Hunt.targetGid) { Hunt.targetGid = 0; }
+    const goal = this.beside(pos, me, Math.max(30, keep * 0.6));
+    let point = goal, straight = false;
+    if (Navigation.scene && !((me.regionId | goal.regionId) & DUNGEON)) {
+      const move = Navigation.next(this, goal, false, Math.max(40, keep * 0.4));
+      if (move.point) point = move.point;
+      else if (move.error && !move.waiting) straight = true;
+    }
+    if (now() - this.sentAt >= TRACE_LIMIT.sendMs && Cmd.move(point)) this.sentAt = now();
+    this.code = 'walking';
+    this.message = `Following ${member.name}: ${Math.round(distance / 10)} m away` + (straight ? '; no walkable route in the collision map, walking straight.' : '.');
+    return true;
+  },
+  status() { return this.message; },
+  names() {
+    const social = this.social();
+    return (Array.isArray(social?.members) ? social.members : []).filter(m => m?.name && m.name !== social.localName).map(m => [m.name, m.name + (m.id === social.leader ? ' (leader)' : '')]);
+  },
+  draw(parent) {
+    const box = UI.group('Follow a party member', UI.check('Follow a party member while hunting', () => this.cfg().enabled, v => { this.cfg().enabled = v; this.reset(); }));
+    box.append(UI.select('Follow', () => [['', 'The party leader'], ...this.names(), ...(this.cfg().name && !this.names().some(n => n[0] === this.cfg().name) ? [[this.cfg().name, this.cfg().name + ' (not in the party now)']] : [])], () => this.cfg().name || '', v => { this.cfg().name = v; this.reset(); }),
+      UI.number('Stay within (m)', () => this.cfg().distance, v => this.cfg().distance = v, 3, 60),
+      UI.check('Fight monsters that attack on the way', () => this.cfg().fight, v => this.cfg().fight = v));
+    this.note = el('p', this.message, 'muted');
+    box.append(this.note, el('p', 'While hunting the bot stays within this distance of the member and hunts around them, not around your saved hunting spot (that stays saved and is used again when following is off or the member is unavailable). The game tells the party where its members are, so it also follows them across the map, up to 300 m. It does not follow into another area, a dungeon or a teleport. Town trips, resurrection and walk-back still work as before and bring you back to your saved spot.', 'muted'));
+    parent.append(box);
+  },
+};
+for (const [name, method] of [['Follow party member', 'tick']]) {
+  const original = Trace[method];
+  Trace[method] = function (...args) { return Controller.guard(name, () => original.apply(this, args)); };
+}
+
+
 // Sharing settings. A share code or file holds only what differs from the defaults and nothing personal: positions,
 // town and merchant points, walking routes, buff weapon sets and the wardrobe stay out. Importing never runs
 // anything: the text is parsed as data, every field is checked against the defaults, and a preview lists the changes
@@ -5466,12 +5561,12 @@ const ProfileShare = {
   personal(p) {
     const r = p.potion.restock, t = r.town;
     return this.clone({ center: p.hunt.center, vendor: r.vendor, route: r.route, offers: r.offers,
-      town: { arrival: t.arrival, storage: t.storage, vendor: t.vendor, smith: t.smith, gate: t.gate }, buffSets: p.macro.buffSets, wardrobe: p.wardrobe });
+      town: { arrival: t.arrival, storage: t.storage, vendor: t.vendor, smith: t.smith, gate: t.gate }, buffSets: p.macro.buffSets, wardrobe: p.wardrobe, follow: p.trace.name });
   },
   restore(p, own) {
     const r = p.potion.restock, t = r.town;
     p.hunt.center = own.center; r.vendor = own.vendor; r.route = own.route; r.offers = own.offers;
-    Object.assign(t, own.town); p.macro.buffSets = own.buffSets; p.wardrobe = own.wardrobe;
+    Object.assign(t, own.town); p.macro.buffSets = own.buffSets; p.wardrobe = own.wardrobe; p.trace.name = own.follow;
     // A buff assigned to a weapon set means nothing without the sets.
     for (const b of p.macro.buffs) if (b && !p.macro.buffSets.some(s => s.id === Number(b.gearSet))) b.gearSet = 0;
     return p;
@@ -7929,7 +8024,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.111", "title": "Setup page: a live checklist for new characters", "items": ["New Setup page, the first one in the list, and the page a character opens on until it has a hunting spot or attack skills. It is a checklist that reads your real state: character and weapon, hunting spot, attack skills, potions (and how many are in the bag), what to pick up, town trips, pet, and what happens on death.", "Every row says in a sentence what is missing and has one button: Set here saves the hunting spot, Pick skills opens the skill page, Turn on switches potions or pickup on, Set up town fills your town and turns town trips on when nothing is missing, and Fix the next thing jumps to the first red item.", "Starter settings: Level up, Farm drops and Safe AFK. Each is laid over your current settings, so your skills, hunting spot and town stay. You see every changed setting first, nothing changes until you press Apply, and Undo last change brings the old settings back.", "Nothing changes by itself: the page only reads the game and your settings until you press a button."]}, {"version": "1.2.110", "title": "Share and import settings", "items": ["New Share and import settings group in Settings. Copy share code or Save share file gives a short code or a file with only the settings you changed from the defaults, ready to post in Discord.", "A share never contains your hunting spot, town and merchant points, walking routes, buff weapon sets or wardrobe, so it is safe to hand out and works on any character.", "To import, paste a code or open a file and press Preview import. It lists exactly which settings would change, and only Apply import changes anything. Your own positions, town points, buff weapon sets and wardrobe are kept, and Undo last import brings your previous settings back.", "Imports are read as plain data: files that are not a nixxane bot share, contain unsafe keys, or are too large are refused, every value must have the type of the setting it replaces, and unknown settings are dropped. Old exports from the previous Export button still import.", "The old Export button is now called Export full backup (with my positions)."]}, {"version": "1.2.109", "title": "Fix: stat point settings are kept after a reload", "items": ["The Stat points settings from 1.2.108 were not saved: they went back to off every time the game was reloaded. They are now kept with the rest of your profile.", "A new test checks that every setting group survives a reload of the saved profile, so a new group cannot be forgotten like this again."], "note": "If you turned on Spend stat points automatically in 1.2.108, tick it once more after updating."}, {"version": "1.2.108", "title": "Auto stat points (Strength and Intelligence)", "items": ["New Stat points group in Settings: tick Spend stat points automatically and the bot spends your unspent stat points on Strength and Intelligence, one point at a time, as you level up.", "The split is a ratio. 1 and 0 puts everything into Strength, 0 and 1 everything into Intelligence, 2 and 1 spends two Strength points for every Intelligence point. A reserve keeps some points unspent.", "Each point is confirmed by your unspent count going down before the next is sent. A point the game does not accept is not resent for a minute. It is off by default and the status line says what it is doing."]}, {"version": "1.2.107", "title": "Buff weapon swapping explains itself", "items": ["The Buffs & imbue page now lists every buff assigned to a weapon set and what it is waiting for: how many seconds an active buff has left (the swap only happens when it is about to end), that it is due now, that the skill is not learned, or why it was skipped.", "When a buff is due but the swap cannot start, the page says why instead of staying silent: a saved set whose weapon or shield cannot be found in the bag (or two copies look identical), a missing combat weapon, no free bag slot, no saved set, or no buff assigned to a set.", "A buff whose cast was only unconfirmed is tried again after two minutes. Before, it was skipped until you changed buff settings, so a single missed confirmation could stop swaps for good.", "The buff weapon status is part of the diagnostics export, so a bug report shows what the swap was waiting for."]}, {"version": "1.2.106", "title": "Town setup: pick your town, no need to stand in it", "items": ["The Town page has a Town list and a Set up this town button. Pick Hotan, Jangan, Donwhang, Constantinople or Samarkand and one click fills the arrival point, warehouse, potion merchant, repair merchant and world statue. You no longer have to use a return scroll and stand where it lands first.", "The arrival point is now a preset too. Each town's return scroll always lands on the same spot, so the bot knows it from the server's own data instead of using wherever you happened to be standing.", "Auto-set town services and Redo all automatically still work for the town you are in, and now also use the preset arrival point."]}, {"version": "1.2.105", "title": "Alchemy: aim for stat percentages with attribute stones", "items": ["New Item attributes group in the Alchemy tab. Pick an item, choose the lowest percentage you want for each of its stats (Phy. reinforce, Mag. reinforce, attack rating, attack power, critical, defense, block, absorption and so on, depending on the kind of item) and press Fuse attribute stones. The bot fuses attribute stones of the item's degree until every picked stat reaches its target.", "Every successful fusion rolls the stat again, so it can come out lower, and it can re-roll another stat of the item; the bot keeps going until all picked stats are at or above their targets, and the log names any other stat that changed.", "The tab shows each stat's current percentage and a rough number of stones each target takes (the chance is 50% per stone before bonuses and the top steps get rare fast), and a stone limit (100 by default) stops it. It stops with a message if a stone of the right kind is missing from the bag."]}, {"version": "1.2.104", "title": "Fix: stuck-character recall that fails to start", "items": ["If the optional recovery recall could not start a town trip, hunting kept running and the stuck check repeated forever. Hunting now stops with the alert, as it does when recall is off.", "Fixed a missing full stop in the Obstacles help text."], "note": "Reviewed the 1.2.101 to 1.2.103 obstacle and attack-retry changes: 360 integration tests, the obstacle suite, the browser test and the native navigation comparison all pass."}];
+const RELEASE_NOTES = [{"version": "1.2.112", "title": "Follow a party member (auto trace)", "items": ["New Follow a party member group on the Party page. Tick it, choose a member (or leave it on the party leader) and the bot stays within the distance you set of them while hunting, and hunts around them instead of around your saved hunting spot.", "The game tells the party where every member is, so the bot also follows them across the map when they run off, up to 300 m. It walks around obstacles when collision data is loaded, and stands beside the member, not on top of them.", "Your saved hunting spot is never changed: it is only swapped for the member's position while the hunting step runs, and used again as soon as following is off or the member is unavailable (not in the party, dead, in another area or too far).", "Fight monsters that attack on the way is on by default. The stuck check does not count waiting for the member as being stuck. The chosen member is never part of a share, and the status line says what it is doing."]}, {"version": "1.2.111", "title": "Setup page: a live checklist for new characters", "items": ["New Setup page, the first one in the list, and the page a character opens on until it has a hunting spot or attack skills. It is a checklist that reads your real state: character and weapon, hunting spot, attack skills, potions (and how many are in the bag), what to pick up, town trips, pet, and what happens on death.", "Every row says in a sentence what is missing and has one button: Set here saves the hunting spot, Pick skills opens the skill page, Turn on switches potions or pickup on, Set up town fills your town and turns town trips on when nothing is missing, and Fix the next thing jumps to the first red item.", "Starter settings: Level up, Farm drops and Safe AFK. Each is laid over your current settings, so your skills, hunting spot and town stay. You see every changed setting first, nothing changes until you press Apply, and Undo last change brings the old settings back.", "Nothing changes by itself: the page only reads the game and your settings until you press a button."]}, {"version": "1.2.110", "title": "Share and import settings", "items": ["New Share and import settings group in Settings. Copy share code or Save share file gives a short code or a file with only the settings you changed from the defaults, ready to post in Discord.", "A share never contains your hunting spot, town and merchant points, walking routes, buff weapon sets or wardrobe, so it is safe to hand out and works on any character.", "To import, paste a code or open a file and press Preview import. It lists exactly which settings would change, and only Apply import changes anything. Your own positions, town points, buff weapon sets and wardrobe are kept, and Undo last import brings your previous settings back.", "Imports are read as plain data: files that are not a nixxane bot share, contain unsafe keys, or are too large are refused, every value must have the type of the setting it replaces, and unknown settings are dropped. Old exports from the previous Export button still import.", "The old Export button is now called Export full backup (with my positions)."]}, {"version": "1.2.109", "title": "Fix: stat point settings are kept after a reload", "items": ["The Stat points settings from 1.2.108 were not saved: they went back to off every time the game was reloaded. They are now kept with the rest of your profile.", "A new test checks that every setting group survives a reload of the saved profile, so a new group cannot be forgotten like this again."], "note": "If you turned on Spend stat points automatically in 1.2.108, tick it once more after updating."}, {"version": "1.2.108", "title": "Auto stat points (Strength and Intelligence)", "items": ["New Stat points group in Settings: tick Spend stat points automatically and the bot spends your unspent stat points on Strength and Intelligence, one point at a time, as you level up.", "The split is a ratio. 1 and 0 puts everything into Strength, 0 and 1 everything into Intelligence, 2 and 1 spends two Strength points for every Intelligence point. A reserve keeps some points unspent.", "Each point is confirmed by your unspent count going down before the next is sent. A point the game does not accept is not resent for a minute. It is off by default and the status line says what it is doing."]}, {"version": "1.2.107", "title": "Buff weapon swapping explains itself", "items": ["The Buffs & imbue page now lists every buff assigned to a weapon set and what it is waiting for: how many seconds an active buff has left (the swap only happens when it is about to end), that it is due now, that the skill is not learned, or why it was skipped.", "When a buff is due but the swap cannot start, the page says why instead of staying silent: a saved set whose weapon or shield cannot be found in the bag (or two copies look identical), a missing combat weapon, no free bag slot, no saved set, or no buff assigned to a set.", "A buff whose cast was only unconfirmed is tried again after two minutes. Before, it was skipped until you changed buff settings, so a single missed confirmation could stop swaps for good.", "The buff weapon status is part of the diagnostics export, so a bug report shows what the swap was waiting for."]}, {"version": "1.2.106", "title": "Town setup: pick your town, no need to stand in it", "items": ["The Town page has a Town list and a Set up this town button. Pick Hotan, Jangan, Donwhang, Constantinople or Samarkand and one click fills the arrival point, warehouse, potion merchant, repair merchant and world statue. You no longer have to use a return scroll and stand where it lands first.", "The arrival point is now a preset too. Each town's return scroll always lands on the same spot, so the bot knows it from the server's own data instead of using wherever you happened to be standing.", "Auto-set town services and Redo all automatically still work for the town you are in, and now also use the preset arrival point."]}, {"version": "1.2.105", "title": "Alchemy: aim for stat percentages with attribute stones", "items": ["New Item attributes group in the Alchemy tab. Pick an item, choose the lowest percentage you want for each of its stats (Phy. reinforce, Mag. reinforce, attack rating, attack power, critical, defense, block, absorption and so on, depending on the kind of item) and press Fuse attribute stones. The bot fuses attribute stones of the item's degree until every picked stat reaches its target.", "Every successful fusion rolls the stat again, so it can come out lower, and it can re-roll another stat of the item; the bot keeps going until all picked stats are at or above their targets, and the log names any other stat that changed.", "The tab shows each stat's current percentage and a rough number of stones each target takes (the chance is 50% per stone before bonuses and the top steps get rare fast), and a stone limit (100 by default) stops it. It stops with a message if a stone of the right kind is missing from the bag."]}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -8226,7 +8321,7 @@ const Diagnostics = {
         hpTarget: this.number(Restock.cfg().hp.target), mpTarget: this.number(Restock.cfg().mp.target),
         buyCure: !!Restock.cfg().cure.on, cureTarget: this.number(Restock.cfg().cure.target), cureLow: this.number(Restock.cfg().cure.low),
         hpLow: this.number(Restock.cfg().hp.low), mpLow: this.number(Restock.cfg().mp.low),
-        collectDrops: !!c.hunt.pickup.enabled, petCollector: Loot.petMode(), autoStatPoints: Settings.profile.statPoints.enabled ? String(StatPoints.status()).slice(0, 200) : '', autoMastery: AutoMastery.active() ? String(AutoMastery.message).slice(0, 600) : '', trapStage: Trap.stage, trapTile: Trap.stage ? Trap.tile : '', characterCollects: Loot.categories.some(k => c.hunt.pickup[k] && Loot.collectorFor(k) === 'character'), pickupRadius: this.number(c.hunt.pickup.radius / 10),
+        collectDrops: !!c.hunt.pickup.enabled, petCollector: Loot.petMode(), follow: Settings.profile.trace.enabled ? Trace.code : '', autoStatPoints: Settings.profile.statPoints.enabled ? String(StatPoints.status()).slice(0, 200) : '', autoMastery: AutoMastery.active() ? String(AutoMastery.message).slice(0, 600) : '', trapStage: Trap.stage, trapTile: Trap.stage ? Trap.tile : '', characterCollects: Loot.categories.some(k => c.hunt.pickup[k] && Loot.collectorFor(k) === 'character'), pickupRadius: this.number(c.hunt.pickup.radius / 10),
         finishFight: !!c.hunt.pickup.afterKillOnly, speedScroll: !!c.potion.speedScroll }
     };
   },
@@ -9543,6 +9638,7 @@ const UI = {
         this.check('Auto-resurrect party members', () => party().autoRes, v => { party().autoRes = v; Resurrect.reset(); }),
         this.number('Maximum res distance from hunt spot (m)', () => party().resRadius / 10, v => party().resRadius = v * 10, 1, 100),
         el('p', 'Works during hunting and while stopped. Walks into skill range for visible dead members within the maximum radius, casts Rebirth, then returns. During hunting the radius is measured from the saved hunt spot; while stopped it uses your starting position. Collision data is required for walking. Travel stops after 30 seconds or 12 seconds without progress per leg. The member must accept the revival. Travel, shopping and manual control take priority.', 'muted')));
+      Trace.draw(this.pane);
     } else if (this.current === 'Items') {
       this.drawItems();
     } else if (this.current === 'Setup') {
@@ -9717,6 +9813,7 @@ const UI = {
     if (this.current === 'Settings' && AutoMastery.note) AutoMastery.note.textContent = AutoMastery.status();
     if (this.current === 'Settings' && StatPoints.note) StatPoints.note.textContent = StatPoints.status();
     if (this.current === 'Settings' && this.stuckNote) this.stuckNote.textContent = AntiStuck.status();
+    if (this.current === 'Party' && Trace.note) Trace.note.textContent = Trace.status();
     if (this.current === 'Party' && this.partyNote) {
       const notes = [Settings.profile.party.autoRecruit ? Party.message : 'Auto-recruit off.'];
       if (Settings.profile.party.autoRes) notes.push(Resurrect.message);
@@ -9774,7 +9871,7 @@ function boot() {
     const key = name ? 'profile:' + name : 'profile:default';
     if (key !== Settings.profileKey) { Town.lastScrollPoint = null; stopAll(); Settings.useCharacter(name); }
   });
-  bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); StatPoints.reset(); BuffGear.reset(); Town.lastScrollPoint = null; SpeedScroll.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
+  bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); StatPoints.reset(); Trace.reset(); BuffGear.reset(); Town.lastScrollPoint = null; SpeedScroll.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
   bus.on('phase', phase => {
     if (phase !== 'world') {
       BuffGear.interrupt('World transition interrupted buff swaps.');
@@ -9813,7 +9910,7 @@ function boot() {
   Ticker.start(() => Controller.tick(), 100);
   setInterval(() => { Wardrobe.tick(); UI.update(); }, 500);
   W.SROLean = { version: VERSION, stats: Stats, updates: Updates, diagnostics: Diagnostics, reports: Reports, alchemy: Alchemy, buffGear: BuffGear, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, resurrect: Resurrect,
-    restock: Restock, town: Town, walkBack: WalkBack, antiStuck: AntiStuck, chase: Chase, trap: Trap, autoMastery: AutoMastery, statPoints: StatPoints, share: ProfileShare, setup: Setup, reconnect: Reconnect, petPotion: PetPotion, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, ui: UI, map: LeanMap, support: Support, items: ItemRules, stop: stopAll, log: Log };
+    restock: Restock, town: Town, walkBack: WalkBack, antiStuck: AntiStuck, chase: Chase, trap: Trap, autoMastery: AutoMastery, statPoints: StatPoints, share: ProfileShare, trace: Trace, setup: Setup, reconnect: Reconnect, petPotion: PetPotion, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, ui: UI, map: LeanMap, support: Support, items: ItemRules, stop: stopAll, log: Log };
   Log.info('nixxane bot ready. F8 starts/stops; F7 folds; the × minimises; Shift+F7 hides/shows the window.');
 }
 

@@ -220,7 +220,7 @@ const Controller = {
       }
       if (WalkBack.active) { this.mode = 'returning'; WalkBack.tick(); }
       else if (Restock.recording) this.mode = 'recording';
-      else if (Hunt.running) { Hunt.tick(); this.mode = Restock.trip ? 'shopping' : Hunt.state; }
+      else if (Hunt.running) { if (!Trace.tick()) Hunt.tick(); this.mode = Restock.trip ? 'shopping' : Hunt.state; }
       else this.mode = 'idle';
     } catch (e) {
       stopAll();

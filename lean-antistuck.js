@@ -14,6 +14,8 @@ const AntiStuck = {
   tick() {
     const c = this.cfg();
     if (!c.enabled || !Hunt.running || !World.inWorld()) { this.lastAt = null; return; }
+    // Following a party member: waiting for them is not being stuck, and recovery would walk away from them.
+    if (Trace.active()) { this.idleMs = 0; this.lastAt = now(); return; }
     const t = now(), gap = this.lastAt === null ? 0 : t - this.lastAt;
     this.lastAt = t;
     // A gap means Hunt.tick did not run (town trip, shopping, walk-back): start counting afresh.
