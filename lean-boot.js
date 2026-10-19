@@ -16,19 +16,26 @@ function boot() {
   // field owns focus. Stop propagation early, but retain native editing defaults.
   const protectEditing = e => {
     const path = e.composedPath(), target = path[0];
-    if (path.includes(UI.root?.host) && (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName || ''))) {
+    const copyingLog = (e.ctrlKey || e.metaKey) && e.code === 'KeyC' && UI.selectedActivityText();
+    if (copyingLog || path.includes(UI.root?.host) && (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName || ''))) {
       e.stopImmediatePropagation();
     }
   };
   for (const type of ['keydown', 'keypress', 'keyup']) W.addEventListener(type, protectEditing, true);
+  W.addEventListener('copy', e => {
+    const text = UI.selectedActivityText();
+    if (!text || !e.clipboardData) return;
+    e.clipboardData.setData('text/plain', text);
+    e.preventDefault(); e.stopImmediatePropagation();
+  }, true);
   // Scrolling the panel must not also zoom or move the game camera underneath it.
   W.addEventListener('wheel', e => { if (e.composedPath().includes(UI.root?.host)) e.stopImmediatePropagation(); }, { capture: true, passive: true });
   Combat.init(); Loot.init(); Alchemy.init(); BuffGear.init();
   bus.on('character', name => {
     const key = name ? 'profile:' + name : 'profile:default';
-    if (key !== Settings.profileKey) { Town.lastScrollPoint = null; stopAll(); Settings.useCharacter(name); }
+    if (key !== Settings.profileKey) { Town.lastScrollPoint = null; Town.deathPoint = null; stopAll(); Settings.useCharacter(name); }
   });
-  bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); StatPoints.reset(); Trace.reset(); BuffGear.reset(); Town.lastScrollPoint = null; SpeedScroll.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
+  bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); StatPoints.reset(); Trace.reset(); BuffGear.reset(); Town.lastScrollPoint = null; Town.deathPoint = null; SpeedScroll.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
   bus.on('phase', phase => {
     if (phase !== 'world') {
       BuffGear.interrupt('World transition interrupted buff swaps.');
@@ -67,7 +74,7 @@ function boot() {
   Ticker.start(() => Controller.tick(), 100);
   setInterval(() => { Wardrobe.tick(); UI.update(); }, 500);
   W.SROLean = { version: VERSION, stats: Stats, updates: Updates, diagnostics: Diagnostics, reports: Reports, alchemy: Alchemy, buffGear: BuffGear, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, resurrect: Resurrect,
-    restock: Restock, town: Town, walkBack: WalkBack, antiStuck: AntiStuck, chase: Chase, trap: Trap, autoMastery: AutoMastery, statPoints: StatPoints, share: ProfileShare, trace: Trace, setup: Setup, reconnect: Reconnect, petPotion: PetPotion, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, ui: UI, map: LeanMap, support: Support, items: ItemRules, stop: stopAll, log: Log };
+    restock: Restock, town: Town, walkBack: WalkBack, antiStuck: AntiStuck, chase: Chase, trap: Trap, autoMastery: AutoMastery, statPoints: StatPoints, share: ProfileShare, trace: Trace, setup: Setup, reconnect: Reconnect, petPotion: PetPotion, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, ui: UI, activity: Activity, map: LeanMap, support: Support, items: ItemRules, stop: stopAll, log: Log };
   Log.info('nixxane bot ready. F8 starts/stops; F7 folds; the × minimises; Shift+F7 hides/shows the window.');
 }
 

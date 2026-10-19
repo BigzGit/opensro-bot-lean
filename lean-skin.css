@@ -165,3 +165,12 @@ fieldset>input[type=search]{width:100%;margin:2px 0 6px}
 .sx-ico{--c:#8a8a8a;overflow:visible}.sx-ico:after{content:'';position:absolute;right:-4px;bottom:-4px;width:11px;height:11px;border-radius:50%;border:1px solid #000;background:var(--c)}
 .sx-ok .sx-ico{--c:#7fd08a}.sx-warn .sx-ico{--c:#f0b64a}.sx-bad .sx-ico{--c:#e8776a}
 .sx-row button{flex:0 0 auto;min-width:64px}
+
+/* Shared activity views own their scrolling inside Settings and the session window. */
+.activity-history{position:relative;height:220px;max-height:30vh;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;margin:6px 0;padding:6px;list-style:none;background:#171711;border:1px solid #5d5034;font-size:11px}
+.activity-history[hidden]{display:none}.activity-history li{display:flex;gap:7px;line-height:1.5}.activity-history time{flex:none;color:#b0a48b}.activity-history span{white-space:pre-wrap;overflow-wrap:anywhere;min-width:0}.activity-history .warn{color:#ffc67a}.activity-history .error{color:#ff9999}.activity-history .cmd{color:#aba79c}
+.session-window .dialog-body{max-height:calc(100vh - 100px)}:host(.wide) .session-window .body{display:block}.session-window .field{margin:3px 0}.session-window .session-values{padding-bottom:6px}
+.activity-panel[hidden]{display:none}.activity-panel>.row{display:flex;flex-wrap:wrap;gap:4px}.activity-panel select{max-width:160px}.activity-panel input[type=search]{box-sizing:border-box;width:100%;margin:4px 0}.activity-panel .field{white-space:normal}.activity-export .dialog-body{display:block}.activity-export textarea{box-sizing:border-box;width:100%;font:11px monospace}:host(.wide) .activity-export .body{display:block}
+.activity-history,.activity-history *{user-select:text;-webkit-user-select:text}
+:host(.wide) .logbox .activity-history{height:78px;max-height:none;margin:4px 0 0;padding:0;background:none;border:0}
+.activity-history .activity-message{flex:1}.activity-history .activity-repeat{flex:0 0 auto;margin-left:auto;white-space:nowrap;color:#b9a878}

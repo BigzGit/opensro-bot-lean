@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -1720,7 +1720,7 @@ test('pet auto potion never touches the wrong pets, the player potions or an unc
   f.Controller.tick(); assert.equal(petUses(f).length, 1); assert.equal(petUses(f)[0].companionGid, undefined, 'the player potion went first, the pet waits for the next tick');
   f = petPotionFixture(); f.Controller.tick(); assert.equal(petUses(f).length, 1);
   f.advance(2000); f.Controller.tick(); assert.equal(petUses(f).length, 1, 'no second kit until the first is seen consumed');
-  f.advance(4000); f.Controller.tick(); assert.equal(petUses(f).length, 1); assert.match(f.PetPotion.message, /did not take/);
+  f.advance(4000); f.Controller.tick(); assert.equal(petUses(f).length, 1); assert.match(f.PetPotion.message, /consumption unconfirmed/);
   f.advance(31000); f.Controller.tick(); assert.equal(petUses(f).length, 2, 'retried after the 30 s pause');
   f = petPotionFixture(); f.Controller.tick(); assert.equal(petUses(f).length, 1);
   f.World.applyGameplay({ ...f.World.gp, inventory: f.World.gp.inventory.map(i => i.slot === 21 ? { ...i, quantity: 4 } : i), cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 300, status: 5, dead: false }] });
@@ -1894,6 +1894,8 @@ function townFixture() {
   ];
   gp.pose.x = 700; f.Settings.profile.hunt.center.x = 700;
   f.Hunt.start();
+  // The death-return tests below exercise the death-location choice; the default is covered by its own test.
+  c.deathReturn = 'death'; f.Town.deathPoint = { ...f.Settings.profile.hunt.center };
   return { ...f, pet };
 }
 test('a wrong saved arrival point is replaced by where the return scroll actually lands', () => {
@@ -2758,6 +2760,7 @@ test('protected full pet recalls before asking for manual emptying', () => {
 
 test('town revival overrides stop default and preserves reverse intent through bootstrap', () => {
   const f = townFixture();
+  f.Town.cfg().deathReturn = 'death';
   f.UI.mount = f.UI.draw = f.UI.update = f.Ticker.start = () => {}; f.boot();
   f.Settings.profileKey = 'profile:TestHero';
   f.World.local().appearanceState[0] = 2;
@@ -2777,13 +2780,26 @@ test('town revival overrides stop default and preserves reverse intent through b
   f.World.gp.inventory.find(i => i.slot === 6).durability = 10;
   f.advance(1000); f.Controller.tick();
   const reverse = f.commands.find(c => c.kind === 'travel-gate');
-  assert.equal(reverse.type, 5); assert.equal(reverse.target, 2);
+  assert.equal(reverse.type, 5); assert.equal(reverse.target, 3);
   f.bus.emit('phase', 'entering-world'); f.bus.emit('reset'); f.World.gp.pose.x = 700;
   f.advance(1000); f.Controller.tick();
   assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, true);
   f.advance(1000); f.Controller.tick(); assert.equal(f.Town.trip, null);
 });
 
+test('after a death the bot reverses to the last return-scroll point unless it chose the death spot and died inside the hunting area', () => {
+  const f = townFixture(), H = f.Hunt.cfg();
+  assert.equal(f.botProfile({}).potion.restock.town.deathReturn, 'recall', 'the default keeps the bot able to start hunting after the reverse');
+  assert.equal(f.botProfile({ potion: { restock: { town: { deathReturn: 'nonsense' } } } }).potion.restock.town.deathReturn, 'recall');
+  const choose = (setting, deathAt) => {
+    const g = townFixture(); g.Town.cfg().deathReturn = setting; g.Town.deathPoint = deathAt(g.Hunt.cfg().center);
+    g.Town.lastScrollPoint = { ...g.Hunt.cfg().center }; g.Town.begin(true); return g.Town.trip ? g.Town.trip.reverseChoice : null;
+  };
+  const inside = c => ({ ...c, x: c.x + 10 }), outside = c => ({ ...c, x: c.x + 5000 });
+  assert.equal(choose('recall', inside), 2); assert.equal(choose('death', inside), 3, 'chosen and inside the hunting area');
+  assert.equal(choose('death', outside), 2, 'a death spot outside the hunting area cannot restart hunting, so the scroll point is used');
+  assert.equal(choose('death', () => null), 2, 'no known death spot');
+});
 test('death during departure recovers instead of silently stopping hunting', () => {
   const f = townFixture(); f.Controller.tick();
   f.World.local().appearanceState[0] = 2; f.Controller.tick();
@@ -3005,7 +3021,7 @@ test('death return accepts the current hunt area even with an older remembered s
   f.World.gp.pose.x = 100; f.Town.begin(true); f.Town.enter('reverse-wait');
   f.Town.phase('entering-world'); f.World.gp.pose.x = 950;
   f.Town.tick(); assert.equal(f.Town.trip, null);
-  assert.equal(f.Town.lastScrollPoint.x, 950);
+  assert.equal(f.Town.lastScrollPoint.x, 1500, 'death return must not overwrite the remembered recall point');
 });
 
 test('death arrival still requires settled travel inside the expected destination area', () => {
@@ -4031,4 +4047,6 @@ async function updateTests() {
   await Promise.all(asyncTests);
   console.log('Total integration tests: ' + passed);
 }
+require('./lean.session.test.cjs')({ test, fixture, townFixture });
+require('./lean.logging.test.cjs')({ test, fixture, townFixture });
 updateTests().catch(error => { console.error(error); process.exitCode = 1; });

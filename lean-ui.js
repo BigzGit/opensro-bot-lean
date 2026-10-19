@@ -191,7 +191,7 @@ const UI = {
     this.body = el('div', null, 'body'); this.status = el('div', 'Waiting for game…', 'status'); this.status.setAttribute('role', 'status');
     this.updateNote = el('div', '', 'update-note'); this.updateNote.hidden = true;
     Updates.render();
-    const controls = this.row(this.button('Start / stop · F8', () => toggleBot()), this.button('Return & hunt', () => WalkBack.start(true)), this.button('Stop all', () => stopAll()));
+    const controls = this.row(this.button('Start / stop · F8', () => toggleBot()), this.button('Return & hunt', () => WalkBack.start(true)), this.button('Stop all', () => stopAll()), this.button('Session', () => this.showSession()));
     controls.classList.add('controls');
     this.nav = el('nav'); this.nav.setAttribute('aria-label', 'Bot settings');
     // Page icons are the game's own action-bar icons; they show only in the wide window's page list.
@@ -212,7 +212,7 @@ const UI = {
     this.tip = el('div', null, 'skill-tip'); this.tip.hidden = true; this.root.append(this.tip);
     // The panel's spot is remembered across reloads (global, like the minimised icon's).
     this.dragBy(header, host, () => { if (host.style.left) this.uiPrefs({ panel: { x: host.offsetLeft, y: host.offsetTop } }); });
-    W.addEventListener('resize', () => { this.fitWindow(this.reportBox); this.fitWindow(this.notesBox); if (this.minimised) this.placeOrb(host.offsetLeft, host.offsetTop); else if (host.style.left) this.fitWindow(host); });
+    W.addEventListener('resize', () => { this.fitWindow(this.reportBox); this.fitWindow(this.notesBox); this.fitWindow(this.sessionBox); this.fitWindow(this.activityExportBox); if (this.minimised) this.placeOrb(host.offsetLeft, host.offsetTop); else if (host.style.left) this.fitWindow(host); });
     this.setWide(!!this.uiPrefs().wide, false);
     this.draw(); this.update();
     this.restorePanel();
@@ -291,12 +291,6 @@ const UI = {
     side.append(session, supplies);
     return side;
   },
-  makeLog() {
-    const box = el('div', null, 'logbox wide-only');
-    this.logList = el('ol', null, 'log'); this.logList.setAttribute('aria-label', 'Activity');
-    box.append(el('strong', 'Activity'), this.logList);
-    return box;
-  },
   updateWide() {
     if (!this.wide || !this.bars || this.minimised) return;
     const me = World.me(), p = World.gp?.progression || {}, live = World.inWorld();
@@ -323,23 +317,14 @@ const UI = {
     this.sideFields.bag.textContent = live ? String(World.freeBagSlots()) : '—';
     this.sideFields.pet.textContent = pet ? `${pet.rec.inventory.length} / ${pet.rec.status}` : 'none';
     this.sideFields.spot.textContent = Number.isFinite(distance) ? Math.round(distance / 10) + ' m away' : center ? 'another region' : 'not saved';
-    // The log is rebuilt only when a line was added, newest at the bottom; it follows new lines unless scrolled up.
-    const last = Log.lines[Log.lines.length - 1];
-    if (last !== this.logLast) {
-      this.logLast = last;
-      const two = v => String(v).padStart(2, '0');
-      // A notice is also logged on its own; show "Hunting stopped" and "Hunting stopped." from the same moment once.
-      const same = (a, b) => a && b && Math.abs(a.at - b.at) < 1000 && a.text.replace(/\.$/, '') === b.text.replace(/\.$/, '');
-      const lines = Log.lines.filter(l => l.level !== 'cmd').slice(-60).filter((l, i, all) => !same(all[i - 1], l)).slice(-40);
-      const rows = lines.map(l => {
-        const row = el('li', null, l.level), at = new Date(l.at);
-        row.append(el('time', `${two(at.getHours())}:${two(at.getMinutes())}:${two(at.getSeconds())}`), el('span', l.text));
-        return row;
-      });
-      const atEnd = this.logList.scrollTop + this.logList.clientHeight >= this.logList.scrollHeight - 4;
-      this.logList.replaceChildren(...rows);
-      if (atEnd) this.logList.scrollTop = this.logList.scrollHeight;
-    }
+
+  },
+  // The wide window's activity box shows the same shared history as Settings and the session window.
+  makeLog() {
+    const box = el('div', null, 'logbox wide-only');
+    this.logList = this.activityLog('Activity'); this.logList.classList.add('log');
+    box.append(el('strong', 'Activity'), this.logList);
+    return box;
   },
   makeOrb() {
     const orb = this.orb = el('button', null, 'orb'); orb.type = 'button'; orb.hidden = true;
@@ -592,6 +577,7 @@ const UI = {
       this.pane.append(kinds);
     } else if (this.current === 'Supplies') {
       const pots = this.group('Automatic potion use', this.check('Use potions automatically', () => P().enabled, v => P().enabled = v));
+      pots.append(this.potionDelay(), el('p', 'Minimum interval between automatic potion uses. The game’s own item cooldowns still apply.', 'muted'));
       this.speedNote = el('p', '', 'muted');
       pots.append(this.check('Use beginner +100% speed scroll automatically', () => P().speedScroll, v => { P().speedScroll = v; SpeedScroll.reset(); }),
         el('p', 'Uses only the beginner scroll during hunting or travel when no movement-speed buff is active. Works during combat casts; potions have priority. Waits for buff confirmation and stops retrying after three unconfirmed attempts.', 'muted'), this.speedNote);
@@ -655,7 +641,9 @@ const UI = {
         this.number('No XP for (minutes)', () => town().noXp.minutes, v => town().noXp.minutes = v, 1, 120),
         this.check('On a timer', () => town().every.on, v => town().every.on = v),
         this.number('Every (minutes)', () => town().every.minutes, v => town().every.minutes = v, 5, 600),
-        this.check('Revive in town and reverse to last scroll point', () => town().revive, v => town().revive = v),
+        this.check('Revive in town and use reverse return', () => town().revive, v => town().revive = v),
+        this.select('After death, reverse to', [['recall', 'Last return-scroll location (hunting area)'], ['death', 'Death location']], () => town().deathReturn, v => { town().deathReturn = v; Activity.emit({category:'settings',code:'reverse-choice-changed',text:'Revival reverse destination changed to ' + v + '.',details:{choice:v === 'death' ? 3 : 2}}); }),
+        el('p', 'Service trips reverse to their departure point. After death, use the selected destination. A missing game destination stops the trip; it never substitutes another point.', 'muted'),
         el('p', 'Worn gear means the most worn repairable item you are wearing, measured against its own maximum durability; the trip repairs it. A broken weapon (0 durability) has its own switch, on by default. The XP and timer clocks run only while hunting and restart with every trip.', 'muted')));
       const services = this.group('Scroll town cycle',
         this.check('Use return scroll → town services → reverse return', () => town().enabled, v => { town().enabled = v; this.draw(); }),
@@ -778,7 +766,7 @@ const UI = {
     } else {
       Stats.draw(this.pane);
       this.pane.append(this.group('Behaviour',
-        ...(Town.autoRevive() ? [el('p', 'On death: the town cycle revives you in town and reverses back (Supplies → Scroll town cycle).', 'muted')]
+        ...(Town.autoRevive() ? [el('p', 'On death: the town cycle revives you in town and reverses back (Town → Scroll town cycle).', 'muted')]
           : [this.select('On death', [['stop', 'Stop'], ['wait', 'Wait'], ['revive', 'Revive and walk back']], () => H().onDeath, v => H().onDeath = v)]),
         this.check('Rest when low', () => H().sit.enabled, v => { H().sit.enabled = v; this.draw(); }),
         ...(H().sit.enabled ? [
@@ -812,7 +800,8 @@ const UI = {
         })));
       ProfileShare.draw(this.pane);
       this.pane.append(this.group('Bug reports', el('p', 'Preview diagnostics and optionally a screenshot, then send them to the developer. Nothing sends automatically.', 'muted'), this.button('Send bug report', () => Reports.open())));
-      this.logs = el('pre'); this.pane.append(this.group('Recent activity', this.logs));
+      this.logs = this.activityLog('Settings activity');
+      this.pane.append(this.group('Recent activity', this.button('Pop out session totals and log', () => this.showSession(true)), this.activityPanel(this.logs, 'Settings')));
     }
     this.update();
     this.pane.scrollTop = scroll;
@@ -954,6 +943,7 @@ const UI = {
     const me = World.me(), center = Settings.profile.hunt.center;
     const distance = center ? dist2D(World.pose(), center) : Infinity;
     this.status.textContent = `${World.charName || 'No character'} · ${World.inWorld() ? Controller.mode : World.phase}\nHP ${Math.round(me.hpPct)}% · MP ${Math.round(me.mpPct)}% · Potions ${Potion.count('hp')}/${Potion.count('mp')} · Pickups ${Stats.values.loot}\nHunting spot: ${Number.isFinite(distance) ? Math.round(distance / 10) + ' m away' : center ? 'another region' : 'not saved'}${Restock.recording ? '\nRecording route: ' + Restock.draft.route.length + ' points' : ''}`;
+
     if (Town.cfg().enabled) this.status.textContent += '\n' + Town.status();
     if (Reconnect.active() && Reconnect.message) this.status.textContent += '\n' + Reconnect.message;
     this.refreshers.forEach(refresh => refresh());
@@ -962,6 +952,6 @@ const UI = {
       slot.querySelector('.cd').style.setProperty('--p', total && left > 0 ? Math.min(100, left / total * 100) + '%' : '0%');
       slot.querySelector('.seconds').textContent = left > 0 ? String(Math.ceil(left / 1000)) : '';
     }
-    if (this.current === 'Settings' && this.logs) this.logs.textContent = Log.lines.slice(-12).map(l => l.text).join('\n');
+    this.updateSession();
   },
 };

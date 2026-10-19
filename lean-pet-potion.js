@@ -44,8 +44,11 @@ const PetPotion = {
     this.load();
     const p = this.pending;
     if (p) {
-      if (this.total(p.ref) < p.before) this.pending = null;
-      else if (now() - p.at > 5000) { this.pending = null; this.blocked.set(p.gid, now() + 30000); this.message = 'The pet did not take the recovery kit; waiting 30 s.'; }
+      if (this.total(p.ref) < p.before) {
+        Activity.emit({ category: 'potion', code: 'pet-kit-consumed', text: 'Pet recovery kit consumption observed in inventory.', outcome: 'confirmed', details: { quantity: 1 } });
+        this.pending = null;
+      }
+      else if (now() - p.at > 5000) { this.pending = null; this.blocked.set(p.gid, now() + 30000); this.message = 'Pet recovery kit consumption unconfirmed; waiting 30 s.'; }
       else return false;
     }
     if (World.gp.inventoryPending || now() - this.lastAt < 1500 || now() - Potion.lastUse < P.delayMs) return false;
@@ -58,7 +61,7 @@ const PetPotion = {
     if (!kit) { this.message = 'Pet HP low but no pet recovery kits in the bag.'; return false; }
     if (!Cmd.itemUseOnPet(kit.slot, pet.gid)) return false;
     this.pending = { ref: kit.refObjId, before: this.total(kit.refObjId), gid: pet.gid, at: now() }; this.lastAt = now();
-    this.message = 'Used a recovery kit on the pet at ' + Math.round(pet.pct) + '% HP.';
+    this.message = 'Recovery kit requested for the pet at ' + Math.round(pet.pct) + '% HP; waiting for consumption confirmation.';
     return true;
   },
 };
