@@ -37,7 +37,7 @@ legend{position:absolute;left:9px;right:9px;top:3px;padding:0;height:13px;line-h
 input:not([type=checkbox]),select{height:22px;background:#080907;border:1px solid #5d5034;padding:0 4px;outline:none;min-width:0;color:#efdaa4}
 input:focus,select:focus{border-color:#c9a85c}.field input[type=number]{width:66px;text-align:right}.field input[type=text]{width:170px}.field select{max-width:220px;min-width:110px}
 input[type=checkbox]{appearance:none;width:16px;height:16px;flex:0 0 16px;margin:0;border:0;background:var(--s-chk_off) center/16px 16px;cursor:pointer}input[type=checkbox]:checked{background-image:var(--s-chk_on)}
-.status{padding:6px 6px 8px;white-space:pre-line;color:#f4eedc;border-bottom:1px solid #5d503455}
+.status{padding:6px 6px 8px;min-height:5lh;box-sizing:content-box;white-space:pre-line;color:#f4eedc;border-bottom:1px solid #5d503455}
 .controls{padding:6px 0;gap:3px}.controls button:first-child{flex:1}
 .feedback{padding:6px 4px 0;overflow-wrap:anywhere;font-size:11px;min-height:8px}
 .muted{color:#a09b8c;font-size:11px;margin:6px 0}
@@ -62,7 +62,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;max-height:130px;
 .wardrobe-item[aria-pressed=true]{color:#ffe08a;outline:1px solid #ffe08a;outline-offset:-2px}
 @media(max-width:500px){:host{right:4px;top:70px;width:calc(100vw - 8px)}.body{margin:0 13px}.pane{max-height:clamp(200px,calc(100vh - 280px),720px)}.field input[type=text]{width:150px}.skill-row{gap:4px}.controls{gap:2px}}
 
-.waiting{white-space:pre-line;color:#c8d9ae;margin:4px 0}
+.waiting{white-space:pre-line;color:#c8d9ae;margin:4px 0}:host(:not(.wide)) .waiting{min-height:2lh}
 textarea{width:100%;color:inherit;background:#151916;font:11px monospace}
 
 .dialog{position:fixed;width:min(430px,calc(100vw - 8px));z-index:10}.dialog[hidden]{display:none}.dialog-body{max-height:min(70vh,640px);margin:0 15px}.report-preview .field{display:block}.report-preview .field>span{display:block;margin-bottom:4px}.report-image{display:block;width:100%;height:auto;margin:6px 0;border:1px solid #5d5034}
