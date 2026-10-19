@@ -215,6 +215,10 @@ The main panel's status line and Send bug report now name what the walk is waiti
 - **"No walkable route found":** save that service point again from open ground a few steps in front of the NPC (stop hunting, stand there, select the NPC and click its Save button).
 - **"Blocked route (no progress for 20 s)":** something is physically in the way; check the character is not stuck behind another player or object.
 
+## Sharing and importing settings
+
+Under **Settings → Share and import settings**, **Copy share code** or **Save share file** makes a short code or a file holding only the settings you changed from the defaults, ready to post in Discord. A share never contains your hunting spot, town and merchant points, walking routes, buff weapon sets or wardrobe, so it works on any character. To import, paste a code or **Open file…** and press **Preview import**: it lists exactly which settings would change and nothing happens until you press **Apply import**. Your own positions, town points, buff weapon sets and wardrobe are kept, and **Undo last import** brings your previous settings back. Files that are not a share, contain unsafe keys or are too large are refused. **Export full backup (with my positions)** saves everything, including your positions, for your own use.
+
 ## If something gets stuck
 
 Read the return status on the main panel. Use **Settings → Send bug report**; the diagnostics it previews include recent return states, even after toggling the bot. Reloading clears that history.

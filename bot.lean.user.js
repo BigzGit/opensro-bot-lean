@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.109
+// @version      1.2.110
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[nixxane bot] Another SRO assistant is active. Disable it and reload to use nixxane bot.');
   return;
 }
-const VERSION = '1.2.109';
+const VERSION = '1.2.110';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -5453,6 +5453,222 @@ for (const [name, method] of [['Auto stat points', 'tick']]) {
 }
 
 
+// Sharing settings. A share code or file holds only what differs from the defaults and nothing personal: positions,
+// town and merchant points, walking routes, buff weapon sets and the wardrobe stay out. Importing never runs
+// anything: the text is parsed as data, every field is checked against the defaults, and a preview lists the changes
+// before anything is applied. The previous settings are kept so one press undoes an import.
+const SHARE = { apps: ['nixxane-bot', 'sro-bot-lean'], format: 1, maxChars: 300000, maxNodes: 20000, plain: 'nixxane0:', packed: 'nixxane1:' };
+const ProfileShare = {
+  pending: null, code: '', message: '', note: null, view: null, box: null,
+  isMap(v) { return !!v && typeof v === 'object' && !Array.isArray(v); },
+  clone(v) { return JSON.parse(JSON.stringify(v)); },
+  // The fields that mean nothing on another character; an import keeps the importer's own.
+  personal(p) {
+    const r = p.potion.restock, t = r.town;
+    return this.clone({ center: p.hunt.center, vendor: r.vendor, route: r.route, offers: r.offers,
+      town: { arrival: t.arrival, storage: t.storage, vendor: t.vendor, smith: t.smith, gate: t.gate }, buffSets: p.macro.buffSets, wardrobe: p.wardrobe });
+  },
+  restore(p, own) {
+    const r = p.potion.restock, t = r.town;
+    p.hunt.center = own.center; r.vendor = own.vendor; r.route = own.route; r.offers = own.offers;
+    Object.assign(t, own.town); p.macro.buffSets = own.buffSets; p.wardrobe = own.wardrobe;
+    // A buff assigned to a weapon set means nothing without the sets.
+    for (const b of p.macro.buffs) if (b && !p.macro.buffSets.some(s => s.id === Number(b.gearSet))) b.gearSet = 0;
+    return p;
+  },
+  strip(p) {
+    const q = this.clone(p), d = this.clone(DEFAULT_PROFILE);
+    this.restore(q, this.personal(d));
+    return q;
+  },
+  // Only what differs from the defaults, so a code stays short and a default is never "shared".
+  diff(value, base) {
+    if (Array.isArray(base) || !this.isMap(base)) return JSON.stringify(value) === JSON.stringify(base) ? undefined : value;
+    const out = {};
+    for (const k of Object.keys(value || {})) {
+      const d = this.diff(value[k], k in base ? base[k] : undefined);
+      if (d !== undefined) out[k] = d;
+    }
+    return Object.keys(out).length ? out : undefined;
+  },
+  // Untrusted text: no prototype keys, bounded depth and size.
+  safe(value, depth = 0, count = { n: 0 }) {
+    if (++count.n > SHARE.maxNodes || depth > 12) return false;
+    if (Array.isArray(value)) return value.every(v => this.safe(v, depth + 1, count));
+    if (!value || typeof value !== 'object') return true;
+    return Object.keys(value).every(k => !['__proto__', 'constructor', 'prototype'].includes(k) && this.safe(value[k], depth + 1, count));
+  },
+  // Every field takes the default's type; unknown fields are dropped, except in the settings that are maps by design
+  // (item rules, per-kind collectors, attribute targets).
+  conform(base, value) {
+    if (Array.isArray(base)) return Array.isArray(value) && value.length <= 500 ? this.clone(value) : this.clone(base);
+    if (base === null) return value === null || this.isMap(value) || ['number', 'boolean', 'string'].includes(typeof value) ? this.clone(value ?? null) : null;
+    if (this.isMap(base)) {
+      const source = this.isMap(value) ? value : {}, out = {};
+      if (!Object.keys(base).length) {
+        for (const k of Object.keys(source).slice(0, 5000)) if (/^[\w.:-]{1,64}$/.test(k) && source[k] !== undefined) out[k] = this.clone(source[k]);
+        return out;
+      }
+      for (const k of Object.keys(base)) out[k] = this.conform(base[k], source[k]);
+      return out;
+    }
+    if (typeof base === 'number') return typeof value === 'number' && Number.isFinite(value) ? value : base;
+    if (typeof base === 'string') return typeof value === 'string' ? value.slice(0, 500) : base;
+    return typeof value === typeof base ? value : base;
+  },
+  // The settings an import would leave you with: the shared ones, plus your own positions and wardrobe.
+  build(imported) {
+    const own = this.personal(Settings.profile);
+    return this.restore(botProfile(this.conform(DEFAULT_PROFILE, imported)), own);
+  },
+  text(share = true) {
+    const profile = this.diff(share ? this.strip(Settings.profile) : Settings.profile, DEFAULT_PROFILE) || {};
+    return JSON.stringify({ app: SHARE.apps[0], format: SHARE.format, version: VERSION, profile }, null, share ? 0 : 2);
+  },
+  // Text <-> bytes <-> base64 without relying on browser-only helpers.
+  bytes(text) { return Uint8Array.from(unescape(encodeURIComponent(text)), c => c.charCodeAt(0)); },
+  string(bytes) { let s = ''; for (let i = 0; i < bytes.length; i += 4096) s += String.fromCharCode(...bytes.subarray(i, i + 4096)); return decodeURIComponent(escape(s)); },
+  toBase64(bytes) {
+    const a = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    let out = '';
+    for (let i = 0; i < bytes.length; i += 3) {
+      const n = (bytes[i] << 16) | ((bytes[i + 1] ?? 0) << 8) | (bytes[i + 2] ?? 0);
+      out += a[n >> 18 & 63] + a[n >> 12 & 63] + (i + 1 < bytes.length ? a[n >> 6 & 63] : '') + (i + 2 < bytes.length ? a[n & 63] : '');
+    }
+    return out;
+  },
+  fromBase64(text) {
+    const a = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_', out = [];
+    const clean = text.replace(/[\s=]/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+    if (/[^A-Za-z0-9_-]/.test(clean) || clean.length % 4 === 1) throw Error('The share code is damaged.');
+    for (let i = 0; i < clean.length; i += 4) {
+      const n = [0, 1, 2, 3].map(j => i + j < clean.length ? a.indexOf(clean[i + j]) : 0).reduce((x, v) => (x << 6) | v, 0);
+      out.push(n >> 16 & 255); if (i + 2 < clean.length) out.push(n >> 8 & 255); if (i + 3 < clean.length) out.push(n & 255);
+    }
+    return Uint8Array.from(out);
+  },
+  async pipe(bytes, stream) {
+    const reader = new Blob([bytes]).stream().pipeThrough(stream).getReader(), parts = [];
+    let size = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > SHARE.maxChars) { reader.cancel(); throw Error('The share code is too large.'); }
+      parts.push(value);
+    }
+    const out = new Uint8Array(size); let at = 0;
+    for (const part of parts) { out.set(part, at); at += part.length; }
+    return out;
+  },
+  async encode(json) {
+    try {
+      if (typeof CompressionStream === 'function') return SHARE.packed + this.toBase64(await this.pipe(this.bytes(json), new CompressionStream('deflate-raw')));
+    } catch {}
+    return SHARE.plain + this.toBase64(this.bytes(json));
+  },
+  async decode(input) {
+    const text = String(input || '').trim();
+    if (!text) throw Error('Paste a share code or choose a settings file first.');
+    if (text.length > SHARE.maxChars) throw Error('That is too large to be a settings share.');
+    if (text.startsWith(SHARE.packed)) {
+      if (typeof DecompressionStream !== 'function') throw Error('This browser cannot open compressed share codes.');
+      return this.string(await this.pipe(this.fromBase64(text.slice(SHARE.packed.length)), new DecompressionStream('deflate-raw')));
+    }
+    if (text.startsWith(SHARE.plain)) return this.string(this.fromBase64(text.slice(SHARE.plain.length)));
+    return text;
+  },
+  async parse(input) {
+    let data;
+    try { data = JSON.parse(await this.decode(input)); } catch (e) { throw Error(/share|paste|large|browser/i.test(e.message) ? e.message : 'That is not a nixxane bot settings share.'); }
+    if (!this.isMap(data) || !SHARE.apps.includes(data.app) || !this.isMap(data.profile)) throw Error('That is not a nixxane bot settings share.');
+    if (!this.safe(data.profile)) throw Error('That settings share contains values that are not allowed.');
+    return data.profile;
+  },
+  // path -> value for every setting, so two profiles can be compared one setting at a time.
+  flat(value, path = '', out = new Map()) {
+    if (this.isMap(value)) { for (const k of Object.keys(value)) this.flat(value[k], path ? path + '.' + k : k, out); if (!Object.keys(value).length && path) out.set(path, '{}'); }
+    else out.set(path, JSON.stringify(value));
+    return out;
+  },
+  changes(current, next) {
+    const a = this.flat(current), b = this.flat(next), rows = [];
+    for (const k of new Set([...a.keys(), ...b.keys()])) if (a.get(k) !== b.get(k)) rows.push({ path: k, from: a.get(k) ?? '(not set)', to: b.get(k) ?? '(not set)' });
+    return rows;
+  },
+  show(v) { const s = String(v); return s.length > 50 ? s.slice(0, 47) + '…' : s; },
+  async preview(input) {
+    const imported = await this.parse(input), next = this.build(imported), rows = this.changes(Settings.profile, next);
+    return { imported, next, rows };
+  },
+  backupKey() { return 'backup:' + Settings.profileKey; },
+  hasBackup() { return !!Store.get(this.backupKey(), null)?.profile; },
+  apply() {
+    const p = this.pending;
+    if (!p) return false;
+    if (Hunt.running) { UI.toast('Stop hunting before importing settings.', 'warn'); return false; }
+    const next = this.build(p.imported);
+    Store.set(this.backupKey(), { at: Date.now(), profile: this.clone(Settings.profile) });
+    stopAll();
+    Settings.profile = next; Settings.saveProfile();
+    this.pending = null; this.message = `Imported ${p.rows.length} setting${p.rows.length === 1 ? '' : 's'}. Your previous settings are kept: press Undo last import to go back.`;
+    bus.emit('profile'); UI.toast(this.message); return true;
+  },
+  undo() {
+    const backup = Store.get(this.backupKey(), null);
+    if (!backup?.profile) { UI.toast('There is no import to undo.', 'warn'); return false; }
+    if (Hunt.running) { UI.toast('Stop hunting before undoing an import.', 'warn'); return false; }
+    stopAll();
+    Settings.profile = botProfile(backup.profile); Settings.saveProfile();
+    Store.set(this.backupKey(), null); this.pending = null; this.message = 'Your settings from before the import are back.';
+    bus.emit('profile'); UI.toast(this.message); return true;
+  },
+  summary(rows) {
+    if (!rows.length) return 'These settings match what you have now; nothing would change.';
+    const groups = {};
+    for (const r of rows) { const g = r.path.split('.')[0]; groups[g] = (groups[g] || 0) + 1; }
+    return `${rows.length} setting${rows.length === 1 ? '' : 's'} would change (${Object.entries(groups).map(([g, n]) => g + ' ' + n).join(', ')}). Your positions, town points, routes, buff weapon sets and wardrobe stay as they are.`;
+  },
+  draw(parent) {
+    const box = UI.group('Share and import settings');
+    const area = el('textarea'); area.rows = 4; area.placeholder = 'Paste a share code or the contents of a settings file here';
+    const out = el('textarea'); out.rows = 3; out.readOnly = true; out.hidden = true; out.setAttribute('aria-label', 'Your share code');
+    const file = el('input'); file.type = 'file'; file.accept = '.json,application/json,text/plain'; file.hidden = true;
+    const status = el('p', this.message, 'muted'), changes = el('pre'); changes.hidden = true;
+    const apply = UI.button('Apply import', () => { if (this.apply()) UI.draw(); }), cancel = UI.button('Cancel', () => { this.pending = null; changes.hidden = apply.hidden = cancel.hidden = true; status.textContent = ''; });
+    apply.hidden = cancel.hidden = true;
+    const say = text => { this.message = text; status.textContent = text; };
+    file.addEventListener('change', () => {
+      const f = file.files?.[0]; if (!f) return;
+      if (f.size > SHARE.maxChars) return say('That file is too large to be a settings share.');
+      const reader = new FileReader();
+      reader.onload = () => { area.value = String(reader.result || ''); say('File loaded. Press Preview import.'); };
+      reader.onerror = () => say('The file could not be read.');
+      reader.readAsText(f);
+    });
+    const copy = async () => {
+      out.value = await this.encode(this.text(true)); out.hidden = false; out.select();
+      try { await W.navigator.clipboard.writeText(out.value); say('Share code copied. It holds only your settings, not your positions or town points.'); }
+      catch { say('Select the code above and copy it. It holds only your settings, not your positions or town points.'); }
+    };
+    box.append(el('p', 'Share your settings with others, or load settings someone shared. A share holds only what you changed from the defaults: never your positions, town points, routes, buff weapon sets or wardrobe. An import shows what it would change first, never touches those, and can be undone.', 'muted'),
+      UI.row(UI.button('Copy share code', () => { void copy(); }), UI.button('Save share file', () => {
+        const url = URL.createObjectURL(new Blob([this.text(true)], { type: 'application/json' }));
+        const link = el('a'); link.href = url; link.download = 'nixxane-bot-share.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      })), out, area,
+      UI.row(UI.button('Open file…', () => file.click()), UI.button('Preview import', async () => {
+        try {
+          const p = await this.preview(area.value); this.pending = p;
+          changes.textContent = p.rows.slice(0, 60).map(r => `${r.path}: ${this.show(r.from)} → ${this.show(r.to)}`).join('\n') + (p.rows.length > 60 ? `\n… and ${p.rows.length - 60} more` : '');
+          changes.hidden = !p.rows.length; apply.hidden = cancel.hidden = !p.rows.length; say(this.summary(p.rows));
+        } catch (e) { this.pending = null; changes.hidden = apply.hidden = cancel.hidden = true; say(e.message); }
+      })), file, status, changes, UI.row(apply, cancel),
+      UI.button('Undo last import', () => { if (this.undo()) UI.draw(); }));
+    this.note = status; parent.append(box);
+  },
+};
+
+
 // Automatic HP recovery kits for your attack and pickup pets. Kits are companion items (type 3/3/1/4): the game
 // needs the pet named in the item-use command, so this sends it explicitly. Player potions always go first, kits
 // are never resent until the previous one is seen to be consumed, and a pet that cannot be healed is left alone
@@ -7585,7 +7801,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.109", "title": "Fix: stat point settings are kept after a reload", "items": ["The Stat points settings from 1.2.108 were not saved: they went back to off every time the game was reloaded. They are now kept with the rest of your profile.", "A new test checks that every setting group survives a reload of the saved profile, so a new group cannot be forgotten like this again."], "note": "If you turned on Spend stat points automatically in 1.2.108, tick it once more after updating."}, {"version": "1.2.108", "title": "Auto stat points (Strength and Intelligence)", "items": ["New Stat points group in Settings: tick Spend stat points automatically and the bot spends your unspent stat points on Strength and Intelligence, one point at a time, as you level up.", "The split is a ratio. 1 and 0 puts everything into Strength, 0 and 1 everything into Intelligence, 2 and 1 spends two Strength points for every Intelligence point. A reserve keeps some points unspent.", "Each point is confirmed by your unspent count going down before the next is sent. A point the game does not accept is not resent for a minute. It is off by default and the status line says what it is doing."]}, {"version": "1.2.107", "title": "Buff weapon swapping explains itself", "items": ["The Buffs & imbue page now lists every buff assigned to a weapon set and what it is waiting for: how many seconds an active buff has left (the swap only happens when it is about to end), that it is due now, that the skill is not learned, or why it was skipped.", "When a buff is due but the swap cannot start, the page says why instead of staying silent: a saved set whose weapon or shield cannot be found in the bag (or two copies look identical), a missing combat weapon, no free bag slot, no saved set, or no buff assigned to a set.", "A buff whose cast was only unconfirmed is tried again after two minutes. Before, it was skipped until you changed buff settings, so a single missed confirmation could stop swaps for good.", "The buff weapon status is part of the diagnostics export, so a bug report shows what the swap was waiting for."]}, {"version": "1.2.106", "title": "Town setup: pick your town, no need to stand in it", "items": ["The Town page has a Town list and a Set up this town button. Pick Hotan, Jangan, Donwhang, Constantinople or Samarkand and one click fills the arrival point, warehouse, potion merchant, repair merchant and world statue. You no longer have to use a return scroll and stand where it lands first.", "The arrival point is now a preset too. Each town's return scroll always lands on the same spot, so the bot knows it from the server's own data instead of using wherever you happened to be standing.", "Auto-set town services and Redo all automatically still work for the town you are in, and now also use the preset arrival point."]}, {"version": "1.2.105", "title": "Alchemy: aim for stat percentages with attribute stones", "items": ["New Item attributes group in the Alchemy tab. Pick an item, choose the lowest percentage you want for each of its stats (Phy. reinforce, Mag. reinforce, attack rating, attack power, critical, defense, block, absorption and so on, depending on the kind of item) and press Fuse attribute stones. The bot fuses attribute stones of the item's degree until every picked stat reaches its target.", "Every successful fusion rolls the stat again, so it can come out lower, and it can re-roll another stat of the item; the bot keeps going until all picked stats are at or above their targets, and the log names any other stat that changed.", "The tab shows each stat's current percentage and a rough number of stones each target takes (the chance is 50% per stone before bonuses and the top steps get rare fast), and a stone limit (100 by default) stops it. It stops with a message if a stone of the right kind is missing from the bag."]}, {"version": "1.2.104", "title": "Fix: stuck-character recall that fails to start", "items": ["If the optional recovery recall could not start a town trip, hunting kept running and the stuck check repeated forever. Hunting now stops with the alert, as it does when recall is off.", "Fixed a missing full stop in the Obstacles help text."], "note": "Reviewed the 1.2.101 to 1.2.103 obstacle and attack-retry changes: 360 integration tests, the obstacle suite, the browser test and the native navigation comparison all pass."}, {"version": "1.2.103", "title": "Fix attack retries carrying over to other monsters", "items": ["Fixed skills being falsely paused while the character was still approaching a monster outside skill reach.", "Attack rejection pauses now apply to the affected monster, so a failed target does not leave skills paused against the next one.", "Silent rejection checks now require the same selected target, known skill reach and fresh game state without pending movement, selection or inventory work."], "note": "The existing weaker-attacker priority remains in effect. Validated with 360 integration tests; live gameplay confirmation is still pending."}, {"version": "1.2.102", "title": "Fix false blocked-target rejections on normal terrain", "items": ["Removed a two-metre height-difference rejection from the horizontal collision query. Ordinary slopes no longer make nearby monsters look unreachable.", "Missing maps, search limits and failed initial route queries preserve the game's normal approach and targeting. A no-route abandonment now requires fresh state showing an actual sustained lack of movement and confirmed damage.", "Failed-approach memory applies only to the same monster. A failed enemy no longer excludes a different nearby enemy or a party-engaged target beside it."], "note": "This corrects the 1.2.101 targeting regression. Collision-checked detours and confirmed escape recovery remain enabled; live tree-interior recovery still needs gameplay validation."}];
+const RELEASE_NOTES = [{"version": "1.2.110", "title": "Share and import settings", "items": ["New Share and import settings group in Settings. Copy share code or Save share file gives a short code or a file with only the settings you changed from the defaults, ready to post in Discord.", "A share never contains your hunting spot, town and merchant points, walking routes, buff weapon sets or wardrobe, so it is safe to hand out and works on any character.", "To import, paste a code or open a file and press Preview import. It lists exactly which settings would change, and only Apply import changes anything. Your own positions, town points, buff weapon sets and wardrobe are kept, and Undo last import brings your previous settings back.", "Imports are read as plain data: files that are not a nixxane bot share, contain unsafe keys, or are too large are refused, every value must have the type of the setting it replaces, and unknown settings are dropped. Old exports from the previous Export button still import.", "The old Export button is now called Export full backup (with my positions)."]}, {"version": "1.2.109", "title": "Fix: stat point settings are kept after a reload", "items": ["The Stat points settings from 1.2.108 were not saved: they went back to off every time the game was reloaded. They are now kept with the rest of your profile.", "A new test checks that every setting group survives a reload of the saved profile, so a new group cannot be forgotten like this again."], "note": "If you turned on Spend stat points automatically in 1.2.108, tick it once more after updating."}, {"version": "1.2.108", "title": "Auto stat points (Strength and Intelligence)", "items": ["New Stat points group in Settings: tick Spend stat points automatically and the bot spends your unspent stat points on Strength and Intelligence, one point at a time, as you level up.", "The split is a ratio. 1 and 0 puts everything into Strength, 0 and 1 everything into Intelligence, 2 and 1 spends two Strength points for every Intelligence point. A reserve keeps some points unspent.", "Each point is confirmed by your unspent count going down before the next is sent. A point the game does not accept is not resent for a minute. It is off by default and the status line says what it is doing."]}, {"version": "1.2.107", "title": "Buff weapon swapping explains itself", "items": ["The Buffs & imbue page now lists every buff assigned to a weapon set and what it is waiting for: how many seconds an active buff has left (the swap only happens when it is about to end), that it is due now, that the skill is not learned, or why it was skipped.", "When a buff is due but the swap cannot start, the page says why instead of staying silent: a saved set whose weapon or shield cannot be found in the bag (or two copies look identical), a missing combat weapon, no free bag slot, no saved set, or no buff assigned to a set.", "A buff whose cast was only unconfirmed is tried again after two minutes. Before, it was skipped until you changed buff settings, so a single missed confirmation could stop swaps for good.", "The buff weapon status is part of the diagnostics export, so a bug report shows what the swap was waiting for."]}, {"version": "1.2.106", "title": "Town setup: pick your town, no need to stand in it", "items": ["The Town page has a Town list and a Set up this town button. Pick Hotan, Jangan, Donwhang, Constantinople or Samarkand and one click fills the arrival point, warehouse, potion merchant, repair merchant and world statue. You no longer have to use a return scroll and stand where it lands first.", "The arrival point is now a preset too. Each town's return scroll always lands on the same spot, so the bot knows it from the server's own data instead of using wherever you happened to be standing.", "Auto-set town services and Redo all automatically still work for the town you are in, and now also use the preset arrival point."]}, {"version": "1.2.105", "title": "Alchemy: aim for stat percentages with attribute stones", "items": ["New Item attributes group in the Alchemy tab. Pick an item, choose the lowest percentage you want for each of its stats (Phy. reinforce, Mag. reinforce, attack rating, attack power, critical, defense, block, absorption and so on, depending on the kind of item) and press Fuse attribute stones. The bot fuses attribute stones of the item's degree until every picked stat reaches its target.", "Every successful fusion rolls the stat again, so it can come out lower, and it can re-roll another stat of the item; the bot keeps going until all picked stats are at or above their targets, and the log names any other stat that changed.", "The tab shows each stat's current percentage and a rough number of stones each target takes (the chance is 50% per stone before bonuses and the top steps get rare fast), and a stone limit (100 by default) stops it. It stops with a message if a stone of the right kind is missing from the bag."]}, {"version": "1.2.104", "title": "Fix: stuck-character recall that fails to start", "items": ["If the optional recovery recall could not start a town trip, hunting kept running and the stuck check repeated forever. Hunting now stops with the alert, as it does when recall is off.", "Fixed a missing full stop in the Obstacles help text."], "note": "Reviewed the 1.2.101 to 1.2.103 obstacle and attack-retry changes: 360 integration tests, the obstacle suite, the browser test and the native navigation comparison all pass."}, {"version": "1.2.103", "title": "Fix attack retries carrying over to other monsters", "items": ["Fixed skills being falsely paused while the character was still approaching a monster outside skill reach.", "Attack rejection pauses now apply to the affected monster, so a failed target does not leave skills paused against the next one.", "Silent rejection checks now require the same selected target, known skill reach and fresh game state without pending movement, selection or inventory work."], "note": "The existing weaker-attacker priority remains in effect. Validated with 360 integration tests; live gameplay confirmation is still pending."}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -9238,10 +9454,11 @@ const UI = {
       AutoMastery.draw(this.pane);
       StatPoints.draw(this.pane);
       this.pane.append(this.group('Profiles', el('p', 'Settings are saved separately for each character.', 'muted'),
-        this.button('Export nixxane bot settings', () => {
+        this.button('Export full backup (with my positions)', () => {
           const url = URL.createObjectURL(new Blob([JSON.stringify({ app: 'sro-bot-lean', version: VERSION, profile: Settings.profile }, null, 2)], { type: 'application/json' }));
           const link = el('a'); link.href = url; link.download = 'nixxane-bot-settings.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
         })));
+      ProfileShare.draw(this.pane);
       this.pane.append(this.group('Bug reports', el('p', 'Preview diagnostics and optionally a screenshot, then send them to the developer. Nothing sends automatically.', 'muted'), this.button('Send bug report', () => Reports.open())));
       this.logs = el('pre'); this.pane.append(this.group('Recent activity', this.logs));
     }
@@ -9465,7 +9682,7 @@ function boot() {
   Ticker.start(() => Controller.tick(), 100);
   setInterval(() => { Wardrobe.tick(); UI.update(); }, 500);
   W.SROLean = { version: VERSION, stats: Stats, updates: Updates, diagnostics: Diagnostics, reports: Reports, alchemy: Alchemy, buffGear: BuffGear, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, resurrect: Resurrect,
-    restock: Restock, town: Town, walkBack: WalkBack, antiStuck: AntiStuck, chase: Chase, trap: Trap, autoMastery: AutoMastery, statPoints: StatPoints, reconnect: Reconnect, petPotion: PetPotion, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, ui: UI, map: LeanMap, support: Support, items: ItemRules, stop: stopAll, log: Log };
+    restock: Restock, town: Town, walkBack: WalkBack, antiStuck: AntiStuck, chase: Chase, trap: Trap, autoMastery: AutoMastery, statPoints: StatPoints, share: ProfileShare, reconnect: Reconnect, petPotion: PetPotion, navigation: Navigation, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, ui: UI, map: LeanMap, support: Support, items: ItemRules, stop: stopAll, log: Log };
   Log.info('nixxane bot ready. F8 starts/stops; F7 folds; the × minimises; Shift+F7 hides/shows the window.');
 }
 

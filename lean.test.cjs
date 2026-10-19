@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -217,7 +217,13 @@ function navProduct(objects = [], blocked = new Uint8Array(9216)) {
     navmesh: { regionSize: 1920, tileSize: 20, tilesPerAxis: 96,
       regions: [{ dx: 0, dz: 0, cells: { count: 1 }, blockedTiles: Buffer.from(blocked).toString('base64'), tileCellIds: Buffer.alloc(36864).toString('base64') }] } };
 }
-function test(name, fn) { fn(); passed++; console.log('PASS ' + name); }
+const asyncTests = [];
+// An async test is awaited before the total is printed, so a failure inside it can never be lost.
+function test(name, fn) {
+  const result = fn();
+  if (result && typeof result.then === 'function') { asyncTests.push(result.then(() => { passed++; console.log('PASS ' + name); }, error => { console.error('FAIL ' + name); throw error; })); return; }
+  passed++; console.log('PASS ' + name);
+}
 test('filters foreign ownership and permits own/party claims', () => {
   const f = fixture(), d = f.drop(); d.groundItem.ownerJid = 2;
   assert.equal(f.Loot.choose(), null);
@@ -1321,6 +1327,58 @@ test('auto stat points is off by default, waits for a living character and never
   f.advance(60000); f.Controller.tick(); assert.equal(statSends(f).length, 2);
   const unknown = statFixture(0); unknown.World.applyGameplay({ ...unknown.World.gp, progression: { ...unknown.World.gp.progression, statPoints: undefined } });
   unknown.Controller.tick(); assert.deepEqual(statSends(unknown), []); assert.match(unknown.StatPoints.status(), /not known yet/);
+});
+const plain = v => JSON.parse(JSON.stringify(v));
+function shareFixture() {
+  const f = fixture(), p = f.Settings.profile;
+  p.hunt.center = { regionId: 5, x: 10, y: 0, z: 20 }; p.hunt.radius = 250; p.mastery.enabled = true; p.mastery.ids = [257];
+  p.potion.restock.town.arrival = { regionId: 7, x: 1, y: 2, z: 3 }; p.potion.restock.town.vendor = { regionId: 7, x: 4, y: 5, z: 6, name: 'Mine' };
+  p.macro.buffSets = [{ id: 1, name: 'Cleric', weapon: 'w', shield: null }]; p.macro.buffs = [{ id: 20, group: 20, gearSet: 1, enabled: true }];
+  p.wardrobe.presets = { a: { name: 'secret look' } }; p.statPoints.enabled = true; p.statPoints.int = 2; p.items.rules = { 100: { pick: 'yes' } };
+  return f;
+}
+test('a share holds only what differs from the defaults and nothing personal', () => {
+  const f = shareFixture(), data = JSON.parse(f.ProfileShare.text(true));
+  assert.equal(data.app, 'nixxane-bot'); const p = data.profile;
+  assert.equal(p.hunt.radius, 250); assert.equal(p.mastery.enabled, true); assert.equal(p.statPoints.int, 2); assert.deepEqual(plain(p.items.rules), { 100: { pick: 'yes' } });
+  const text = JSON.stringify(p);
+  for (const secret of ['regionId', 'Mine', 'Cleric', 'secret look']) assert.equal(text.includes(secret), false, secret + ' stays out of a share');
+  assert.equal('potion' in p && 'restock' in p.potion && 'town' in p.potion.restock, false, 'unchanged town settings are not shared');
+  assert.equal(p.macro.buffs[0].gearSet, 0, 'a weapon set assignment means nothing without the set');
+  assert.ok(JSON.parse(f.ProfileShare.text(false)).profile.hunt.center, 'the full backup keeps the positions');
+  const defaults = f.ProfileShare.text(true); assert.ok(defaults.length < 600, 'a share stays short');
+});
+test('importing previews the changes, keeps your own positions, applies once and can be undone', async () => {
+  const sender = shareFixture(), code = await sender.ProfileShare.encode(sender.ProfileShare.text(true));
+  assert.match(code, /^nixxane[01]:/);
+  const f = fixture(), p = f.Settings.profile;
+  p.hunt.center = { regionId: 99, x: 1, y: 1, z: 1 }; p.potion.restock.town.arrival = { regionId: 99, x: 9, y: 9, z: 9 }; p.macro.buffSets = [{ id: 4, name: 'Mine', weapon: 'k', shield: null }];
+  const preview = await f.ProfileShare.preview(code);
+  assert.ok(preview.rows.some(r => r.path === 'hunt.radius' && r.to === '250')); assert.equal(preview.rows.some(r => /center|arrival|buffSets|wardrobe/.test(r.path)), false);
+  assert.match(f.ProfileShare.summary(preview.rows), /would change/);
+  assert.equal(p.hunt.radius, 400, 'nothing changed by a preview');
+  f.ProfileShare.pending = preview; assert.equal(f.ProfileShare.apply(), true);
+  const now = f.Settings.profile; assert.equal(now.hunt.radius, 250); assert.equal(now.mastery.enabled, true); assert.equal(now.statPoints.int, 2);
+  assert.equal(now.hunt.center.regionId, 99, 'your hunting spot is kept'); assert.equal(now.potion.restock.town.arrival.regionId, 99); assert.equal(now.macro.buffSets[0].name, 'Mine');
+  assert.equal(f.ProfileShare.hasBackup(), true); assert.equal(f.ProfileShare.undo(), true);
+  assert.equal(f.Settings.profile.hunt.radius, 400); assert.equal(f.Settings.profile.mastery.enabled, false); assert.equal(f.ProfileShare.hasBackup(), false);
+  f.Hunt.running = true; f.ProfileShare.pending = preview; assert.equal(f.ProfileShare.apply(), false); assert.equal(f.Settings.profile.hunt.radius, 400, 'not while hunting');
+});
+test('an import is parsed as data: wrong files, prototype keys, wrong types and unknown fields are refused or dropped', async () => {
+  const f = fixture(), share = obj => JSON.stringify({ app: 'nixxane-bot', format: 1, profile: obj });
+  await assert.rejects(f.ProfileShare.preview(''), /Paste a share code/);
+  await assert.rejects(f.ProfileShare.preview('hello'), /not a nixxane bot settings share/);
+  await assert.rejects(f.ProfileShare.preview(JSON.stringify({ app: 'other', profile: {} })), /not a nixxane bot settings share/);
+  await assert.rejects(f.ProfileShare.preview('{"app":"nixxane-bot","profile":{"hunt":{"__proto__":{"polluted":true}}}}'), /not allowed/);
+  await assert.rejects(f.ProfileShare.preview('nixxane0:@@@'), /damaged/);
+  await assert.rejects(f.ProfileShare.preview('x'.repeat(300001)), /too large/);
+  assert.equal({}.polluted, undefined);
+  const odd = await f.ProfileShare.preview(share({ hunt: { radius: 'huge', chase: 650, extra: 1 }, evil: { a: 1 }, potion: { hp: { pct: 'x', on: false } } }));
+  assert.equal(odd.next.hunt.radius, 400, 'a wrong type falls back to the default'); assert.equal(odd.next.hunt.chase, 650); assert.equal('extra' in odd.next.hunt, false); assert.equal('evil' in odd.next, false);
+  assert.equal(odd.next.potion.hp.pct, 60); assert.equal(odd.next.potion.hp.on, false);
+  const old = await f.ProfileShare.preview(JSON.stringify({ app: 'sro-bot-lean', version: '1.2.0', profile: { ...plain(f.Settings.profile), hunt: { ...plain(f.Settings.profile.hunt), radius: 123 } } }));
+  assert.equal(old.next.hunt.radius, 123, 'an old full export still imports');
+  const unicode = 'Jäger 狩猎 ✓'; assert.equal(f.ProfileShare.string(f.ProfileShare.fromBase64(f.ProfileShare.toBase64(f.ProfileShare.bytes(unicode)))), unicode);
 });
 function skillFixture(extra = {}, learned = [1001]) {
   const f = masteryFixture(extra); f.Settings.profile.mastery.enabled = false; f.Settings.profile.mastery.skills = true;
@@ -3885,6 +3943,7 @@ async function updateTests() {
     assert.equal(f.Stats.session.xp,38n);assert.equal(f.Stats.pendingXP.length,0);assert.equal(f.Stats.display().xp,'38');
     assert.equal(f.storage.size,0);assert.equal(f.commands.length,0);
   });
+  await Promise.all(asyncTests);
   console.log('Total integration tests: ' + passed);
 }
 updateTests().catch(error => { console.error(error); process.exitCode = 1; });

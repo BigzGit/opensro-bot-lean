@@ -803,10 +803,11 @@ const UI = {
       AutoMastery.draw(this.pane);
       StatPoints.draw(this.pane);
       this.pane.append(this.group('Profiles', el('p', 'Settings are saved separately for each character.', 'muted'),
-        this.button('Export nixxane bot settings', () => {
+        this.button('Export full backup (with my positions)', () => {
           const url = URL.createObjectURL(new Blob([JSON.stringify({ app: 'sro-bot-lean', version: VERSION, profile: Settings.profile }, null, 2)], { type: 'application/json' }));
           const link = el('a'); link.href = url; link.download = 'nixxane-bot-settings.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
         })));
+      ProfileShare.draw(this.pane);
       this.pane.append(this.group('Bug reports', el('p', 'Preview diagnostics and optionally a screenshot, then send them to the developer. Nothing sends automatically.', 'muted'), this.button('Send bug report', () => Reports.open())));
       this.logs = el('pre'); this.pane.append(this.group('Recent activity', this.logs));
     }

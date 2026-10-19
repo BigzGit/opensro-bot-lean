@@ -125,7 +125,7 @@ const gameplay = { localGid: 1, target: 0, targetPending: false, inventoryPendin
     await tab('Alchemy'); await page.locator('#sro-bot-lean select').first().selectOption({ index: 1 }); await page.waitForTimeout(300); await snap('09-alchemy'); await jump('Stones that help and protect'); await snap('09b-alchemy-stones'); await jump('Item attributes'); await snap('09c-alchemy-attributes');
     await tab('Party'); await snap('13-party');
     await tab('Settings'); await snap('10-settings');
-    await jump('Anti-stuck'); await snap('11-anti-stuck');
+    await jump('Share and import settings'); await snap('10b-share'); await jump('Anti-stuck'); await snap('11-anti-stuck');
     await jump('Auto mastery and skills'); await snap('12-mastery');
     await page.getByRole('button', { name: 'Send bug report', exact: true }).click();
     await page.getByRole('textbox', { name: 'Report preview', exact: true }).waitFor();

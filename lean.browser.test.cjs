@@ -160,6 +160,12 @@ const server = http.createServer((req, res) => {
     await page.getByRole('button', { name: 'Skills', exact: true }).click();
     await page.getByRole('button', { name: 'Add Test attack', exact: true }).click();
     assert.equal(await page.evaluate(() => SROLean.settings.profile.macro.rotations.normal[0].id), 5);
+    // A share code is compressed with the browser's own stream and opens again to the same settings, without the hunting spot.
+    const shared = await page.evaluate(async () => {
+      const share = SROLean.share, code = await share.encode(share.text(true)), profile = await share.parse(code);
+      return { prefix: code.slice(0, 9), hasRotation: !!profile.macro.rotations.normal.length, hasSpot: JSON.stringify(profile).includes('regionId') };
+    });
+    assert.deepEqual(shared, { prefix: 'nixxane1:', hasRotation: true, hasSpot: false });
     await page.getByRole('button', { name: 'Add Second attack', exact: true }).click();
     await page.getByRole('button', { name: 'Move up Second attack', exact: true }).click();
     assert.deepEqual(await page.evaluate(() => SROLean.settings.profile.macro.rotations.normal.map(s => s.id)), [7, 5]);
