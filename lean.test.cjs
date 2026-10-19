@@ -1304,6 +1304,14 @@ test('auto stat points follows the Strength and Intelligence ratio and the reser
   const h = statFixture(3, { str: 1, int: 0 }, { reserve: 3 }); h.Controller.tick(); assert.deepEqual(statSends(h), []); assert.match(h.StatPoints.status(), /Keeping 3 stat points unspent/);
   const z = statFixture(3, { str: 0, int: 0 }); z.Controller.tick(); assert.deepEqual(statSends(z), []); assert.match(z.StatPoints.status(), /share above zero/);
 });
+test('the auto stat points settings survive a reload of the saved profile', () => {
+  const f = fixture(), saved = JSON.parse(JSON.stringify({ ...f.Settings.profile, statPoints: { enabled: true, str: 0, int: 3, reserve: 4 } }));
+  const loaded = f.botProfile(saved);
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.statPoints)), { enabled: true, str: 0, int: 3, reserve: 4 });
+  assert.deepEqual(JSON.parse(JSON.stringify(f.botProfile({}).statPoints)), { enabled: false, str: 1, int: 0, reserve: 0 });
+  for (const key of Object.keys(f.Settings.profile)) assert.ok(key in loaded, key + ' is kept when a profile loads');
+  const kept = f.botProfile(saved); for (const key of Object.keys(saved)) assert.deepEqual(JSON.parse(JSON.stringify(kept[key])), saved[key], key + ' round-trips through botProfile');
+});
 test('auto stat points is off by default, waits for a living character and never resends an unconfirmed point', () => {
   const off = fixture(); off.World.applyGameplay({ ...off.World.gp, progression: { ...off.World.gp.progression, statPoints: 5 } });
   assert.equal(off.Settings.profile.statPoints.enabled, false); off.Controller.tick(); assert.deepEqual(statSends(off), []);
