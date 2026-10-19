@@ -257,6 +257,7 @@ const UI = {
     this.layoutButton.textContent = on ? 'Compact' : 'Wide';
     if (save) this.uiPrefs({ wide: on });
     if (on) { Stats.loadLevels(); this.updateWide(); }
+    if (save && this.pane) this.draw();
     if (!this.minimised && this.root.host.style.left) this.fitWindow(this.root.host);
   },
   readout(parent, label, group) {
@@ -803,8 +804,31 @@ const UI = {
       this.logs = this.activityLog('Settings activity');
       this.pane.append(this.group('Recent activity', this.button('Pop out session totals and log', () => this.showSession(true)), this.activityPanel(this.logs, 'Settings')));
     }
+    this.balance();
     this.update();
     this.pane.scrollTop = scroll;
+  },
+  // The wide window shows a page as two columns. Plain grid rows leave a gap under every box that is shorter than its
+  // neighbour, so the boxes are dealt into two stacks instead: each one goes under the shorter stack, in page order.
+  // Wide boxes (the map, the item table, the member list, the trip pictures) and loose notes keep the full width.
+  balance() {
+    if (!this.wide || !this.pane) return;
+    const full = el => el.tagName !== 'FIELDSET' || el.matches('.map-box, :has(.trip-flow), :has(.members), :has(.item-table)');
+    const kids = [...this.pane.children], boxes = kids.filter(k => !full(k));
+    if (boxes.length < 2 || kids.length === 1) return;
+    const heights = new Map(boxes.map(b => [b, b.offsetHeight])), segments = [];
+    let run = [];
+    for (const k of kids) {
+      if (full(k)) { if (run.length) segments.push({ run, before: k }); run = []; } else run.push(k);
+    }
+    if (run.length) segments.push({ run, before: null });
+    for (const { run: group, before } of segments) {
+      if (group.length < 2) continue;
+      const row = el('div', null, 'pane-cols'), left = el('div', null, 'pane-col'), right = el('div', null, 'pane-col');
+      let l = 0, r = 0;
+      for (const b of group) { if (l <= r) { left.append(b); l += heights.get(b) + 8; } else { right.append(b); r += heights.get(b) + 8; } }
+      row.append(left, right); this.pane.insertBefore(row, before);
+    }
   },
   // Items page: every item of the game's catalogue with its rule (sBot's item list). Filters re-render only the table,
   // so typing in the search box keeps its focus. 100 rows per page; bulk buttons apply to everything the filters show.

@@ -174,3 +174,4 @@ fieldset>input[type=search]{width:100%;margin:2px 0 6px}
 .activity-history,.activity-history *{user-select:text;-webkit-user-select:text}
 :host(.wide) .logbox .activity-history{height:78px;max-height:none;margin:4px 0 0;padding:0;background:none;border:0}
 .activity-history .activity-message{flex:1}.activity-history .activity-repeat{flex:0 0 auto;margin-left:auto;white-space:nowrap;color:#b9a878}
+:host(.wide) .pane>.pane-cols{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:8px;align-items:start}.pane-col{min-width:0}

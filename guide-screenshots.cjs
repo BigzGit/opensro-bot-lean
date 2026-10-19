@@ -128,6 +128,11 @@ const gameplay = { localGid: 1, target: 0, targetPending: false, inventoryPendin
     await tab('Settings'); await snap('10-settings');
     await jump('Share and import settings'); await snap('10b-share'); await jump('Anti-stuck'); await snap('11-anti-stuck');
     await jump('Auto mastery and skills'); await snap('12-mastery');
+    // The wide window lays each page out in two columns; short boxes must not leave gaps under them.
+    await page.setViewportSize({ width: 1200, height: 1000 });
+    await page.evaluate(() => SROLean.ui.setWide(true));
+    await tab('Party'); await snap('15-wide-party'); await tab('Settings'); await snap('15-wide-settings'); await tab('Alchemy'); await snap('15-wide-alchemy');
+    await page.evaluate(() => SROLean.ui.setWide(false)); await page.setViewportSize({ width: 1280, height: 900 }); await tab('Settings');
     await page.getByRole('button', { name: 'Send bug report', exact: true }).click();
     await page.getByRole('textbox', { name: 'Report preview', exact: true }).waitFor();
     await page.setViewportSize({ width: 1000, height: 1010 });

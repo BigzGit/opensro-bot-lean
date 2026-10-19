@@ -502,6 +502,11 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('sroLean:ui')).wide), true);
     assert.equal(await page.getByLabel('Activity', { exact: true }).isVisible(), true);
     assert.equal(await page.locator('.status').isVisible(), false, 'the strip replaces the text status');
+    // Wide pages are dealt into two stacks, so a short box never leaves a gap under it.
+    await page.getByRole('button', { name: 'Party', exact: true }).click();
+    const stacks = await page.evaluate(() => [...document.getElementById('sro-bot-lean').shadowRoot.querySelectorAll('.pane-cols > .pane-col')].map(c => ({ boxes: c.children.length, height: c.offsetHeight })));
+    assert.equal(stacks.length, 2); assert.ok(stacks.every(s => s.boxes >= 1), 'both columns hold boxes');
+    assert.ok(Math.abs(stacks[0].height - stacks[1].height) < 260, 'the two columns end at about the same height: ' + JSON.stringify(stacks));
     assert.equal(await page.locator('.strip strong').first().innerText(), await page.evaluate(() => SROLean.world.charName));
     await page.waitForFunction(() => [...document.getElementById('sro-bot-lean').shadowRoot.querySelectorAll('nav button')].every(b => b.dataset.iconLoaded === 'true'));
     assert.match(await page.getByLabel('Supplies: HP potions', { exact: true }).innerText(), /^[\d,]+$/);
