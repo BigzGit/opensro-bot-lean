@@ -147,6 +147,8 @@ An application to the main's party that has not been answered after 30 seconds i
 
 If the character is back in a known town, far from the hunting spot, and the town cycle's revive option is on, the bot does the town services and reverses with the scroll (the same trip as after a death) instead of walking.
 
+If the plain **Disconnected from the server.** box stays up and the resume and three fresh entries have not brought the character back, the bot reloads the page the same way. The limit of 3 reloads in 30 minutes is a pause, not the end: once the oldest reload is 30 minutes old the bot tries again, for up to 12 hours.
+
 ## Returning after death
 
 Leave **Revive in town and reverse to last scroll point** enabled under **Town → Go to town when…**. With the town cycle enabled, the bot revives, completes town services and reverses back to hunt. Hunting resumes within 30 metres of the last scroll point, or within your saved hunting area after death. Carry reverse scrolls.

@@ -10,7 +10,7 @@ const Reconnect = {
   intent: null, attempts: 0, nextAt: 0, waitUntil: 0, backAt: 0, message: '',
   DELAYS: [4000, 10000, 20000, 30000], GIVE_UP_MS: 12 * 3600 * 1000,
   STORE_KEY: 'sro-lean-reload', LOAD_WAIT_MS: 15000, MAX_RELOADS: 3, RELOAD_WINDOW_MS: 30 * 60000, PENDING_MS: 10 * 60000, LOGIN_GRACE_MS: 60000,
-  restored: false, failedAt: 0, expiredAt: 0, EXPIRED_WAIT_MS: 30000, snapAt: 0, gaveUp: false,
+  restored: false, failedAt: 0, expiredAt: 0, EXPIRED_WAIT_MS: 30000, snapAt: 0, gaveUp: false, retryAt: 0,
   // What survives a page reload: the last in-world snapshot, the reload times and the one reload waiting to be resumed.
   load() { try { return JSON.parse(window.localStorage.getItem(this.STORE_KEY)) || {}; } catch { return {}; } },
   save(data) { try { window.localStorage.setItem(this.STORE_KEY, JSON.stringify(data)); } catch {} },
@@ -45,7 +45,7 @@ const Reconnect = {
     const data = this.load(), times = (data.times || []).filter(t => Date.now() - t < this.RELOAD_WINDOW_MS);
     if (times.length >= this.MAX_RELOADS) {
       if (!this.gaveUp) {
-        this.gaveUp = true; this.message = 'Reloaded the page ' + this.MAX_RELOADS + ' times in 30 minutes; not reloading again. Reload it yourself.';
+        this.gaveUp = true; this.retryAt = Math.min(...times) + this.RELOAD_WINDOW_MS + 1000; this.message = 'Reloaded the page ' + this.MAX_RELOADS + ' times in 30 minutes; not reloading again for now; trying again when the oldest reload is 30 minutes old.';
         Log.warn(this.message); UI.toast(this.message, 'warn', 8000);
       }
       return false;
@@ -55,11 +55,17 @@ const Reconnect = {
     this.doReload();
     return true;
   },
+  // The reload limit is a pause, not the end: once the oldest reload is 30 minutes old another one is allowed (a server
+  // that is down for hours must not leave the bot stuck for the night).
+  capped() {
+    if (this.gaveUp && Date.now() >= this.retryAt) { this.gaveUp = false; this.failedAt = this.failedAt ? now() : 0; this.expiredAt = this.expiredAt ? now() : 0; }
+    return this.gaveUp;
+  },
   watchLoad() {
     const text = this.loadFailure();
     if (!text) { this.failedAt = 0; return; }
     if (!this.failedAt) { this.failedAt = now(); this.gaveUp = false; Log.warn('The game failed to load (' + text + '); reloading the page shortly.'); }
-    if (this.gaveUp) return;
+    if (this.capped()) return;
     if (now() - this.failedAt < this.LOAD_WAIT_MS) { this.message = 'The game failed to load; reloading the page shortly.'; return; }
     this.reloadPage();
   },
@@ -101,10 +107,12 @@ const Reconnect = {
     // "Your session ended while the connection was gone": the server dropped the world session (its resume window is 30 s),
     // so resuming can never work. Enter the character afresh; if that does not bring it back, reload the page, which
     // restores the login from the game's session cookie. The window's Confirm button would log out, so it is never pressed.
-    const expired = phase === 'disconnected' && /session ended while the connection was gone|could not resume/i.test(String(World.session?.disconnectMessage || '') + ' ' + error);
+    // A plain "Disconnected from the server." box has no message to read. When the resume and three fresh entries have all
+    // failed the login behind them is stale as well, so it gets the same treatment: enter afresh, then reload the page.
+    const expired = phase === 'disconnected' && (/session ended while the connection was gone|could not resume/i.test(String(World.session?.disconnectMessage || '') + ' ' + error) || this.attempts >= 4);
     if (expired) {
-      if (!this.expiredAt) { this.expiredAt = now(); Log.warn('The game session ended while the connection was gone; entering the character again.'); }
-      else if (now() - this.expiredAt > this.EXPIRED_WAIT_MS && !this.gaveUp) { this.message = 'Still not back; reloading the page.'; if (this.reloadPage()) return; }
+      if (!this.expiredAt) { this.expiredAt = now(); Log.warn('The game session is gone (' + (this.attempts >= 4 ? 'reconnect attempts failed' : 'session ended') + '); entering the character again, then reloading the page.'); }
+      else if (now() - this.expiredAt > this.EXPIRED_WAIT_MS && !this.capped()) { this.message = 'Still not back; reloading the page.'; if (this.reloadPage()) return; }
     }
     if (now() < this.nextAt || now() < this.waitUntil) return;
     const n = this.attempts++;

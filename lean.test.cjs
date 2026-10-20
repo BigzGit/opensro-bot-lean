@@ -4435,3 +4435,18 @@ test('an expired world session skips the futile resume, enters afresh, then relo
   g.f.storage.set('sro-lean-reload', JSON.stringify({ times: [Date.now(), Date.now(), Date.now()] }));
   g.f.advance(3000); g.f.Controller.tick(); g.f.advance(40000); g.f.Controller.tick(); assert.equal(g.reloads(), 0); assert.equal(g.f.Reconnect.gaveUp, true);
 });
+
+test('a plain "Disconnected from the server." that nothing recovers ends in a page reload, and the reload limit is only a pause', () => {
+  const r = reloadFixture(), f = r.f; r.sent.length = 0;
+  r.lose(); f.World.session = { phase: 'disconnected', disconnectMessage: '' };
+  for (let i = 0; i < 40 && r.reloads() === 0; i++) { f.advance(10000); f.Controller.tick(); }
+  assert.equal(r.reloads(), 1, 'stuck reconnecting: the page is reloaded to restore the login');
+  assert.ok(r.sent.filter(c => c.kind === 'reconnect').length === 1, 'one resume attempt only');
+  const g = reloadFixture(); g.lose(); g.f.World.session = { phase: 'disconnected', disconnectMessage: '' };
+  g.f.storage.set('sro-lean-reload', JSON.stringify({ times: [Date.now(), Date.now(), Date.now()] }));
+  for (let i = 0; i < 40; i++) { g.f.advance(10000); g.f.Controller.tick(); }
+  assert.equal(g.reloads(), 0); assert.equal(g.f.Reconnect.gaveUp, true);
+  assert.ok(g.f.Reconnect.retryAt > Date.now() + 25 * 60000, 'paused until the oldest reload is 30 minutes old'); g.f.Reconnect.retryAt = Date.now() - 1; g.f.storage.set('sro-lean-reload', JSON.stringify({ times: [Date.now() - 31 * 60000, Date.now() - 32 * 60000, Date.now() - 33 * 60000] }));
+  for (let i = 0; i < 200 && g.reloads() === 0; i++) { g.f.advance(10000); g.f.Controller.tick(); }
+  assert.equal(g.reloads(), 1, 'once the limit window has passed the bot tries again');
+});
