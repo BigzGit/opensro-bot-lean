@@ -184,7 +184,7 @@ const UI = {
     discord.className = 'discord'; discord.title = 'Updates, suggestions and bug reports';
     const version = this.button(VERSION, () => this.showNotes());
     version.className = 'version'; version.title = 'What’s new: patch notes';
-    const name = el('strong', 'nixxane bot '); name.append(version);
+    const name = el('strong', 'NIX '); name.append(version);
     this.layoutButton = this.button('Wide', () => this.classic ? this.setClassic(false) : this.setWide(!this.wide));
     this.layoutButton.className = 'layout'; this.layoutButton.title = 'Switch between the wide and the compact window';
     this.classicButton = this.button('Classic', () => this.setClassic(true));

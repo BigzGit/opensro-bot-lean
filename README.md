@@ -1,4 +1,4 @@
-# nixxane bot
+# NIX (the nixxane bot)
 
 A compact OpenSRO bot for hunting, potions, pet loot and automatic town trips.
 
