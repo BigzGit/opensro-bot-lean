@@ -574,6 +574,16 @@ const server = http.createServer((req, res) => {
     }
     assert.ok(await page.evaluate(() => { const p = document.getElementById('sro-bot-lean').shadowRoot.querySelector('.pane'); p.scrollTop = 400; return p.scrollTop > 0 && p.scrollHeight > p.clientHeight; }), 'the pane scrolls');
     assert.deepEqual(await frameBoxes(), frameAtStart, 'scrolling the pane does not move the frame');
+    // The pop-out windows follow the classic look too.
+    await page.getByRole('button', { name: 'Session log', exact: true }).click();
+    await page.screenshot({ path: __dirname + '/lean-classic-session.png' });
+    await page.getByRole('button', { name: 'Close current session', exact: true }).click();
+    await page.evaluate(() => { SROLean.ui.sessionBox?.remove(); SROLean.ui.sessionBox = null; });
+    await page.getByRole('button', { name: 'Help', exact: true }).click();
+    await page.getByRole('button', { name: 'Patch notes', exact: true }).click();
+    await page.screenshot({ path: __dirname + '/lean-classic-notes.png' });
+    await page.getByRole('button', { name: 'Close patch notes', exact: true }).click();
+    await page.evaluate(() => { SROLean.ui.notesBox?.remove(); SROLean.ui.notesBox = null; });
     // One source of truth: a setting changed in the classic window is the same setting in the compact pages.
     const hpBefore = await page.evaluate(() => SROLean.settings.profile.potion.hp.on);
     await page.getByLabel('Use HP', { exact: true }).setChecked(!hpBefore);

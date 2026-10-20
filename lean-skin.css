@@ -187,7 +187,7 @@ fieldset>input[type=search]{width:100%;margin:2px 0 6px}
 :host(.classic) header button{height:20px;min-width:0;color:#000;background:#f1f1f1;border:1px solid #9a9aa3;border-image:none;padding:0 7px;font-size:11px}
 :host(.classic) header button.version{background:none;border:0;padding:0;margin:0 0 0 4px;text-decoration:underline dotted}
 :host(.classic) header button.fold{background:none;border:0;width:16px;height:16px;top:7px;right:10px;color:#000;font-size:0;background-image:var(--s-close)}
-:host(.classic) .body{margin:0;padding:0 0 6px;display:grid;grid-template-columns:106px minmax(0,1fr) 140px;column-gap:6px;align-items:start;
+:host(.classic) .panel:not(.dialog)>.body{margin:0;padding:0 0 6px;display:grid;grid-template-columns:106px minmax(0,1fr) 140px;column-gap:6px;align-items:start;
   grid-template-areas:"menu menu menu" "note note note" "strip strip strip" "ctl ctl ctl" "nav wait side" "nav pane side" "nav fb side"}
 :host(.classic) .menubar{grid-area:menu;display:flex;gap:2px;position:relative;padding:3px 6px;background:#fff;color:#000;margin-bottom:4px}
 :host(.classic) .menubar button.menu-title{height:20px;min-width:0;padding:0 8px;border:0;border-image:none;background:none;color:#000;font-size:12px}
@@ -252,5 +252,10 @@ fieldset>input[type=search]{width:100%;margin:2px 0 6px}
 :host(.classic) .readout{display:flex;justify-content:space-between;gap:6px;margin:1px 0;font-size:11px}
 :host(.classic) .readout span{color:var(--c-text)}
 :host(.classic) .readout b{color:#fff;font-weight:normal;text-align:right;font-variant-numeric:tabular-nums}
+:host(.classic) .dialog-body{margin:0 10px;padding:8px 0;max-height:calc(100vh - 100px)}
+:host(.classic) .dialog .field{justify-content:space-between}
+:host(.classic) .dialog .field:has(input[type=checkbox]){flex-direction:row-reverse;justify-content:flex-end}
+:host(.classic) .dialog textarea{background:#000;color:#fff;border:1px solid #fff}
+:host(.classic) .activity-history{background:#000;border:1px solid #6d6d78}
 :host(.classic) .item-row{grid-template-columns:26px minmax(0,1fr) 34px 44px repeat(5,44px)}
 }
