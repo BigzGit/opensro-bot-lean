@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.119
+// @version      1.2.120
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[NIX] Another SRO assistant is active. Disable it and reload to use NIX.');
   return;
 }
-const VERSION = '1.2.119';
+const VERSION = '1.2.120';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -5809,9 +5809,58 @@ Hook.observers.push( command => {
 // It never types or stores credentials: if the login itself is gone it says so and waits for you. Hunting that was
 // running resumes once the character is back at the hunting spot. Choosing logout, disconnect, exit or restart yourself
 // cancels everything, and so does logging in or entering a character by hand.
+// When the game itself fails to load ("Unable to finish loading") the page is reloaded after a short wait. The character
+// and whether hunting was running are kept in localStorage across the reload; the game restores the login from its own
+// session cookie, then the same reconnect steps below enter the world and resume hunting. At most 3 reloads per 30 minutes.
 const Reconnect = {
   intent: null, attempts: 0, nextAt: 0, waitUntil: 0, backAt: 0, message: '',
   DELAYS: [4000, 10000, 20000, 30000], GIVE_UP_MS: 12 * 3600 * 1000,
+  STORE_KEY: 'sro-lean-reload', LOAD_WAIT_MS: 15000, MAX_RELOADS: 3, RELOAD_WINDOW_MS: 30 * 60000, PENDING_MS: 10 * 60000, LOGIN_GRACE_MS: 60000,
+  restored: false, failedAt: 0, snapAt: 0, gaveUp: false,
+  // What survives a page reload: the last in-world snapshot, the reload times and the one reload waiting to be resumed.
+  load() { try { return JSON.parse(window.localStorage.getItem(this.STORE_KEY)) || {}; } catch { return {}; } },
+  save(data) { try { window.localStorage.setItem(this.STORE_KEY, JSON.stringify(data)); } catch {} },
+  // The game's own loading screen says when it gave up; its label is only changed to this text on a failure.
+  loadFailure() {
+    if (typeof document === 'undefined') return '';
+    const box = document.getElementById('startup-loading');
+    if (!box || box.dataset.error !== 'true' || !/Unable to finish loading/.test(box.querySelector('.sro-boot-loading__label')?.textContent || '')) return '';
+    return box.querySelector('.sro-boot-loading__detail')?.textContent || 'Unable to finish loading';
+  },
+  doReload() { window.location.reload(); },
+  snapshot() {
+    if (!World.inWorld() || !World.charName || now() - this.snapAt < 5000) return;
+    this.snapAt = now();
+    const data = this.load();
+    this.save({ ...data, snap: { character: World.charName, hunting: !!(Hunt.running || Town.trip || WalkBack.active || this.intent?.hunting), at: Date.now() } });
+  },
+  // Right after a reload: pick the character up again exactly as after a lost connection.
+  restore() {
+    this.restored = true;
+    const data = this.load(), p = data.pending;
+    if (!p) return;
+    this.save({ ...data, pending: null });
+    if (!p.character || Date.now() - p.at > this.PENDING_MS) return;
+    this.intent = { character: p.character, hunting: !!p.hunting, since: now(), reloaded: true };
+    this.attempts = 1; this.nextAt = now() + 3000; this.backAt = 0;
+    this.message = 'The page was reloaded; restoring ' + p.character + '.';
+    Log.warn('The game failed to load earlier; page reloaded, restoring ' + p.character + '.');
+  },
+  watchLoad() {
+    const text = this.loadFailure();
+    if (!text) { this.failedAt = 0; return; }
+    if (!this.failedAt) { this.failedAt = now(); this.gaveUp = false; Log.warn('The game failed to load (' + text + '); reloading the page shortly.'); }
+    if (this.gaveUp) return;
+    if (now() - this.failedAt < this.LOAD_WAIT_MS) { this.message = 'The game failed to load; reloading the page shortly.'; return; }
+    const data = this.load(), times = (data.times || []).filter(t => Date.now() - t < this.RELOAD_WINDOW_MS);
+    if (times.length >= this.MAX_RELOADS) {
+      this.gaveUp = true; this.message = 'The game failed to load ' + this.MAX_RELOADS + ' times in 30 minutes; not reloading again. Reload it yourself.';
+      Log.warn(this.message); return UI.toast(this.message, 'warn', 8000);
+    }
+    const known = this.intent ? { character: this.intent.character, hunting: this.intent.hunting } : data.snap && Date.now() - data.snap.at < this.RELOAD_WINDOW_MS ? data.snap : null;
+    this.save({ snap: data.snap, times: [...times, Date.now()], pending: known ? { character: known.character, hunting: !!known.hunting, at: Date.now() } : null });
+    this.doReload();
+  },
   active() { return !!this.intent; },
   clear(message = '') { this.intent = null; this.attempts = 0; this.nextAt = this.waitUntil = this.backAt = 0; this.message = message; },
   // The connection was lost while the bot may have been working: remember what to restore.
@@ -5831,6 +5880,9 @@ const Reconnect = {
     try { Hook.post({ kind: 'session', command }); return true; } catch (e) { Log.warn('Reconnect command failed: ' + (e?.message || e)); return false; }
   },
   tick() {
+    if (!this.restored) this.restore();
+    this.watchLoad();
+    this.snapshot();
     const i = this.intent;
     if (!i) return;
     if (now() - i.since > this.GIVE_UP_MS) return this.clear('Gave up reconnecting after 12 hours.');
@@ -5839,6 +5891,7 @@ const Reconnect = {
     const phase = World.phase, error = String(World.session?.error || '');
     if (['connecting', 'entering-world', 'reconnecting'].includes(phase)) { this.message = 'Reconnecting…'; return; }
     if (['signed-out', 'listing-servers', 'loading-roster', 'authenticating'].includes(phase) || /authentication required/i.test(error)) {
+      if (i.reloaded && now() - i.since < this.LOGIN_GRACE_MS) { this.message = 'The page was reloaded; waiting for the game to restore your login.'; return; }
       this.message = 'The login is gone (server restart?). Log in and enter your character again; the bot resumes when you are back.';
       return;
     }
@@ -8698,7 +8751,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.119", "title": "The panel is now called NIX", "items": ["The panel title now reads **NIX** followed by the version, instead of \"nixxane bot\".", "Nothing else changes: the script keeps its installed name inside Tampermonkey, so it updates in place and nobody has to reinstall. Settings, saved profiles and shared settings are untouched."]}, {"version": "1.2.118", "title": "Alt accounts join the main account's party", "items": ["**Join the main account's party:** a new option on the Party page (Party/Autores in the Classic window) for your other accounts. Tick **Join the main account's party** and type the main character's name. While the character is not in a party, the bot accepts a party invitation from the main, or finds the main's listing on the party-matching board and applies to it. It does nothing while the character is in another party, and the status line says what it is doing (looking for the listing, applying, party full, level outside the listing's range).", "On the main account, tick **Auto-recruit** and **Auto-accept party-matching joins** so the listing is there and the applications are answered. Leave the new option off on the main account.", "It also brings an account back into the party after a disconnect: once automatic reconnect has the character back in the game, the party is rejoined the same way."]}, {"version": "1.2.117", "title": "Classic window and Max every skill", "items": ["**Classic window:** a third layout, opt-in with the Classic button at the top of the panel (screens at least 900 px wide). It is a fixed-size window laid out like SBot: a menu bar, HP, MP and EXP bars with the bot status beside them, three wide buttons (Start / stop, Return & hunt, Stop all), the tabs down the left, and your session numbers, supplies and Start / Stop training always on the right. The tabs are Settings, Skills, Items/Storage, Training place, Party/Autores, Player buffing, Auto alchemy and Extra, then Map, Wardrobe and Setup. They hold the same settings as the compact and wide pages, so a change made in one window shows in the others. Compact brings the small window back.", "**Max every skill:** a new button under Settings → Auto mastery and skills (the Extra tab in the Classic window). It learns and upgrades every skill, level by level, including skill lines you have not started, as fast as the game answers. It raises a mastery only when that mastery is what blocks a skill, ignores the gap and reserve settings, and when nothing more is allowed it stops and says what is left (skill points, strength or intelligence). Stop ends it early.", "The compact window reserves less space for its status lines, so it is no longer taller than before, and the town, walk-back and reconnect messages show in the waiting note only. Fixes the panel running off the bottom of short screens in 1.2.115 and 1.2.116."]}, {"version": "1.2.116", "title": "Walk to a far hunting spot", "items": ["**Return & hunt**, revival return and reconnect now walk to a hunting spot more than 600 m away instead of telling you to walk there yourself. The trip is walked in short legs, because the game only publishes collision data for the area around the character; each leg crosses into the next region and the next leg is planned from the newly loaded map.", "The status line shows the leg and the distance left. A blocked leg end is replaced by a nearby walkable point, and a leg that makes no progress is retried before it is reported. Death, manual control and **Stop all** cancel the walk at once.", "A spot beyond about 14 km, a walk longer than 30 minutes, or one that stops making progress is cancelled with a message instead of walking forever. Another world and dungeons still have no walking route.", "A long-range route planner is built in and will take over for trips inside one map area once its route data is published; until then the bot walks in legs."]}, {"version": "1.2.115", "title": "Narrow window: buttons stay put", "items": ["In the compact window the status lines and the waiting note changed height as lines came and went, which moved the buttons below them and caused misclicks. They now reserve their space, so the buttons stay where they are."]}, {"version": "1.2.114", "title": "Wide window: no more gaps between boxes", "items": ["In the wide window each page is shown in two columns. A short box next to a tall one used to leave a gap under it. The boxes are now dealt into two stacks, each under the shorter one, so the columns close up. The map, item table, member list and trip pictures still use the full width.", "Switching between Compact and Wide redraws the page, so the layout is right straight away."]}, {"version": "1.2.113", "title": "Detailed activity log, pop-out session window and return choices", "items": ["Structured activity history (from Joggio's contribution): categories, outcomes, session markers and grouped repeats, with filters, search, pause and follow, a bounded optional 10-minute command capture, and a local export with a preview (names, free text and positions left out unless you tick raw). Nothing is uploaded.", "Messages use monster names and plain language. Cast code 5 becomes one \"Skill not ready yet\" row with a count. Select log text and press Ctrl+C to copy it.", "Session window with live totals and the log: open it with the Session button or Pop out in Settings. It no longer opens by itself when you start hunting.", "The feedback line and the status lines stay on the main panel, as before.", "Potion delay in milliseconds, saved per character. Town revival can reverse to the last return-scroll point (the default, so the bot lands in its hunting area) or to where you died. The death spot is only used when you died inside the hunting area, because hunting starts again only from inside it."]}, {"version": "1.2.112", "title": "Follow a party member (auto trace)", "items": ["New Follow a party member group on the Party page. Tick it, choose a member (or leave it on the party leader) and the bot stays within the distance you set of them while hunting, and hunts around them instead of around your saved hunting spot.", "The game tells the party where every member is, so the bot also follows them across the map when they run off, up to 300 m. It walks around obstacles when collision data is loaded, and stands beside the member, not on top of them.", "Your saved hunting spot is never changed: it is only swapped for the member's position while the hunting step runs, and used again as soon as following is off or the member is unavailable (not in the party, dead, in another area or too far).", "Fight monsters that attack on the way is on by default. The stuck check does not count waiting for the member as being stuck. The chosen member is never part of a share, and the status line says what it is doing."]}];
+const RELEASE_NOTES = [{"version": "1.2.120", "title": "Reload the page when the game fails to load", "items": ["When the game's loading screen gives up (\"Unable to finish loading\", for example \"Renderer failed: Invalid particle graph time\"), the bot waits 15 seconds, then reloads the page by itself. It remembers the character and whether hunting was running, so after the reload it enters the character again and resumes hunting, the same way it does after a lost connection.", "It never types or stores your password: the game restores your login from its own session cookie. If the login is gone, the status line says so and the bot waits for you.", "It reloads at most 3 times in 30 minutes, then stops and tells you, so a game that cannot load does not reload forever. Logging out or entering a character yourself cancels it."], "note": "Written against the game's own code and simulated game state; not yet seen on a live server."}, {"version": "1.2.119", "title": "The panel is now called NIX", "items": ["The panel title now reads **NIX** followed by the version, instead of \"nixxane bot\".", "Nothing else changes: the script keeps its installed name inside Tampermonkey, so it updates in place and nobody has to reinstall. Settings, saved profiles and shared settings are untouched."]}, {"version": "1.2.118", "title": "Alt accounts join the main account's party", "items": ["**Join the main account's party:** a new option on the Party page (Party/Autores in the Classic window) for your other accounts. Tick **Join the main account's party** and type the main character's name. While the character is not in a party, the bot accepts a party invitation from the main, or finds the main's listing on the party-matching board and applies to it. It does nothing while the character is in another party, and the status line says what it is doing (looking for the listing, applying, party full, level outside the listing's range).", "On the main account, tick **Auto-recruit** and **Auto-accept party-matching joins** so the listing is there and the applications are answered. Leave the new option off on the main account.", "It also brings an account back into the party after a disconnect: once automatic reconnect has the character back in the game, the party is rejoined the same way."]}, {"version": "1.2.117", "title": "Classic window and Max every skill", "items": ["**Classic window:** a third layout, opt-in with the Classic button at the top of the panel (screens at least 900 px wide). It is a fixed-size window laid out like SBot: a menu bar, HP, MP and EXP bars with the bot status beside them, three wide buttons (Start / stop, Return & hunt, Stop all), the tabs down the left, and your session numbers, supplies and Start / Stop training always on the right. The tabs are Settings, Skills, Items/Storage, Training place, Party/Autores, Player buffing, Auto alchemy and Extra, then Map, Wardrobe and Setup. They hold the same settings as the compact and wide pages, so a change made in one window shows in the others. Compact brings the small window back.", "**Max every skill:** a new button under Settings → Auto mastery and skills (the Extra tab in the Classic window). It learns and upgrades every skill, level by level, including skill lines you have not started, as fast as the game answers. It raises a mastery only when that mastery is what blocks a skill, ignores the gap and reserve settings, and when nothing more is allowed it stops and says what is left (skill points, strength or intelligence). Stop ends it early.", "The compact window reserves less space for its status lines, so it is no longer taller than before, and the town, walk-back and reconnect messages show in the waiting note only. Fixes the panel running off the bottom of short screens in 1.2.115 and 1.2.116."]}, {"version": "1.2.116", "title": "Walk to a far hunting spot", "items": ["**Return & hunt**, revival return and reconnect now walk to a hunting spot more than 600 m away instead of telling you to walk there yourself. The trip is walked in short legs, because the game only publishes collision data for the area around the character; each leg crosses into the next region and the next leg is planned from the newly loaded map.", "The status line shows the leg and the distance left. A blocked leg end is replaced by a nearby walkable point, and a leg that makes no progress is retried before it is reported. Death, manual control and **Stop all** cancel the walk at once.", "A spot beyond about 14 km, a walk longer than 30 minutes, or one that stops making progress is cancelled with a message instead of walking forever. Another world and dungeons still have no walking route.", "A long-range route planner is built in and will take over for trips inside one map area once its route data is published; until then the bot walks in legs."]}, {"version": "1.2.115", "title": "Narrow window: buttons stay put", "items": ["In the compact window the status lines and the waiting note changed height as lines came and went, which moved the buttons below them and caused misclicks. They now reserve their space, so the buttons stay where they are."]}, {"version": "1.2.114", "title": "Wide window: no more gaps between boxes", "items": ["In the wide window each page is shown in two columns. A short box next to a tall one used to leave a gap under it. The boxes are now dealt into two stacks, each under the shorter one, so the columns close up. The map, item table, member list and trip pictures still use the full width.", "Switching between Compact and Wide redraws the page, so the layout is right straight away."]}, {"version": "1.2.113", "title": "Detailed activity log, pop-out session window and return choices", "items": ["Structured activity history (from Joggio's contribution): categories, outcomes, session markers and grouped repeats, with filters, search, pause and follow, a bounded optional 10-minute command capture, and a local export with a preview (names, free text and positions left out unless you tick raw). Nothing is uploaded.", "Messages use monster names and plain language. Cast code 5 becomes one \"Skill not ready yet\" row with a count. Select log text and press Ctrl+C to copy it.", "Session window with live totals and the log: open it with the Session button or Pop out in Settings. It no longer opens by itself when you start hunting.", "The feedback line and the status lines stay on the main panel, as before.", "Potion delay in milliseconds, saved per character. Town revival can reverse to the last return-scroll point (the default, so the bot lands in its hunting area) or to where you died. The death spot is only used when you died inside the hunting area, because hunting starts again only from inside it."]}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {

@@ -4364,3 +4364,45 @@ async function updateTests() {
 require('./lean.session.test.cjs')({ test, fixture, townFixture });
 require('./lean.logging.test.cjs')({ test, fixture, townFixture });
 updateTests().catch(error => { console.error(error); process.exitCode = 1; });
+
+function reloadFixture() {
+  const { f, sent, lose, back } = reconnectFixture(); let reloads = 0, failure = '';
+  f.Reconnect.doReload = () => { reloads++; };
+  f.Reconnect.loadFailure = () => failure;
+  return { f, sent, lose, back, reloads: () => reloads, fail: text => { failure = text; } };
+}
+const stored = f => JSON.parse(f.storage.get('sro-lean-reload') || '{}');
+
+test('a game that fails to load is reloaded after a wait, remembering the character and that hunting was on', () => {
+  const r = reloadFixture(), f = r.f;
+  f.Controller.tick(); assert.equal(stored(f).snap.character, 'Tester'); assert.equal(stored(f).snap.hunting, true);
+  r.fail('Renderer failed: Error: Invalid particle graph time'); f.World.phase = 'failed'; f.World.gp = null;
+  f.Controller.tick(); f.advance(10000); f.Controller.tick(); assert.equal(r.reloads(), 0, 'gives the game its own time first');
+  f.advance(6000); f.Controller.tick(); assert.equal(r.reloads(), 1);
+  assert.deepEqual({ ...stored(f).pending, at: 0 }, { character: 'Tester', hunting: true, at: 0 });
+});
+
+test('after the reload the character is entered again and hunting resumes', () => {
+  const r = reloadFixture(), f = r.f;
+  f.storage.set('sro-lean-reload', JSON.stringify({ pending: { character: 'Tester', hunting: true, at: Date.now() }, times: [Date.now()] }));
+  f.stopAll(); f.World.gp = null; f.World.phase = 'listing-servers'; r.sent.length = 0;
+  f.Controller.tick(); assert.equal(f.Reconnect.active(), true); assert.match(f.Reconnect.message, /restore your login/);
+  f.advance(4000); f.Controller.tick(); assert.equal(r.sent.length, 0, 'waits while the game restores the login');
+  f.World.phase = 'character-select'; f.advance(4000); f.Controller.tick();
+  assert.deepEqual(r.sent[0], { kind: 'enter-world', character: 'Tester' }, 'no resume attempt: the page is fresh');
+  r.back(); f.advance(100); f.Controller.tick(); f.advance(3500); f.Controller.tick();
+  assert.equal(f.Hunt.running, true); assert.equal(f.Reconnect.active(), false); assert.equal(stored(f).pending, null);
+});
+
+test('a reload that is not wanted or not allowed never happens', () => {
+  const r = reloadFixture(), f = r.f; r.fail('Renderer failed: x');
+  f.storage.set('sro-lean-reload', JSON.stringify({ times: [Date.now() - 1000, Date.now() - 2000, Date.now() - 3000] }));
+  f.Controller.tick(); f.advance(16000); f.Controller.tick(); f.advance(60000); f.Controller.tick();
+  assert.equal(r.reloads(), 0); assert.match(f.Reconnect.message, /not reloading again/);
+  const g = reloadFixture(); g.f.storage.set('sro-lean-reload', JSON.stringify({ pending: { character: 'Tester', hunting: true, at: Date.now() - 3600000 } }));
+  g.f.stopAll(); g.f.World.gp = null; g.f.World.phase = 'signed-out'; g.f.Controller.tick(); assert.equal(g.f.Reconnect.active(), false, 'a stale reload is not resumed');
+  const h = reloadFixture(); h.f.storage.set('sro-lean-reload', JSON.stringify({ pending: { character: 'Tester', hunting: true, at: Date.now() } }));
+  h.f.stopAll(); h.f.World.gp = null; h.f.World.phase = 'signed-out'; h.sent.length = 0; h.f.Controller.tick();
+  h.f.Hook.observers.forEach(fn => fn({ kind: 'logout' })); assert.equal(h.f.Reconnect.active(), false, 'logging out cancels it');
+  h.f.advance(70000); h.f.Controller.tick(); assert.equal(h.sent.length, 0);
+});

@@ -135,6 +135,10 @@ This is always on; there is no switch. When the connection to the game is lost (
 
 Once the character is back, hunting that was running resumes: at the hunting spot it simply starts again, otherwise it walks back first, however far the spot is (up to about 14 km, walked in short legs), and if the spot is out of reach, in another world or in a dungeon, it stays stopped and tells you to use **Return & hunt**. A bot that was stopped is reconnected but not started, and a dead character is never started. Choosing logout, disconnect, exit or restart yourself, or logging in or entering a character by hand, cancels automatic reconnect.
 
+### When the game fails to load
+
+If the game's loading screen shows **Unable to finish loading** (for example "Renderer failed: Invalid particle graph time"), the bot waits 15 seconds and reloads the page. It remembers the character and whether hunting was running; after the reload the game restores your login from its own session cookie, the bot enters the character again and hunting resumes as described above. It reloads at most 3 times in 30 minutes, then stops and says so. If the login cannot be restored, the status line says so and the bot waits for you. Logging out or entering a character yourself cancels it.
+
 ## Returning after death
 
 Leave **Revive in town and reverse to last scroll point** enabled under **Town → Go to town when…**. With the town cycle enabled, the bot revives, completes town services and reverses back to hunt. Hunting resumes within 30 metres of the last scroll point, or within your saved hunting area after death. Carry reverse scrolls.

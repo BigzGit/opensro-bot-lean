@@ -3,9 +3,58 @@
 // It never types or stores credentials: if the login itself is gone it says so and waits for you. Hunting that was
 // running resumes once the character is back at the hunting spot. Choosing logout, disconnect, exit or restart yourself
 // cancels everything, and so does logging in or entering a character by hand.
+// When the game itself fails to load ("Unable to finish loading") the page is reloaded after a short wait. The character
+// and whether hunting was running are kept in localStorage across the reload; the game restores the login from its own
+// session cookie, then the same reconnect steps below enter the world and resume hunting. At most 3 reloads per 30 minutes.
 const Reconnect = {
   intent: null, attempts: 0, nextAt: 0, waitUntil: 0, backAt: 0, message: '',
   DELAYS: [4000, 10000, 20000, 30000], GIVE_UP_MS: 12 * 3600 * 1000,
+  STORE_KEY: 'sro-lean-reload', LOAD_WAIT_MS: 15000, MAX_RELOADS: 3, RELOAD_WINDOW_MS: 30 * 60000, PENDING_MS: 10 * 60000, LOGIN_GRACE_MS: 60000,
+  restored: false, failedAt: 0, snapAt: 0, gaveUp: false,
+  // What survives a page reload: the last in-world snapshot, the reload times and the one reload waiting to be resumed.
+  load() { try { return JSON.parse(window.localStorage.getItem(this.STORE_KEY)) || {}; } catch { return {}; } },
+  save(data) { try { window.localStorage.setItem(this.STORE_KEY, JSON.stringify(data)); } catch {} },
+  // The game's own loading screen says when it gave up; its label is only changed to this text on a failure.
+  loadFailure() {
+    if (typeof document === 'undefined') return '';
+    const box = document.getElementById('startup-loading');
+    if (!box || box.dataset.error !== 'true' || !/Unable to finish loading/.test(box.querySelector('.sro-boot-loading__label')?.textContent || '')) return '';
+    return box.querySelector('.sro-boot-loading__detail')?.textContent || 'Unable to finish loading';
+  },
+  doReload() { window.location.reload(); },
+  snapshot() {
+    if (!World.inWorld() || !World.charName || now() - this.snapAt < 5000) return;
+    this.snapAt = now();
+    const data = this.load();
+    this.save({ ...data, snap: { character: World.charName, hunting: !!(Hunt.running || Town.trip || WalkBack.active || this.intent?.hunting), at: Date.now() } });
+  },
+  // Right after a reload: pick the character up again exactly as after a lost connection.
+  restore() {
+    this.restored = true;
+    const data = this.load(), p = data.pending;
+    if (!p) return;
+    this.save({ ...data, pending: null });
+    if (!p.character || Date.now() - p.at > this.PENDING_MS) return;
+    this.intent = { character: p.character, hunting: !!p.hunting, since: now(), reloaded: true };
+    this.attempts = 1; this.nextAt = now() + 3000; this.backAt = 0;
+    this.message = 'The page was reloaded; restoring ' + p.character + '.';
+    Log.warn('The game failed to load earlier; page reloaded, restoring ' + p.character + '.');
+  },
+  watchLoad() {
+    const text = this.loadFailure();
+    if (!text) { this.failedAt = 0; return; }
+    if (!this.failedAt) { this.failedAt = now(); this.gaveUp = false; Log.warn('The game failed to load (' + text + '); reloading the page shortly.'); }
+    if (this.gaveUp) return;
+    if (now() - this.failedAt < this.LOAD_WAIT_MS) { this.message = 'The game failed to load; reloading the page shortly.'; return; }
+    const data = this.load(), times = (data.times || []).filter(t => Date.now() - t < this.RELOAD_WINDOW_MS);
+    if (times.length >= this.MAX_RELOADS) {
+      this.gaveUp = true; this.message = 'The game failed to load ' + this.MAX_RELOADS + ' times in 30 minutes; not reloading again. Reload it yourself.';
+      Log.warn(this.message); return UI.toast(this.message, 'warn', 8000);
+    }
+    const known = this.intent ? { character: this.intent.character, hunting: this.intent.hunting } : data.snap && Date.now() - data.snap.at < this.RELOAD_WINDOW_MS ? data.snap : null;
+    this.save({ snap: data.snap, times: [...times, Date.now()], pending: known ? { character: known.character, hunting: !!known.hunting, at: Date.now() } : null });
+    this.doReload();
+  },
   active() { return !!this.intent; },
   clear(message = '') { this.intent = null; this.attempts = 0; this.nextAt = this.waitUntil = this.backAt = 0; this.message = message; },
   // The connection was lost while the bot may have been working: remember what to restore.
@@ -25,6 +74,9 @@ const Reconnect = {
     try { Hook.post({ kind: 'session', command }); return true; } catch (e) { Log.warn('Reconnect command failed: ' + (e?.message || e)); return false; }
   },
   tick() {
+    if (!this.restored) this.restore();
+    this.watchLoad();
+    this.snapshot();
     const i = this.intent;
     if (!i) return;
     if (now() - i.since > this.GIVE_UP_MS) return this.clear('Gave up reconnecting after 12 hours.');
@@ -33,6 +85,7 @@ const Reconnect = {
     const phase = World.phase, error = String(World.session?.error || '');
     if (['connecting', 'entering-world', 'reconnecting'].includes(phase)) { this.message = 'Reconnecting…'; return; }
     if (['signed-out', 'listing-servers', 'loading-roster', 'authenticating'].includes(phase) || /authentication required/i.test(error)) {
+      if (i.reloaded && now() - i.since < this.LOGIN_GRACE_MS) { this.message = 'The page was reloaded; waiting for the game to restore your login.'; return; }
       this.message = 'The login is gone (server restart?). Log in and enter your character again; the bot resumes when you are back.';
       return;
     }
