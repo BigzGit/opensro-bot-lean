@@ -142,7 +142,8 @@ module.exports = function loggingTests( { test, fixture, townFixture } ) {
 		f.Activity.emit( { text: "SecretHero at 123,456 password private", code: "test-event", operationId: "SecretHero",
 			details: { hpPct: 35, password: "private", player: "SecretHero", x: 123, delayMs: Infinity } } );
 		const text = f.Activity.export();
-		assert.doesNotMatch( text, /SecretHero|password|private|123|456/ );
+		// Millisecond timestamps are digits too; leave them out so the check does not depend on the clock.
+		assert.doesNotMatch( text.replace( /"(at|lastAt)": \d+/g, "" ), /SecretHero|password|private|123|456/ );
 		assert.equal( JSON.parse( text ).events[0].details.hpPct, 35 );
 		assert.match( f.Activity.export( true ), /SecretHero/ );
 		assert.doesNotMatch( f.Activity.export( false, "text" ), /SecretHero/ );

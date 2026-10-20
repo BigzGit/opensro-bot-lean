@@ -513,8 +513,40 @@ const UI = {
         tab.setAttribute('aria-selected', String(name === this.combatTab)); subtabs.append(tab);
       }
       this.pane.append(subtabs);
-      if (this.combatTab === 'Hunt area') {
-      this.pane.append(this.group('Hunting area',
+      if (this.combatTab === 'Hunt area') this.sections('combatHuntArea', 'combatMonsters');
+      if (this.combatTab === 'Skills') this.sections('combatRotation', 'combatOptions', 'combatBerserk');
+      if (this.combatTab === 'Buffs & imbue') this.sections('combatBuffs', 'combatImbue');
+    } else if (this.current === 'Loot') {
+      this.sections('lootCollection', 'lootWho');
+    } else if (this.current === 'Supplies') {
+      this.sections('suppliesPotions', 'suppliesRestock');
+      this.pane.append(el('p', 'Town trips, what starts them, and arrows and bolts are on the Town page.', 'muted'));
+    } else if (this.current === 'Town') {
+      this.sections('townTrip', 'townWhen', 'townCycle', 'townAmmo');
+    } else if (this.current === 'Party') {
+      this.sections('partyMembers', 'partyHeal', 'partyBuffs', 'partyParty', 'partyTrace');
+    } else if (this.current === 'Items') {
+      this.drawItems();
+    } else if (this.current === 'Setup') {
+      Setup.draw(this.pane);
+    } else if (this.current === 'Map') {
+      LeanMap.draw(this.pane);
+    } else if (this.current === 'Alchemy') {
+      Alchemy.draw();
+    } else if (this.current === 'Wardrobe') {
+      LeanWardrobe.draw(this.pane);
+    } else {
+      this.sections('settingsStats', 'settingsBehaviour', 'settingsObstacles', 'settingsAntiStuck', 'settingsMastery', 'settingsStatPoints', 'settingsProfiles', 'settingsShare', 'settingsReports', 'settingsActivity');
+    }
+    this.balance();
+    this.update();
+    this.pane.scrollTop = scroll;
+  },
+  // A page is a list of sections; each section appends its own boxes to the given parent, so other layouts can reuse them.
+  sections(...names) { for (const name of names) this['section_' + name](this.pane); },
+  section_combatHuntArea(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
+      host.append(this.group('Hunting area',
         this.button('Set hunting spot here', () => { if (World.inWorld() && Hunt.setCenter()) this.toast('Hunting spot saved.'); }),
         this.number('Hunt radius (m)', () => H().radius / 10, v => H().radius = v * 10, 5, 200),
         this.number('Chase distance (m)', () => H().chase / 10, v => H().chase = v * 10, 10, 300),
@@ -525,11 +557,15 @@ const UI = {
         this.text('Only these mobs', () => H().include, v => H().include = v),
         this.text('Skip these mobs', () => H().exclude, v => H().exclude = v)
       ));
+  },
+  section_combatMonsters(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       const classes = this.group('Monster classes');
       for (const key of Object.keys(H().classes)) classes.append(this.check(key === 'titan' ? 'titan (uses Unique rotation)' : key, () => H().classes[key], v => H().classes[key] = v));
-      this.pane.append(classes);
-      }
-      if (this.combatTab === 'Skills') {
+      host.append(classes);
+  },
+  section_combatRotation(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       this.rotationClass ||= 'normal';
       const classes = el('div', null, 'class-tabs');
       for (const key of CLASS_KEYS) {
@@ -541,20 +577,31 @@ const UI = {
       const rotation = this.group('Attack rotation', classes,
         this.check('Empty classes use Normal rotation', () => M().fallbackToNormal, v => M().fallbackToNormal = v),
         this.check('Use normal attacks', () => M().normalAttack, v => M().normalAttack = v));
-      this.skillList(rotation, M().rotations[this.rotationClass]); this.pane.append(rotation);
-      this.pane.append(this.group('Combat options',
+      this.skillList(rotation, M().rotations[this.rotationClass]); host.append(rotation);
+  },
+  section_combatOptions(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
+      host.append(this.group('Combat options',
         this.number('Skill gap (ms)', () => M().castGapMs, v => M().castGapMs = v, 150, 2000, 50)));
-      this.pane.append(this.group('Berserk when the gauge is full, on',
+  },
+  section_combatBerserk(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
+      host.append(this.group('Berserk when the gauge is full, on',
         ...[['giant', 'Giants'], ['titan', 'Titans'], ['unique', 'Uniques'], ['elite', 'Elites'], ['party', 'Party monsters'], ['champion', 'Champions'], ['normal', 'Normal monsters']]
           .map(([key, label]) => this.check(label, () => M().berserkClasses[key], v => M().berserkClasses[key] = v))));
-      }
-      if (this.combatTab === 'Buffs & imbue') {
-      BuffGear.draw(this.pane);
+  },
+  section_combatBuffs(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
+      BuffGear.draw(host);
       const buffs = this.group('Buffs'); this.skillList(buffs, M().buffs, true);
-      this.pane.append(buffs);
-      const imbue = this.group('Weapon imbue'); this.imbuePicker(imbue); this.pane.append(imbue);
-      }
-    } else if (this.current === 'Loot') {
+      host.append(buffs);
+  },
+  section_combatImbue(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
+      const imbue = this.group('Weapon imbue'); this.imbuePicker(imbue); host.append(imbue);
+  },
+  section_lootCollection(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       const L = () => H().pickup;
       const options = this.group('Collection');
       options.append(this.select('Default collector', [['character', 'Character'], ['pet', 'Pickup pet']], () => L().collector, v => { L().collector = v; Loot.reset(); }));
@@ -563,20 +610,26 @@ const UI = {
       this.petNote = el('p', '', 'muted'); options.append(this.petNote);
       options.append(this.row(...[['Elixirs only','elixirs'],['Elixirs + gold','elixirs-gold'],['All items','all']].map(([label,mode]) => this.button(label, () => { Loot.preset(mode); this.draw(); }))));
       for (const [key, label] of [['enabled', 'Collect drops'], ['soxOnly', 'Equipment: only SoX (Star / Moon / Sun)'], ['afterKillOnly', 'Character: finish the current fight before picking up']]) options.append(this.check(label, () => L()[key], v => L()[key] = v));
+      options.append(this.number('Pickup radius (m)', () => L().radius / 10, v => L().radius = v * 10, 3, 100),
+        this.number('Retries after first attempt', () => L().retries, v => L().retries = v, 0, 3),
+        this.text('Always include names', () => L().include, v => L().include = v),
+        this.text('Exclude names', () => L().exclude, v => L().exclude = v),
+        el('p', 'Pets collect during combat regardless of the finish-fight setting, which applies to the character only. Inventory transactions and potion priority can briefly delay pet requests. Equipment: only SoX takes Star, Moon and Sun gear and leaves plain equipment, even when Equipment or an Always include name matches it; other items follow their own switches. It needs the item catalogue, which loads automatically. Presets clear Always include names; exclusions still apply. Other items excludes the separate categories above. Ownership and bag capacity always apply. Failed pickups use a backoff.', 'muted'));
+      host.append(options);
+  },
+  section_lootWho(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
+    const L = () => H().pickup;
       const kinds = this.group('Who picks up what');
       for (const [key, label] of [['gold', 'Gold'], ['potions', 'Potions and cure pills'], ['equipment', 'Equipment'], ['elixirs', 'Elixirs'], ['powders', 'Lucky powders'], ['magicStones', 'Magic stones (stored in the warehouse)'], ['attrStones', 'Attribute stones (stored in the warehouse)'], ['alchemy', 'Other alchemy items'], ['others', 'Other items']])
         kinds.append(this.select(label, [['off', 'Leave on the ground'], ['pet', 'Pickup pet'], ['character', 'Character']],
           () => L()[key] ? Loot.collectorFor(key) : 'off',
           v => { if (v === 'off') L()[key] = false; else { L()[key] = true; (L().by ||= {})[key] = v; } Loot.reset(); }));
       kinds.append(el('p', 'Each kind of drop is either left alone, taken by your pickup pet, or taken by the character. The pet collects while you fight and fills its own bag; the character walks to the item and uses your bag, so give it only the few kinds you want on you (for example potions or pills). The default collector decides for kinds you have not set yourself and for names under Always include.', 'muted'));
-      options.append(this.number('Pickup radius (m)', () => L().radius / 10, v => L().radius = v * 10, 3, 100),
-        this.number('Retries after first attempt', () => L().retries, v => L().retries = v, 0, 3),
-        this.text('Always include names', () => L().include, v => L().include = v),
-        this.text('Exclude names', () => L().exclude, v => L().exclude = v),
-        el('p', 'Pets collect during combat regardless of the finish-fight setting, which applies to the character only. Inventory transactions and potion priority can briefly delay pet requests. Equipment: only SoX takes Star, Moon and Sun gear and leaves plain equipment, even when Equipment or an Always include name matches it; other items follow their own switches. It needs the item catalogue, which loads automatically. Presets clear Always include names; exclusions still apply. Other items excludes the separate categories above. Ownership and bag capacity always apply. Failed pickups use a backoff.', 'muted'));
-      this.pane.append(options);
-      this.pane.append(kinds);
-    } else if (this.current === 'Supplies') {
+      host.append(kinds);
+  },
+  section_suppliesPotions(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       const pots = this.group('Automatic potion use', this.check('Use potions automatically', () => P().enabled, v => P().enabled = v));
       pots.append(this.potionDelay(), el('p', 'Minimum interval between automatic potion uses. The game’s own item cooldowns still apply.', 'muted'));
       this.speedNote = el('p', '', 'muted');
@@ -591,7 +644,10 @@ const UI = {
         this.number('Pet HP below (%)', () => P().petHp.pct, v => P().petHp.pct = v, 5, 95),
         el('p', 'Pets: when an attack or pickup pet drops below this HP, one recovery kit (the smallest that covers the missing HP) is used on it. Your own potions always go first; each kit must be seen consumed before the next. Vigor potions need no setting beyond the two thresholds above; they are used only when the HP and MP potions are not enough.', 'muted'));
       this.petPotionNote = el('p', PetPotion.message, 'muted'); pots.append(this.petPotionNote);
-      this.pane.append(pots);
+      host.append(pots);
+  },
+  section_suppliesRestock(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       const townOn = Town.cfg().enabled;
       const shop = this.group('Potion restock');
       if (townOn) shop.append(el('p', 'The town cycle is on: every trip buys X-Large potions at the saved merchant, so walking-route restock and merchant recording are hidden. Low-stock and refill amounts below still apply.', 'muted'));
@@ -613,9 +669,10 @@ const UI = {
         this.number('Pills refill to', () => C().cure.target, v => C().cure.target = v, 1, 10000),
         el('p', 'Buys only Special Universal Pill (small), the strongest universal cure. No cheaper substitute. Uses the same refill trips as HP/MP. Use cure pills above controls automatic use.', 'muted'));
       shop.append(el('p', 'Refill targets are total potion counts, including what is already in your bag. Used for low-supply, full-bag and revival trips, and walking-route restock when the town cycle is off. Set MP refill to 1000 for 1,000 MP potions. Changes apply to the next trip.', 'muted'));
-      this.pane.append(shop);
-      this.pane.append(el('p', 'Town trips, what starts them, and arrows and bolts are on the Town page.', 'muted'));
-    } else if (this.current === 'Town') {
+      host.append(shop);
+  },
+  section_townTrip(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       const town = () => Town.cfg();
       // The trip as the game's own item pictures, with what each step still needs.
       const flow = el('ol', null, 'trip-flow'), count = type => World.items().filter(i => (i.typeFlags & 0xfffc) === type).reduce((n, i) => n + (i.quantity ?? 1), 0);
@@ -630,8 +687,12 @@ const UI = {
         step.append(slot, el('strong', label), note); flow.append(step);
         this.refreshers.push(() => { note.textContent = detail(); note.classList.toggle('missing', /not saved|^0 in bag/.test(note.textContent)); });
       }
-      this.pane.append(this.group('The town trip', flow));
-      this.pane.append(this.group('Go to town when…',
+      host.append(this.group('The town trip', flow));
+  },
+  section_townWhen(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
+    const town = () => Town.cfg();
+      host.append(this.group('Go to town when…',
         el('p', 'Only while the scroll town cycle below is on. Always: the character bag has one free slot or less. Potions, vigor potions and pills: at the low-stock numbers in Supplies. Arrows and bolts: below.', 'muted'),
         this.check('Return when pickup pet is nearly full', () => town().petFull, v => town().petFull = v),
         this.number('Pet free slots ≤', () => town().petFree, v => town().petFree = v, 0, 10),
@@ -646,6 +707,10 @@ const UI = {
         this.select('After death, reverse to', [['recall', 'Last return-scroll location (hunting area)'], ['death', 'Death location']], () => town().deathReturn, v => { town().deathReturn = v; Activity.emit({category:'settings',code:'reverse-choice-changed',text:'Revival reverse destination changed to ' + v + '.',details:{choice:v === 'death' ? 3 : 2}}); }),
         el('p', 'Service trips reverse to their departure point. After death, use the selected destination. A missing game destination stops the trip; it never substitutes another point.', 'muted'),
         el('p', 'Worn gear means the most worn repairable item you are wearing, measured against its own maximum durability; the trip repairs it. A broken weapon (0 durability) has its own switch, on by default. The XP and timer clocks run only while hunting and restart with every trip.', 'muted')));
+  },
+  section_townCycle(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
+    const town = () => Town.cfg();
       const services = this.group('Scroll town cycle',
         this.check('Use return scroll → town services → reverse return', () => town().enabled, v => { town().enabled = v; this.draw(); }),
         this.check('Deposit SoX gear in the warehouse (character and pet bags)', () => town().storeSox, v => town().storeSox = v),
@@ -662,9 +727,12 @@ const UI = {
       services.append(el('p', 'Pet loot: store elixirs, and Star / Moon / Sun gear when SoX deposit is on (needs the saved warehouse; SoX gear in your own bag goes in too, all other character items stay). Nothing is deposited right after pickup, only on the next town trip. Gear requiring one of the levels you list above (for example 85) is deposited the same way and never sold. SoX gear that is part of a saved buff set, the weapon chosen for alchemy, or matches the Keep names stays in your bag. Sell other unprotected pet items at the saved weapon / repair merchant before repairing. Other seal/rare equipment and equipment with unknown rarity stays in the pet. Ordinary equipment is sold regardless of + or blue options. Existing character bag items are never sold.', 'muted'));
       services.append(this.text('Keep in pet (names)', () => town().keep, v => town().keep = v),
         el('p', 'Town buys X-Large potions using the Buy HP/MP switches, low-stock thresholds and refill counts above. Keep each low-stock threshold below its refill target. Potion selections apply to walking-route restock. Returns when the character bag has at most one free slot. Free at least two slots before hunting again; existing character items stay protected. Revival uses the saved town services and a reverse scroll, without using a return scroll in town. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. F8 cancels.', 'muted'));
-      this.townNote = el('p', Town.status(), 'muted'); services.append(this.townNote); this.pane.append(services);
+      this.townNote = el('p', Town.status(), 'muted'); services.append(this.townNote); host.append(services);
+  },
+  section_townAmmo(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       const ammo = () => C().ammo;
-      this.pane.append(this.group('Arrows and bolts',
+      host.append(this.group('Arrows and bolts',
         this.check('Buy arrows on town trips', () => ammo().arrow.on, v => ammo().arrow.on = v),
         this.number('Arrows: go to town at or below', () => ammo().arrow.low, v => ammo().arrow.low = v, 0, 9999),
         this.number('Arrows: refill to', () => ammo().arrow.target, v => ammo().arrow.target = v, 1, 10000),
@@ -672,7 +740,9 @@ const UI = {
         this.number('Bolts: go to town at or below', () => ammo().bolt.low, v => ammo().bolt.low = v, 0, 9999),
         this.number('Bolts: refill to', () => ammo().bolt.target, v => ammo().bolt.target = v, 1, 10000),
         el('p', 'Bought at the repair merchant after selling pet loot and before repairing. The count includes the stack in your ammunition slot and any spare stacks in the bag. A trip also starts when the count falls to the low-stock number. If the merchant does not sell it, there is no bag space or not enough gold, that item is skipped and the rest of the trip goes on. Equipping the bought ammunition is up to you.', 'muted')));
-    } else if (this.current === 'Party') {
+  },
+  section_partyMembers(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       const S = () => Settings.profile.party.support;
       // Live party: HP and MP bars, distance, and which of the assigned buffs each member shows right now.
       const list = el('div', null, 'members'), rows = el('p', '', 'muted');
@@ -697,10 +767,14 @@ const UI = {
         rows.textContent = Support.message;
       };
       renderMembers(); this.refreshers.push(renderMembers);
-      this.pane.append(this.group('Party members', list, rows));
+      host.append(this.group('Party members', list, rows));
+  },
+  section_partyHeal(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
+    const S = () => Settings.profile.party.support;
       const skillOptions = skills => () => [[0, 'None'], ...skills().map(s => [s.id, s.name || '#' + s.id])];
       const pick = entry => v => { const id = Number(v); entry().id = id; entry().group = id ? World.skill(id)?.group ?? id : 0; };
-      this.pane.append(this.group('Heal and buff the party',
+      host.append(this.group('Heal and buff the party',
         this.check('Buff and heal party members', () => S().enabled, v => { S().enabled = v; Support.reset(); }),
         this.check('Also while hunting is stopped', () => S().whileStopped, v => S().whileStopped = v),
         this.number('Support range (m)', () => S().range, v => S().range = v, 5, 60),
@@ -711,6 +785,10 @@ const UI = {
         this.number('Group heal below (%)', () => S().group.pct, v => S().group.pct = v, 10, 95),
         this.number('Group heal when this many are low', () => S().group.count, v => S().group.count = v, 2, 8),
         el('p', 'Casts only on members you can see within the support range; it never walks to them. Order: group heal, then a heal on the lowest member, then missing buffs, one cast at a time. HP is exact for members in view. Your own potions still come first.', 'muted')));
+  },
+  section_partyBuffs(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
+    const S = () => Settings.profile.party.support;
       // Party buffs: skills that can be cast on another member, each with an optional list of who gets it.
       const buffs = this.group('Party buffs'), chosen = () => S().buffs;
       if (!chosen().length) buffs.append(el('div', 'No party buffs chosen. Pick from the icons below.', 'empty'));
@@ -733,10 +811,13 @@ const UI = {
       }
       buffs.append(el('div', 'Learned skills you can cast on a party member', 'muted'), grid);
       if (!grid.children.length) buffs.append(el('div', 'No learned skill can target a party member.', 'empty'));
-      this.pane.append(buffs);
+      host.append(buffs);
+  },
+  section_partyParty(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       const party = () => Settings.profile.party;
       this.partyNote = el('p', '', 'muted');
-      this.pane.append(this.group('Party',
+      host.append(this.group('Party',
         this.check('Auto-recruit', () => party().autoRecruit, v => { party().autoRecruit = v; Party.reset(); }),
         this.text('Party listing title', () => party().title, v => party().title = v),
         this.number('Party minimum level', () => party().min, v => party().min = v, 1, 90),
@@ -753,20 +834,18 @@ const UI = {
         this.check('Auto-resurrect party members', () => party().autoRes, v => { party().autoRes = v; Resurrect.reset(); }),
         this.number('Maximum res distance from hunt spot (m)', () => party().resRadius / 10, v => party().resRadius = v * 10, 1, 100),
         el('p', 'Works during hunting and while stopped. Walks into skill range for visible dead members within the maximum radius, casts Rebirth, then returns. During hunting the radius is measured from the saved hunt spot; while stopped it uses your starting position. Collision data is required for walking. Travel stops after 30 seconds or 12 seconds without progress per leg. The member must accept the revival. Travel, shopping and manual control take priority.', 'muted')));
-      Trace.draw(this.pane);
-    } else if (this.current === 'Items') {
-      this.drawItems();
-    } else if (this.current === 'Setup') {
-      Setup.draw(this.pane);
-    } else if (this.current === 'Map') {
-      LeanMap.draw(this.pane);
-    } else if (this.current === 'Alchemy') {
-      Alchemy.draw();
-    } else if (this.current === 'Wardrobe') {
-      LeanWardrobe.draw(this.pane);
-    } else {
-      Stats.draw(this.pane);
-      this.pane.append(this.group('Behaviour',
+  },
+  section_partyTrace(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
+      Trace.draw(host);
+  },
+  section_settingsStats(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
+      Stats.draw(host);
+  },
+  section_settingsBehaviour(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
+      host.append(this.group('Behaviour',
         ...(Town.autoRevive() ? [el('p', 'On death: the town cycle revives you in town and reverses back (Town → Scroll town cycle).', 'muted')]
           : [this.select('On death', [['stop', 'Stop'], ['wait', 'Wait'], ['revive', 'Revive and walk back']], () => H().onDeath, v => H().onDeath = v)]),
         this.check('Rest when low', () => H().sit.enabled, v => { H().sit.enabled = v; this.draw(); }),
@@ -777,7 +856,10 @@ const UI = {
         this.check('Stop when HP potions run out', () => H().stopNoHpPotion, v => H().stopNoHpPotion = v),
         this.check('Stop when bag is full', () => H().stopInvFull, v => H().stopInvFull = v),
         this.number('Manual control pause (s)', () => H().manualPauseS, v => H().manualPauseS = v, 1, 30)));
-      this.pane.append(this.group('Obstacles',
+  },
+  section_settingsObstacles(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
+      host.append(this.group('Obstacles',
         this.check('Walk around obstacles when chasing a mob', () => H().detour.enabled, v => H().detour.enabled = v),
         this.number('Approach progress check interval (ms)', () => H().detour.stallMs, v => H().detour.stallMs = v, 1000, 10000),
         this.check('Detect a character that cannot move', () => H().trap.enabled, v => H().trap.enabled = v),
@@ -785,28 +867,45 @@ const UI = {
         this.check('Recall to town if legal escape attempts fail', () => H().trap.recall, v => H().trap.recall = v),
         this.check('Keep detailed escape diagnostics locally', () => H().trap.diagnostics, v => H().trap.diagnostics = v),
         el('p', 'Checks blocked approaches before repeating attacks, follows collision-checked detours and stops/releases unreachable targets. Failed approaches are remembered briefly. Escape retries refused movement and requires fresh, stable arrival plus a second move before hunting resumes. Optional recall needs a configured scroll town cycle and stops in town instead of reversing into the trap. Detailed diagnostics stay local and can include exact positions; both new options are off by default. Unknown collision data cannot authorize an escape.', 'muted')));
+  },
+  section_settingsAntiStuck(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       this.stuckNote = el('p', AntiStuck.status(), 'muted');
-      this.pane.append(this.group('Anti-stuck',
+      host.append(this.group('Anti-stuck',
         this.check('Recover when hunting makes no progress', () => H().antiStuck.enabled, v => H().antiStuck.enabled = v),
         this.number('No progress for (minutes)', () => H().antiStuck.minutes, v => H().antiStuck.minutes = v, 1, 30),
         this.number('Stop after failed recoveries', () => H().antiStuck.maxRecoveries, v => H().antiStuck.maxRecoveries = v, 1, 10),
         this.stuckNote,
         el('p', 'Progress means a confirmed kill, XP, gold, a pickup, or damage to your target. Resting, buffing, looting, shopping and town trips do not count against you. First recovery drops the current target; the next ones walk back to the saved hunting spot; after the last one hunting stops.', 'muted')));
-      AutoMastery.draw(this.pane);
-      StatPoints.draw(this.pane);
-      this.pane.append(this.group('Profiles', el('p', 'Settings are saved separately for each character.', 'muted'),
+  },
+  section_settingsMastery(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
+      AutoMastery.draw(host);
+  },
+  section_settingsStatPoints(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
+      StatPoints.draw(host);
+  },
+  section_settingsProfiles(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
+      host.append(this.group('Profiles', el('p', 'Settings are saved separately for each character.', 'muted'),
         this.button('Export full backup (with my positions)', () => {
           const url = URL.createObjectURL(new Blob([JSON.stringify({ app: 'sro-bot-lean', version: VERSION, profile: Settings.profile }, null, 2)], { type: 'application/json' }));
           const link = el('a'); link.href = url; link.download = 'nixxane-bot-settings.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
         })));
-      ProfileShare.draw(this.pane);
-      this.pane.append(this.group('Bug reports', el('p', 'Preview diagnostics and optionally a screenshot, then send them to the developer. Nothing sends automatically.', 'muted'), this.button('Send bug report', () => Reports.open())));
+  },
+  section_settingsShare(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
+      ProfileShare.draw(host);
+  },
+  section_settingsReports(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
+      host.append(this.group('Bug reports', el('p', 'Preview diagnostics and optionally a screenshot, then send them to the developer. Nothing sends automatically.', 'muted'), this.button('Send bug report', () => Reports.open())));
+  },
+  section_settingsActivity(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       this.logs = this.activityLog('Settings activity');
-      this.pane.append(this.group('Recent activity', this.button('Pop out session totals and log', () => this.showSession(true)), this.activityPanel(this.logs, 'Settings')));
-    }
-    this.balance();
-    this.update();
-    this.pane.scrollTop = scroll;
+      host.append(this.group('Recent activity', this.button('Pop out session totals and log', () => this.showSession(true)), this.activityPanel(this.logs, 'Settings')));
   },
   // The wide window shows a page as two columns. Plain grid rows leave a gap under every box that is shorter than its
   // neighbour, so the boxes are dealt into two stacks instead: each one goes under the shorter stack, in page order.
@@ -968,9 +1067,6 @@ const UI = {
     const distance = center ? dist2D(World.pose(), center) : Infinity;
     this.status.textContent = `${World.charName || 'No character'} · ${World.inWorld() ? Controller.mode : World.phase}\nHP ${Math.round(me.hpPct)}% · MP ${Math.round(me.mpPct)}% · Potions ${Potion.count('hp')}/${Potion.count('mp')} · Pickups ${Stats.values.loot}\nHunting spot: ${Number.isFinite(distance) ? Math.round(distance / 10) + ' m away' : center ? 'another region' : 'not saved'}${Restock.recording ? '\nRecording route: ' + Restock.draft.route.length + ' points' : ''}`;
 
-    if (Town.cfg().enabled) this.status.textContent += '\n' + Town.status();
-    if (WalkBack.active) this.status.textContent += '\n' + WalkBack.status();
-    if (Reconnect.active() && Reconnect.message) this.status.textContent += '\n' + Reconnect.message;
     this.refreshers.forEach(refresh => refresh());
     for (const slot of this.pane.querySelectorAll('.slot[data-skill]')) {
       const id = Number(slot.dataset.skill), left = World.cooldownLeft(id), total = World.skill(id)?.cooldownMs || 0;

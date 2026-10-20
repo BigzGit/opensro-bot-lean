@@ -37,7 +37,7 @@ legend{position:absolute;left:9px;right:9px;top:3px;padding:0;height:13px;line-h
 input:not([type=checkbox]),select{height:22px;background:#080907;border:1px solid #5d5034;padding:0 4px;outline:none;min-width:0;color:#efdaa4}
 input:focus,select:focus{border-color:#c9a85c}.field input[type=number]{width:66px;text-align:right}.field input[type=text]{width:170px}.field select{max-width:220px;min-width:110px}
 input[type=checkbox]{appearance:none;width:16px;height:16px;flex:0 0 16px;margin:0;border:0;background:var(--s-chk_off) center/16px 16px;cursor:pointer}input[type=checkbox]:checked{background-image:var(--s-chk_on)}
-.status{padding:6px 6px 8px;min-height:5lh;box-sizing:content-box;white-space:pre-line;color:#f4eedc;border-bottom:1px solid #5d503455}
+.status{padding:6px 6px 8px;min-height:3lh;box-sizing:content-box;white-space:pre-line;color:#f4eedc;border-bottom:1px solid #5d503455}
 .controls{padding:6px 0;gap:3px}.controls button:first-child{flex:1}
 .feedback{padding:6px 4px 0;overflow-wrap:anywhere;font-size:11px;min-height:8px}
 .muted{color:#a09b8c;font-size:11px;margin:6px 0}
