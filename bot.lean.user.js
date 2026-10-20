@@ -5838,12 +5838,13 @@ const MASTERY_NAMES = { 257: 'Bicheon', 258: 'Heuksal', 259: 'Pacheon', 273: 'Co
   513: 'Warrior', 514: 'Wizard', 515: 'Rogue', 516: 'Warlock', 517: 'Bard', 518: 'Cleric' };
 const AutoMastery = {
   pending: null, blocked: new Map(), message: 'Auto mastery off.', lastAt: -Infinity, note: null, turn: 'masteries',
+  maxAll: false, maxMessage: '', maxNote: null, total: 0, fast: 0,
   cfg() { return Settings.profile.mastery; },
-  active() { const c = this.cfg(); return !!(c.enabled || c.skills); },
+  active() { const c = this.cfg(); return !!(c.enabled || c.skills || this.maxAll); },
   gap() { const g = Number(this.cfg().gap); return Number.isInteger(g) ? Math.max(0, Math.min(50, g)) : 0; },
   reserve() { const r = Number(this.cfg().reserve); return Number.isInteger(r) ? Math.max(0, r) : 0; },
   name(id) { return MASTERY_NAMES[id] || 'Mastery #' + id; },
-  reset() { this.pending = null; this.blocked.clear(); this.turn = 'masteries'; this.message = this.active() ? 'Waiting for character data.' : 'Auto mastery off.'; },
+  reset() { this.stopMax(); this.pending = null; this.blocked.clear(); this.turn = 'masteries'; this.message = this.active() ? 'Waiting for character data.' : 'Auto mastery off.'; },
   rows() { return (World.gp?.progression?.masteries || []).filter(m => m && Number.isInteger(m.id) && Number.isInteger(m.level)); },
   spare(progression) { return Number.isInteger(progression.skillPoints) ? progression.skillPoints - this.reserve() : -Infinity; },
   // Why a mastery cannot be raised right now, or '' when it can.
@@ -5882,8 +5883,9 @@ const AutoMastery = {
   },
   send(kind, id, label, extra) {
     if (!Cmd.raw({ kind, id }, label)) return false;
-    this.pending = { kind, id, at: now(), ...extra }; this.lastAt = now();
+    this.pending = { kind, id, at: now(), error: World.gp?.trainingError, ...extra }; this.lastAt = now();
     this.message = label + '.';
+    if (this.maxAll) this.maxMessage = 'Max every skill: ' + label + ' (' + this.total + ' done so far).';
     return true;
   },
   masteryStep(progression, skipped) {
@@ -5930,14 +5932,16 @@ const AutoMastery = {
       const mastery = p.kind === 'mastery-train', row = mastery ? this.rows().find(m => m.id === p.id) : null;
       if (mastery ? row && row.level > p.level : World.learned(p.id)) {
         this.pending = null; this.blocked.delete((mastery ? 'm' : 's') + p.id); this.turn = this.turn === 'masteries' ? 'skills' : 'masteries';
-        UI.toast(mastery ? p.name + ' mastery raised to ' + row.level + '.' : p.name + ' learned.', 'info', 4000);
+        if (!mastery) this.total++;
+        if (!this.maxAll) UI.toast(mastery ? p.name + ' mastery raised to ' + row.level + '.' : p.name + ' learned.', 'info', 4000);
         this.message = mastery ? p.name + ' raised to ' + row.level + '.' : p.name + ' learned.';
-      } else if (now() - p.at > 10000) {
+      } else if (now() - p.at > 10000 || (this.maxAll && gp.trainingError !== p.error)) {
         // The server may have refused (for example its total mastery limit). Never resend blindly.
         this.pending = null; this.blocked.set((mastery ? 'm' : 's') + p.id, now() + 60000);
         this.message = p.name + ' was not accepted; trying again in a minute. ' + (gp.trainingError || '');
       } else return;
     }
+    if (this.maxAll) return gp.trainingPending ? undefined : this.maxStep(progression);
     if (gp.trainingPending || gp.trainingError) {
       this.message = gp.trainingError || 'Waiting for the previous training to finish.'; return;
     }
@@ -5948,6 +5952,44 @@ const AutoMastery = {
     if (!c.skills) skipped.push('skills are not raised: "Upgrade my rotation and buff skills automatically" is off');
     this.message = c.enabled && !c.ids.length && !c.skills ? 'Choose which masteries to raise.'
       : 'Nothing to raise (' + (skipped.slice(0, 8).join('; ') + (skipped.length > 8 ? '; and ' + (skipped.length - 8) + ' more' : '') || 'selected masteries not found') + ').';
+  },
+  // ---- Max every skill: one button, one job. Every skill group gets its next level until nothing more is allowed. ----
+  // A mastery is raised only when it is the one thing blocking a skill. The gap and reserve settings do not apply here.
+  startMax() {
+    if (this.maxAll) return;
+    if (!World.inWorld() || World.isDead() || !World.gp?.progression) return UI.toast('Enter the game with a living character first.', 'warn');
+    if (!World.groups.size) return UI.toast('The skill catalogue is not loaded yet.', 'warn');
+    this.maxAll = true; this.total = 0; this.pending = null; this.blocked.clear();
+    this.message = this.maxMessage = 'Max every skill: starting.';
+    Stats.loadLevels();
+    this.fast = setInterval(() => this.tick(), 10);
+  },
+  stopMax(text) {
+    if (this.fast) { clearInterval(this.fast); this.fast = 0; }
+    if (!this.maxAll) return;
+    this.maxAll = false; this.pending = null;
+    if (text) { this.message = this.maxMessage = text; UI.toast(text, 'info', 8000); Log.info(text); }
+  },
+  maxStep(progression) {
+    if (!Stats.levels) { Stats.loadLevels(); this.message = 'Loading mastery prices.'; return; }
+    const rules = Object.create(this, { reserve: { value: () => 0 }, gap: { value: () => 0 } }), left = new Map();
+    const add = why => left.set(why, (left.get(why) ?? 0) + 1);
+    for (const [group, rows] of World.groups) {
+      const row = rows.find(s => s.level === this.groupLevel(group) + 1);
+      if (!row?.trainable) continue;
+      if ((this.blocked.get('s' + row.id) ?? 0) > now()) { add('refused by the game'); continue; }
+      const why = rules.skillReason(row, progression);
+      if (!why) { const label = World.skillName(row.id) + ' level ' + row.level; return this.send('skill-train', row.id, 'Learning ' + label, { name: label }); }
+      if (!/^mastery/.test(why)) { add(why); continue; }
+      const need = (row.masteries || []).find(r => r.ID && !progression.masteries.some(m => m.id === r.ID && m.level >= r.Level));
+      const mastery = progression.masteries.find(m => m.id === need?.ID), stop = mastery ? rules.reason(mastery, progression) : 'not available';
+      if (mastery && !stop && (this.blocked.get('m' + mastery.id) ?? 0) <= now()) {
+        return this.send('mastery-train', mastery.id, 'Raising ' + this.name(mastery.id) + ' from ' + mastery.level, { level: mastery.level, name: this.name(mastery.id) });
+      }
+      add(this.name(need?.ID) + ' cannot be raised: ' + (stop || 'recently refused'));
+    }
+    const rest = [...left].map(([why, n]) => n + ' ' + why).join(', ');
+    this.stopMax('Max every skill: done, ' + this.total + ' learned or upgraded' + (rest ? '; still blocked: ' + rest : '') + '.');
   },
   status() { return this.message; },
   draw(parent) {
@@ -5969,6 +6011,10 @@ const AutoMastery = {
     this.note = el('p', this.message, 'muted');
     box.append(this.note, el('p', 'Trains one level at a time and waits for each to be confirmed. Masteries are raised in the order you tick them until they reach your character level (or 120) minus the gap; level 0 is free, otherwise the price is the table cost of the current level. Skills are the next level of the attack, buff and imbue skills you already use, using the game\'s own requirements (mastery level, prerequisite skills, STR and INT, skill points). The reserve is never spent. Works while hunting is stopped and does nothing while you are dead. If the server refuses a level (for example its mastery total limit) the bot waits a minute before trying again. Off by default and saved per character.', 'muted'));
     parent.append(box);
+    const max = UI.group('Max every skill', el('p', 'Learns and upgrades every skill, level by level, as fast as the game answers, and raises a mastery only when it is what blocks a skill (up to your character level, or 120). Skill points, strength and intelligence limits still apply, and it tells you what is left.', 'muted'));
+    const button = UI.button(this.maxAll ? 'Stop' : 'Max every skill now', () => { if (this.maxAll) this.stopMax('Max every skill: stopped.'); else this.startMax(); button.textContent = this.maxAll ? 'Stop' : 'Max every skill now'; });
+    UI.refreshers.push(() => { button.textContent = this.maxAll ? 'Stop' : 'Max every skill now'; });
+    this.maxNote = el('p', this.maxMessage, 'muted'); max.append(button, this.maxNote); parent.append(max);
   },
 };
 // Optional features run behind the controller's guard so a bug in one can never stop hunting.
@@ -10648,6 +10694,7 @@ const UI = {
     this.updateOrb(); this.updateWide();
     if (this.townNote) this.townNote.textContent = Town.status();
     if (this.is('Settings') && AutoMastery.note) AutoMastery.note.textContent = AutoMastery.status();
+    if (this.is('Settings') && AutoMastery.maxNote) AutoMastery.maxNote.textContent = AutoMastery.maxMessage;
     if (this.is('Settings') && StatPoints.note) StatPoints.note.textContent = StatPoints.status();
     if (this.stuckNote) this.stuckNote.textContent = AntiStuck.status();
     if (this.is('Party') && Trace.note) Trace.note.textContent = Trace.status();

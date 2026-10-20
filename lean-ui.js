@@ -1186,6 +1186,7 @@ const UI = {
     this.updateOrb(); this.updateWide();
     if (this.townNote) this.townNote.textContent = Town.status();
     if (this.is('Settings') && AutoMastery.note) AutoMastery.note.textContent = AutoMastery.status();
+    if (this.is('Settings') && AutoMastery.maxNote) AutoMastery.maxNote.textContent = AutoMastery.maxMessage;
     if (this.is('Settings') && StatPoints.note) StatPoints.note.textContent = StatPoints.status();
     if (this.stuckNote) this.stuckNote.textContent = AntiStuck.status();
     if (this.is('Party') && Trace.note) Trace.note.textContent = Trace.status();

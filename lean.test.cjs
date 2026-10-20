@@ -1739,6 +1739,41 @@ test('auto skill upper learns the next level of skills in the rotation, one conf
   const buffs = skillFixture(); buffs.Settings.profile.macro.rotations.normal = []; buffs.Settings.profile.macro.buffs = [{ id: 1001, group: 100 }];
   buffs.Controller.tick(); assert.deepEqual(skillTrains(buffs), [1002], 'buff skills are upgraded too');
 });
+test('Max every skill learns every skill group, unlearned ones too, one confirmed level at a time, then says what is left', () => {
+  const f = skillFixture({}, []);
+  f.Settings.profile.mastery.skills = false; f.Settings.profile.mastery.reserve = 1000; f.Settings.profile.mastery.gap = 25;
+  assert.equal(f.AutoMastery.active(), false);
+  f.AutoMastery.startMax(); f.Controller.tick();
+  assert.equal(f.AutoMastery.active(), true); assert.deepEqual(skillTrains(f), [1001], 'an unlearned skill line starts at level 1; the reserve setting does not apply');
+  f.Controller.tick(); assert.deepEqual(skillTrains(f), [1001], 'no second request before the first is confirmed');
+  f.World.applyGameplay({ ...f.World.gp, skills: [1001], progression: { ...f.World.gp.progression, skillPoints: 50 } }); f.Controller.tick();
+  assert.deepEqual(skillTrains(f), [1001, 1002], 'the next request follows at once, with no spacing delay');
+  f.World.applyGameplay({ ...f.World.gp, skills: [1001, 1002], progression: { ...f.World.gp.progression, skillPoints: 0 } }); f.Controller.tick();
+  assert.equal(f.AutoMastery.maxAll, false, 'it ends when nothing more is allowed');
+  assert.match(f.AutoMastery.maxMessage, /done, 2 learned or upgraded; still blocked: .*needs (80|10) skill points/);
+  assert.deepEqual(skillTrains(f), [1001, 1002]);
+});
+test('Max every skill raises a mastery only when it is what blocks a skill, and ignores the gap and reserve', () => {
+  const f = skillFixture({}, []);
+  f.Settings.profile.mastery.skills = false; f.Settings.profile.mastery.reserve = 1000; f.Settings.profile.mastery.gap = 25;
+  f.World.rebuildCatalog([...f.World.catalog.values()].map(s => s.id === 1001 ? { ...s, masteries: [{ ID: 257, Level: 11 }] } : s));
+  f.AutoMastery.startMax(); f.Controller.tick();
+  assert.deepEqual(trains(f), [257]); assert.deepEqual(skillTrains(f), [], 'the mastery comes first');
+  f.World.applyGameplay({ ...f.World.gp, progression: { ...f.World.gp.progression, masteries: [{ id: 257, level: 11 }, { id: 273, level: 0 }, { id: 274, level: 30 }], skillPoints: 90 } }); f.Controller.tick();
+  assert.deepEqual(skillTrains(f), [1001], 'then the skill it unlocked');
+  f.AutoMastery.stopMax('Max every skill: stopped.'); assert.equal(f.AutoMastery.maxAll, false);
+});
+test('Max every skill sees a refusal at once, does not repeat it and leaves other skills alone', () => {
+  const f = skillFixture({}, []);
+  f.Settings.profile.mastery.skills = false;
+  f.AutoMastery.startMax(); f.Controller.tick(); assert.deepEqual(skillTrains(f), [1001]);
+  f.World.applyGameplay({ ...f.World.gp, trainingError: 'The game refused this' }); f.Controller.tick();
+  assert.deepEqual(skillTrains(f), [1001, 2001], 'the refused skill is skipped and the next line goes on');
+  f.World.applyGameplay({ ...f.World.gp, skills: [2001], trainingError: 'The game refused this' }); f.Controller.tick();
+  assert.deepEqual(skillTrains(f), [1001, 2001], 'the refused skill is not sent again');
+  assert.equal(f.AutoMastery.maxAll, false); assert.match(f.AutoMastery.maxMessage, /refused by the game/);
+  f.AutoMastery.stopMax();
+});
 test('auto skill upper follows the game requirements and never trains skills you do not use', () => {
   let f = skillFixture(); f.Settings.profile.macro.rotations.normal = []; f.Controller.tick(); assert.deepEqual(skillTrains(f), [], 'only skills in rotations, buffs or imbue');
   f = skillFixture({ masteries: [{ id: 257, level: 9 }, { id: 273, level: 0 }] }); f.Controller.tick(); assert.deepEqual(skillTrains(f), []); assert.match(f.AutoMastery.status(), /mastery level too low/);
