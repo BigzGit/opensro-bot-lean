@@ -120,6 +120,11 @@ const Reconnect = {
     if (World.charName !== i.character) return this.clear();
     if (!this.backAt) { this.backAt = now(); this.attempts = 0; this.message = 'Back in the game; settling.'; return; }
     if (now() - this.backAt < 3000 || !World.local() || World.gp?.inventoryPending) return;
+    // Killed while disconnected: start hunting so its own death handling revives the character and walks it back to the spot.
+    if (i.hunting && !Hunt.running && World.isDead() && Hunt.cfg().center) {
+      Hunt.start(); this.clear(Hunt.running ? '' : 'Back in the game, but the character is dead; hunting was not resumed.');
+      return UI.toast(Hunt.running ? 'Back in the game, but dead; reviving and returning to the hunting spot.' : this.message, 'info', 4000);
+    }
     if (!i.hunting || Hunt.running || World.isDead()) {
       this.clear(i.hunting && World.isDead() ? 'Back in the game, but the character is dead; hunting was not resumed.' : 'Back in the game.');
       return UI.toast(this.message, 'info', 4000);

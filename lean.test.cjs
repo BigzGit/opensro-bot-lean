@@ -2084,8 +2084,9 @@ test('after reconnecting, hunting that was running resumes at the hunting spot, 
   assert.equal(f.Hunt.running, false, 'a stopped bot is reconnected but not started');
   ({ f, lose, back } = reconnectFixture()); lose(); back(); f.World.gp.pose = { ...f.World.gp.pose, x: 200000 }; f.advance(4000); f.Controller.tick(); f.advance(4000); f.Controller.tick();
   assert.equal(f.Hunt.running, false); assert.equal(f.Reconnect.active(), false);
-  ({ f, lose, back } = reconnectFixture()); lose(); back(); f.World.isDead = () => true; f.advance(4000); f.Controller.tick(); f.advance(4000); f.Controller.tick();
-  assert.equal(f.Hunt.running, false, 'a dead character is never started');
+  ({ f, lose, back } = reconnectFixture()); f.Hunt.cfg().onDeath = 'revive'; lose(); back(); f.World.isDead = () => true; f.advance(4000); f.Controller.tick(); f.advance(4000); f.Controller.tick();
+  assert.equal(f.Hunt.running, true, 'killed while disconnected: hunting restarts so the death handling revives and returns');
+  assert.equal(f.Reconnect.active(), false);
   ({ f, lose, back } = reconnectFixture()); lose('reconnecting'); back(); f.advance(4000); f.Controller.tick(); f.advance(4000); f.Controller.tick();
   assert.equal(f.Hunt.running, true, 'a short drop the game recovered from resumes too');
 });

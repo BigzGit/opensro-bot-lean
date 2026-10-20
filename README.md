@@ -141,6 +141,8 @@ If the game's loading screen shows **Unable to finish loading** (for example "Re
 
 If the game shows **Your session ended while the connection was gone. Please log in again.**, the server dropped the session (it only holds a lost connection for about 30 seconds), so resuming is pointless. The bot enters the character afresh instead; if that has not worked after 30 seconds it reloads the page the same way, with the same limit of 3 reloads per 30 minutes. It never presses that window's Confirm button, which would log you out.
 
+If the character was killed while the connection was gone, the bot starts hunting again once it is back, so the usual death handling revives it and walks it back to the hunting spot (subject to your **On death** setting).
+
 ## Returning after death
 
 Leave **Revive in town and reverse to last scroll point** enabled under **Town → Go to town when…**. With the town cycle enabled, the bot revives, completes town services and reverses back to hunt. Hunting resumes within 30 metres of the last scroll point, or within your saved hunting area after death. Carry reverse scrolls.
