@@ -145,6 +145,8 @@ If the character was killed while the connection was gone, the bot starts huntin
 
 An application to the main's party that has not been answered after 30 seconds is sent again, so several alt accounts can join one main.
 
+If the character is back in a known town, far from the hunting spot, and the town cycle's revive option is on, the bot does the town services and reverses with the scroll (the same trip as after a death) instead of walking.
+
 ## Returning after death
 
 Leave **Revive in town and reverse to last scroll point** enabled under **Town → Go to town when…**. With the town cycle enabled, the bot revives, completes town services and reverses back to hunt. Hunting resumes within 30 metres of the last scroll point, or within your saved hunting area after death. Carry reverse scrolls.

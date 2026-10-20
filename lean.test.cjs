@@ -2098,6 +2098,13 @@ test('after reconnecting, hunting that was running resumes at the hunting spot, 
   ({ f, lose, back } = reconnectFixture()); lose('reconnecting'); back(); f.advance(4000); f.Controller.tick(); f.advance(4000); f.Controller.tick();
   assert.equal(f.Hunt.running, true, 'a short drop the game recovered from resumes too');
 });
+test('after reconnecting in town, far from the hunting spot, the bot does town services and reverses instead of walking', () => {
+  const { f, lose, back } = reconnectFixture(); let began = null;
+  f.Town.autoRevive = () => true; f.Town.detect = () => ({}); f.Town.begin = revival => { began = revival; f.Town.trip = { phase: 'revive-arrival' }; };
+  lose(); back(); f.World.gp.pose = { ...f.World.gp.pose, x: 200000 }; f.World.pose = () => f.World.gp.pose;
+  f.advance(4000); f.Controller.tick(); f.advance(4000); f.Controller.tick();
+  assert.equal(began, true, 'revival-style town trip'); assert.equal(f.WalkBack.active, null); assert.equal(f.Reconnect.active(), false);
+});
 test('reconnect never fights the player: logout, disconnect, exit or a manual login cancel it; a lost login is reported', () => {
   for (const kind of ['logout', 'disconnect', 'exit', 'restart', 'login', 'enter-world']) {
     const { f, sent, lose } = reconnectFixture(); lose(); f.Hook.observers.forEach(fn => fn({ kind, password: 'secret' }));

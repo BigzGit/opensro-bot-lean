@@ -129,6 +129,14 @@ const Reconnect = {
       this.clear(i.hunting && World.isDead() ? 'Back in the game, but the character is dead; hunting was not resumed.' : 'Back in the game.');
       return UI.toast(this.message, 'info', 4000);
     }
+    // Back in town (a death while disconnected respawns there, or the drop came during a town trip) and far from the
+    // hunting spot: do the town services and reverse, as after a death, instead of walking.
+    const H = Hunt.cfg(), spot = H.center && World.pose() ? dist2D(World.pose(), H.center) : NaN;
+    if (Town.autoRevive() && Number.isFinite(spot) && spot > Math.max(H.radius * 1.5, 600) && Town.detect()) {
+      UI.toast('Back in the game, in town; doing town services and reversing to the hunting spot.', 'info', 4000);
+      Controller.returnAfterRevive();
+      return this.clear(Town.trip ? '' : 'Back in the game, but the town cycle could not start: ' + Town.message);
+    }
     const outcome = Controller.resumeHunting('Back in the game');
     this.clear(outcome === 'stopped' ? 'Back in the game, but not at the hunting spot. Use Return & hunt when ready.' : '');
   },
