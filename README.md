@@ -139,6 +139,8 @@ Once the character is back, hunting that was running resumes: at the hunting spo
 
 If the game's loading screen shows **Unable to finish loading** (for example "Renderer failed: Invalid particle graph time"), the bot waits 15 seconds and reloads the page. It remembers the character and whether hunting was running; after the reload the game restores your login from its own session cookie, the bot enters the character again and hunting resumes as described above. It reloads at most 3 times in 30 minutes, then stops and says so. If the login cannot be restored, the status line says so and the bot waits for you. Logging out or entering a character yourself cancels it.
 
+If the game shows **Your session ended while the connection was gone. Please log in again.**, the server dropped the session (it only holds a lost connection for about 30 seconds), so resuming is pointless. The bot enters the character afresh instead; if that has not worked after 30 seconds it reloads the page the same way, with the same limit of 3 reloads per 30 minutes. It never presses that window's Confirm button, which would log you out.
+
 ## Returning after death
 
 Leave **Revive in town and reverse to last scroll point** enabled under **Town → Go to town when…**. With the town cycle enabled, the bot revives, completes town services and reverses back to hunt. Hunting resumes within 30 metres of the last scroll point, or within your saved hunting area after death. Carry reverse scrolls.

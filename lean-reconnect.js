@@ -10,7 +10,7 @@ const Reconnect = {
   intent: null, attempts: 0, nextAt: 0, waitUntil: 0, backAt: 0, message: '',
   DELAYS: [4000, 10000, 20000, 30000], GIVE_UP_MS: 12 * 3600 * 1000,
   STORE_KEY: 'sro-lean-reload', LOAD_WAIT_MS: 15000, MAX_RELOADS: 3, RELOAD_WINDOW_MS: 30 * 60000, PENDING_MS: 10 * 60000, LOGIN_GRACE_MS: 60000,
-  restored: false, failedAt: 0, snapAt: 0, gaveUp: false,
+  restored: false, failedAt: 0, expiredAt: 0, EXPIRED_WAIT_MS: 30000, snapAt: 0, gaveUp: false,
   // What survives a page reload: the last in-world snapshot, the reload times and the one reload waiting to be resumed.
   load() { try { return JSON.parse(window.localStorage.getItem(this.STORE_KEY)) || {}; } catch { return {}; } },
   save(data) { try { window.localStorage.setItem(this.STORE_KEY, JSON.stringify(data)); } catch {} },
@@ -40,23 +40,32 @@ const Reconnect = {
     this.message = 'The page was reloaded; restoring ' + p.character + '.';
     Log.warn('The game failed to load earlier; page reloaded, restoring ' + p.character + '.');
   },
+  // Save what to resume, then reload. Shared by a failed load and an expired session; limited to 3 per 30 minutes.
+  reloadPage() {
+    const data = this.load(), times = (data.times || []).filter(t => Date.now() - t < this.RELOAD_WINDOW_MS);
+    if (times.length >= this.MAX_RELOADS) {
+      if (!this.gaveUp) {
+        this.gaveUp = true; this.message = 'Reloaded the page ' + this.MAX_RELOADS + ' times in 30 minutes; not reloading again. Reload it yourself.';
+        Log.warn(this.message); UI.toast(this.message, 'warn', 8000);
+      }
+      return false;
+    }
+    const known = this.intent ? { character: this.intent.character, hunting: this.intent.hunting } : data.snap && Date.now() - data.snap.at < this.RELOAD_WINDOW_MS ? data.snap : null;
+    this.save({ snap: data.snap, times: [...times, Date.now()], pending: known ? { character: known.character, hunting: !!known.hunting, at: Date.now() } : null });
+    this.doReload();
+    return true;
+  },
   watchLoad() {
     const text = this.loadFailure();
     if (!text) { this.failedAt = 0; return; }
     if (!this.failedAt) { this.failedAt = now(); this.gaveUp = false; Log.warn('The game failed to load (' + text + '); reloading the page shortly.'); }
     if (this.gaveUp) return;
     if (now() - this.failedAt < this.LOAD_WAIT_MS) { this.message = 'The game failed to load; reloading the page shortly.'; return; }
-    const data = this.load(), times = (data.times || []).filter(t => Date.now() - t < this.RELOAD_WINDOW_MS);
-    if (times.length >= this.MAX_RELOADS) {
-      this.gaveUp = true; this.message = 'The game failed to load ' + this.MAX_RELOADS + ' times in 30 minutes; not reloading again. Reload it yourself.';
-      Log.warn(this.message); return UI.toast(this.message, 'warn', 8000);
-    }
-    const known = this.intent ? { character: this.intent.character, hunting: this.intent.hunting } : data.snap && Date.now() - data.snap.at < this.RELOAD_WINDOW_MS ? data.snap : null;
-    this.save({ snap: data.snap, times: [...times, Date.now()], pending: known ? { character: known.character, hunting: !!known.hunting, at: Date.now() } : null });
-    this.doReload();
+    this.reloadPage();
   },
+
   active() { return !!this.intent; },
-  clear(message = '') { this.intent = null; this.attempts = 0; this.nextAt = this.waitUntil = this.backAt = 0; this.message = message; },
+  clear(message = '') { this.intent = null; this.attempts = 0; this.nextAt = this.waitUntil = this.backAt = this.expiredAt = 0; this.message = message; },
   // The connection was lost while the bot may have been working: remember what to restore.
   lost() {
     if (!World.charName) return;
@@ -89,10 +98,18 @@ const Reconnect = {
       this.message = 'The login is gone (server restart?). Log in and enter your character again; the bot resumes when you are back.';
       return;
     }
+    // "Your session ended while the connection was gone": the server dropped the world session (its resume window is 30 s),
+    // so resuming can never work. Enter the character afresh; if that does not bring it back, reload the page, which
+    // restores the login from the game's session cookie. The window's Confirm button would log out, so it is never pressed.
+    const expired = phase === 'disconnected' && /session ended while the connection was gone|could not resume/i.test(String(World.session?.disconnectMessage || '') + ' ' + error);
+    if (expired) {
+      if (!this.expiredAt) { this.expiredAt = now(); Log.warn('The game session ended while the connection was gone; entering the character again.'); }
+      else if (now() - this.expiredAt > this.EXPIRED_WAIT_MS && !this.gaveUp) { this.message = 'Still not back; reloading the page.'; if (this.reloadPage()) return; }
+    }
     if (now() < this.nextAt || now() < this.waitUntil) return;
     const n = this.attempts++;
     // First the game's own resume, then a fresh entry with the held login.
-    const sent = this.send(n === 0 ? { kind: 'reconnect' } : { kind: 'enter-world', character: i.character });
+    const sent = this.send(n === 0 && !expired ? { kind: 'reconnect' } : { kind: 'enter-world', character: i.character });
     this.nextAt = now() + this.DELAYS[Math.min(n, this.DELAYS.length - 1)];
     this.waitUntil = now() + (sent ? 8000 : 0);
     this.message = 'Reconnecting (attempt ' + (n + 1) + ')…';

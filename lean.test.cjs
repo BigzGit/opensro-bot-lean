@@ -4406,3 +4406,16 @@ test('a reload that is not wanted or not allowed never happens', () => {
   h.f.Hook.observers.forEach(fn => fn({ kind: 'logout' })); assert.equal(h.f.Reconnect.active(), false, 'logging out cancels it');
   h.f.advance(70000); h.f.Controller.tick(); assert.equal(h.sent.length, 0);
 });
+
+test('an expired world session skips the futile resume, enters afresh, then reloads the page', () => {
+  const r = reloadFixture(), f = r.f; r.sent.length = 0;
+  r.lose(); f.World.session = { phase: 'disconnected', error: 'Server could not resume the previous world session', disconnectMessage: 'Your session ended while the connection was gone. Please log in again.' };
+  f.advance(3000); f.Controller.tick();
+  assert.deepEqual(r.sent[0], { kind: 'enter-world', character: 'Tester' }, 'no resume: it cannot work any more');
+  f.advance(10000); f.Controller.tick(); assert.equal(r.reloads(), 0, 'the fresh entry gets its time');
+  f.advance(25000); f.Controller.tick(); assert.equal(r.reloads(), 1);
+  assert.equal(stored(f).pending.character, 'Tester');
+  const g = reloadFixture(); g.lose(); g.f.World.session = { phase: 'disconnected', disconnectMessage: 'Your session ended while the connection was gone.' };
+  g.f.storage.set('sro-lean-reload', JSON.stringify({ times: [Date.now(), Date.now(), Date.now()] }));
+  g.f.advance(3000); g.f.Controller.tick(); g.f.advance(40000); g.f.Controller.tick(); assert.equal(g.reloads(), 0); assert.equal(g.f.Reconnect.gaveUp, true);
+});
