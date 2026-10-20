@@ -264,7 +264,7 @@ After an update, reload the game and check the version shown in the panel.
 
 ## License
 
-MIT, copyright nixxane. See [LICENSE](LICENSE). You may use, change and share it, including inside other projects, as long as the copyright notice stays.
+GNU General Public License v3.0 or later, copyright nixxane. See [LICENSE](LICENSE). You may use, change and share it, but a version you share has to stay under the same license with its source available. Versions up to 1.2.118 were released under the MIT license ([LICENSE-MIT-history.txt](LICENSE-MIT-history.txt)); those copies stay MIT.
 
 ## Obstacle pursuit and escape recovery
 
