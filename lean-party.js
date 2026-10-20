@@ -4,7 +4,47 @@ const Party = {
   registration: null,
   lastRegisterAt: -Infinity,
   message: 'Auto-recruit off.',
-  reset() { this.answered = ''; this.registration = null; this.lastRegisterAt = -Infinity; this.message = 'Waiting for party state.'; },
+  joinMessage: '', joinedKey: '', lastPageAt: -Infinity, lastJoinAt: -Infinity, scanDoneAt: -Infinity, wantPage: 1,
+  reset() {
+    this.answered = ''; this.registration = null; this.lastRegisterAt = -Infinity; this.message = 'Waiting for party state.';
+    this.joinMessage = ''; this.joinedKey = ''; this.lastPageAt = this.lastJoinAt = this.scanDoneAt = -Infinity; this.wantPage = 1;
+  },
+  // Alt accounts: find the main account's party and join it. A party invitation from the main is accepted; otherwise the
+  // party-matching board is paged for the main's listing and the bot applies to it (the main's Auto-recruit and
+  // Auto-accept answer). Runs only while solo, so it never pulls the character out of another party.
+  joinMain() {
+    const c = Settings.profile.party, main = String(c.mainName || '').trim().toLowerCase();
+    if (!c.joinMain || !main) { this.joinMessage = ''; return; }
+    const gp = World.gp, social = gp?.social, matching = gp?.partyMatching, me = String(social?.localName || '').toLowerCase();
+    if (!social || !matching || !Array.isArray(social.members)) { this.joinMessage = 'Waiting for party state.'; return; }
+    if (me && me === main) { this.joinMessage = 'This is the main account; nothing to join.'; return; }
+    const named = m => String(m?.name || '').toLowerCase();
+    if (social.members.some(m => named(m) === main)) { this.joinMessage = 'In ' + c.mainName.trim() + "'s party."; this.joinedKey = ''; this.wantPage = 1; return; }
+    if (social.members.some(m => m && named(m) !== me)) { this.joinMessage = 'In another party; leave it to join ' + c.mainName.trim() + '.'; return; }
+    const inv = social.invitation;
+    if (inv && (inv.type === 2 || inv.type === 3) && String(World.ents.get(inv.gid)?.name || '').toLowerCase() === main) {
+      const key = inv.type + ':' + inv.gid;
+      if (key !== this.joinedKey && Cmd.spaced('social-consent') && Cmd.raw({ kind: 'social-consent', accept: true }, 'Accept party invitation from ' + c.mainName.trim())) this.joinedKey = key;
+      this.joinMessage = 'Accepting the invitation from ' + c.mainName.trim() + '.'; return;
+    }
+    if (matching.pending || matching.joining) { this.joinMessage = 'Waiting for the party board…'; return; }
+    const level = World.gp?.progression?.level, row = (matching.rows || []).find(r => named(r) === main);
+    if (row) {
+      const full = row.members >= ((row.type & 1) ? 8 : 4);
+      if (full) { this.joinMessage = c.mainName.trim() + "'s party is full."; return; }
+      if (Number.isInteger(level) && (level < row.min || level > row.max)) { this.joinMessage = 'Level ' + level + ' is outside ' + c.mainName.trim() + "'s listing (" + row.min + '-' + row.max + ').'; return; }
+      if (now() - this.lastJoinAt < 20000 || !Cmd.spaced('party-match-join')) { this.joinMessage = 'Applied to ' + c.mainName.trim() + "'s party; waiting for the answer."; return; }
+      if (Cmd.raw({ kind: 'party-match-join', id: row.id }, 'Join ' + c.mainName.trim() + "'s party")) this.lastJoinAt = now();
+      this.joinMessage = 'Applying to ' + c.mainName.trim() + "'s party."; return;
+    }
+    // Not on the page we have: walk the board a page at a time, then rest before scanning again.
+    const pages = matching.pages || 0;
+    if (this.wantPage > Math.max(pages, 1)) this.wantPage = 1, this.scanDoneAt = now();
+    if (now() - this.scanDoneAt < 20000) { this.joinMessage = 'No listing from ' + c.mainName.trim() + ' yet; is Auto-recruit on for that account?'; return; }
+    if (now() - this.lastPageAt < 2500 || !Cmd.spaced('party-match-page')) return;
+    if (Cmd.raw({ kind: 'party-match-page', page: this.wantPage }, 'Look for ' + c.mainName.trim() + "'s party listing")) { this.lastPageAt = now(); this.wantPage++; }
+    this.joinMessage = 'Looking for ' + c.mainName.trim() + "'s party listing…";
+  },
   // Party sharing options: the party's own once formed, else the listing's, else the saved new-party choice.
   options(matching, social) {
     const c = Settings.profile.party;
@@ -111,6 +151,7 @@ const Party = {
     this.acceptResurrection();
     if (World.inWorld() && Settings.profile.party.acceptRes) this.helping();
     const c = Settings.profile.party;
+    if (World.inWorld()) this.joinMain(); else this.joinMessage = '';
     if (!World.inWorld() || (!c.autoAcceptMatching && !c.autoRecruit)) return;
     const gp = World.gp, matching = gp?.partyMatching, request = matching?.request, social = gp?.social;
     if (!matching || !social || !Array.isArray(social.members)) return;

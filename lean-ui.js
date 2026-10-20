@@ -969,6 +969,9 @@ const UI = {
         el('p', 'Auto-recruit registers your saved listing and accepts applicants whenever enabled, even with hunting stopped. Restores missing listings when space opens and retries unconfirmed registrations after fresh idle state, at most once every 30 seconds. Existing listings and party sharing settings are preserved; edits apply to the next new listing. Turning this off leaves the current listing in place.', 'muted'),
         this.check('Auto-accept party-matching joins', () => Settings.profile.party.autoAcceptMatching, v => Settings.profile.party.autoAcceptMatching = v),
         el('p', 'Accepts applications to your own listing while you are the leader or forming a new party. Works while hunting is stopped; turn this switch off to stop accepting. Ordinary invitations are left to you.', 'muted'),
+        this.check("Join the main account's party", () => party().joinMain, v => { party().joinMain = v; Party.reset(); }),
+        this.text('Main account character name', () => party().mainName, v => { party().mainName = v; Party.reset(); }, 'exact character name'),
+        el('p', 'For your other accounts. While you are not in a party, the bot accepts a party invitation from that character, or finds their party listing on the party-matching board and applies to it. The main account needs Auto-recruit and Auto-accept party-matching joins ticked. It also rejoins after a disconnect, once the character is back in the game. Leave this off on the main account.', 'muted'),
         this.check('Accept resurrection from party members', () => party().acceptRes, v => party().acceptRes = v),
         el('p', 'When you are dead and a party member casts Rebirth on you, the bot answers Yes. Works during hunting and while stopped; resurrection offers from other players are left to you.', 'muted'),
         this.check('Auto-resurrect party members', () => party().autoRes, v => { party().autoRes = v; Resurrect.reset(); }),
@@ -1192,6 +1195,7 @@ const UI = {
     if (this.is('Party') && Trace.note) Trace.note.textContent = Trace.status();
     if (this.is('Party') && this.partyNote) {
       const notes = [Settings.profile.party.autoRecruit ? Party.message : 'Auto-recruit off.'];
+      if (Settings.profile.party.joinMain && Party.joinMessage) notes.push(Party.joinMessage);
       if (Settings.profile.party.autoRes) notes.push(Resurrect.message);
       this.partyNote.textContent = notes.join(' ');
     }

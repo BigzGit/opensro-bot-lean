@@ -863,6 +863,50 @@ function partyApplication(f) {
   return f.World.gp.partyMatching;
 }
 
+const jm = v => JSON.parse(JSON.stringify(v));
+function joinMainFixture(extra = {}) {
+  const f = fixture();
+  Object.assign(f.Settings.profile.party, { joinMain: true, mainName: 'MainChar' });
+  f.World.gp.social = { localName: 'AltChar', self: 0, leader: 0, options: 0, members: [], invitation: null };
+  f.World.gp.partyMatching = { own: null, request: null, pending: null, joining: null, page: 1, pages: 1, rows: [], ...extra };
+  return f;
+}
+
+test('alt account applies to the main account listing and waits for the answer', () => {
+  const f = joinMainFixture({ rows: [{ id: 7, name: 'mainchar', members: 1, type: 1, min: 1, max: 90 }] });
+  f.Controller.tick(); assert.deepEqual(jm(f.commands[0]), { kind: 'party-match-join', id: 7 });
+  f.advance(5000); f.Controller.tick(); assert.equal(f.commands.length, 1);
+});
+
+test('alt account pages the board until it finds the main, then rests', () => {
+  const f = joinMainFixture({ pages: 2, rows: [{ id: 3, name: 'Other', members: 1, type: 0, min: 1, max: 90 }] });
+  f.Controller.tick(); assert.deepEqual(jm(f.commands[0]), { kind: 'party-match-page', page: 1 });
+  f.advance(3000); f.World.gp.partyMatching = { ...f.World.gp.partyMatching, page: 2 };
+  f.Controller.tick(); assert.deepEqual(jm(f.commands[1]), { kind: 'party-match-page', page: 2 });
+  f.advance(3000); f.World.gp.partyMatching = { ...f.World.gp.partyMatching, page: 2 };
+  f.Controller.tick(); assert.equal(f.commands.length, 2); assert.match(f.Party.joinMessage, /No listing/);
+});
+
+test('alt account accepts the main invitation only, and never leaves another party', () => {
+  const f = joinMainFixture();
+  f.World.ents.set(55, { gid: 55, kind: 'player', name: 'Stranger' });
+  f.World.gp.social.invitation = { type: 2, gid: 55, options: 1 };
+  f.Controller.tick(); assert.ok(!f.commands.some(c => c.kind === 'social-consent'));
+  f.World.ents.set(56, { gid: 56, kind: 'player', name: 'MainChar' });
+  f.World.gp.social.invitation = { type: 2, gid: 56, options: 1 };
+  f.Controller.tick(); assert.deepEqual(jm(f.commands.find(c => c.kind === 'social-consent')), { kind: 'social-consent', accept: true });
+  const g = joinMainFixture({ rows: [{ id: 7, name: 'MainChar', members: 1, type: 1, min: 1, max: 90 }] });
+  g.World.gp.social.members = [{ id: 1, name: 'AltChar' }, { id: 2, name: 'Friend' }];
+  g.Controller.tick(); assert.equal(g.commands.length, 0);
+});
+
+test('alt account stays out of the main party when it is full or the level is out of range', () => {
+  const f = joinMainFixture({ rows: [{ id: 7, name: 'MainChar', members: 4, type: 0, min: 1, max: 90 }] });
+  f.Controller.tick(); assert.equal(f.commands.length, 0); assert.match(f.Party.joinMessage, /full/);
+  const g = joinMainFixture({ rows: [{ id: 7, name: 'MainChar', members: 1, type: 0, min: 80, max: 90 }] });
+  g.World.gp.progression = { level: 20 }; g.Controller.tick(); assert.equal(g.commands.length, 0); assert.match(g.Party.joinMessage, /outside/);
+});
+
 test('party matching is opt-in and accepts once while hunting is stopped', () => {
   const f = fixture(); assert.equal(f.Settings.profile.party.autoAcceptMatching, false);
   partyApplication(f); f.Settings.profile.party.autoAcceptMatching = false;

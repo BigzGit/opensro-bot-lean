@@ -125,6 +125,10 @@ Tick **Accept resurrection from party members** on the **Party** page. When you 
 
 If hunting was running when the character died, it resumes after a resurrection you accepted, whatever **On death** is set to: at the hunting spot it simply starts, otherwise it walks back first, however far the spot is (up to about 14 km, walked in short legs), and only stops when the spot is out of reach, in another world or in a dungeon. The memory lasts 15 minutes; a revive you or the bot does yourselves resumes nothing. While this switch is on and an online party member is in view, a bot set to revive (or the town cycle's revive) waits up to 20 seconds instead of 5 before reviving itself, and never revives while a resurrection offer is open.
 
+## Joining the main account's party
+
+For your other accounts. On the **Party** page tick **Join the main account's party** and type the main character's name. While the character is not in a party, the bot accepts a party invitation from that character, or pages the party-matching board for their listing and applies to it (every 20 seconds at most). It does nothing while the character is in another party, and stops when the party is full or the character's level is outside the listing's range; the status line says which. The main account needs **Auto-recruit** and **Auto-accept party-matching joins** ticked and must not use this option itself. After a disconnect the party is rejoined as soon as automatic reconnect has the character back in the game.
+
 ## Automatic reconnect
 
 This is always on; there is no switch. When the connection to the game is lost (a server restart, a network drop), the bot waits for the game's own retries, then asks the game to resume, and if that fails re-enters the world with the login the page already holds, exactly like pressing Enter at character select. It keeps trying every few seconds, then every 30 seconds, for up to 12 hours. It never types or stores your password: if the login itself is gone after a restart, the status line says so and the bot waits for you.
