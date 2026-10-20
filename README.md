@@ -220,6 +220,10 @@ The **Map** page draws the game's minimap around you with your hunt radius (yell
 
 Click **Wide** at the top of the panel for a wider window: a status strip with HP, MP and EXP bars and what the bot is doing, the pages as a list on the left, session numbers and supplies always on the right, and the activity log along the bottom. The pages hold the same settings as in the compact window, in two columns. **Compact** switches back; the compact window is the default. The choice is remembered, and screens narrower than 900 pixels always get the compact window.
 
+## Classic window
+
+Click **Classic** at the top of the panel (screens at least 900 px wide) for a fixed-size window laid out like SBot: a menu bar (Settings, Lists, Help), HP, MP and EXP bars with the bot status beside them, three wide buttons (Start / stop, Return & hunt, Stop all), the tabs down the left, and your session numbers, supplies and **Start training / Stop training** always on the right. The tabs are Settings, Skills, Items/Storage, Training place, Party/Autores, Player buffing, Auto alchemy and Extra, then Map, Wardrobe and Setup. They hold the same settings as the compact and wide pages, regrouped under SBot's headings, so a change made in one window shows in the others. SBot tabs for things the bot cannot do yet (Chat, Union Party, Auto quest, Auto Stall, Other players, Alarms) are not shown. **Compact** brings the small window back; a narrow screen always shows the compact window.
+
 ## Minimised panel
 
 The **×** at the top right of the panel minimises it to a small icon, so it stays out of the way while the bot keeps running. Its dot shows the state: green while hunting, yellow during a town trip, walk back, alchemy or reconnect, and red when stopped, dead or in error. Hover the icon for the current status, HP and MP. It glows when something needs you (a warning, a SoX pickup or a death) until you hover it or open the panel. Drag it anywhere; it keeps its spot and stays minimised after a reload. The panel itself also reopens where you last dragged it. Click it or press **F7** to bring the panel back.

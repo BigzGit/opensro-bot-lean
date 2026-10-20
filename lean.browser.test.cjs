@@ -540,6 +540,61 @@ const server = http.createServer((req, res) => {
     await page.getByRole('button', { name: 'Compact', exact: true }).click();
     assert.equal(Math.round((await host.boundingBox()).width), Math.round(compactWidth));
     assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('sroLean:ui')).wide), false);
+    // Classic window: an SBot-style frame and tab order; the same settings as the compact pages; remembered; compact on narrow screens.
+    await page.getByRole('button', { name: 'Classic', exact: true }).click();
+    assert.equal(Math.round((await host.boundingBox()).width), 840, 'the classic window is 840 px wide');
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('sroLean:ui')).classic), true);
+    const classicTabs = await page.evaluate(() => [...document.getElementById('sro-bot-lean').shadowRoot.querySelectorAll('nav button')].map(b => b.textContent));
+    assert.deepEqual(classicTabs, ['Settings', 'Skills', 'Items/Storage', 'Training place', 'Party/Autores', 'Player buffing', 'Auto alchemy', 'Extra', 'Map', 'Wardrobe', 'Setup']);
+    for (const name of ['Start / stop · F8', 'Return & hunt', 'Stop all', 'Start training', 'Stop training', 'Save settings', 'Hide client']) {
+      assert.equal(await page.getByRole('button', { name, exact: true }).isVisible(), true, name + ' is in the classic frame');
+    }
+    assert.equal(await page.locator('.menubar').isVisible(), true);
+    assert.equal(await page.locator('.status').isVisible(), false, 'the header status replaces the text status');
+    assert.equal(await page.locator('.logbox').isVisible(), false);
+    assert.equal(await page.getByLabel('Status: Hunting spot', { exact: true }).isVisible(), true);
+    assert.match(await page.getByLabel('Session: Kills', { exact: true }).innerText(), /^[\d,]+$/);
+    const frameBoxes = () => page.evaluate(() => ['.menubar', '.strip', '.controls', 'nav', '.pane', '.side'].map(selector => {
+      const r = document.getElementById('sro-bot-lean').shadowRoot.querySelector(selector).getBoundingClientRect();
+      return [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)];
+    }));
+    const frameAtStart = await frameBoxes();
+    for (const name of classicTabs) {
+      await page.locator('nav').getByRole('button', { name, exact: true }).click();
+      assert.equal(await page.locator('nav').getByRole('button', { name, exact: true }).getAttribute('aria-selected'), 'true');
+      const text = await page.evaluate(() => document.getElementById('sro-bot-lean').shadowRoot.querySelector('.pane').innerText.trim());
+      assert.ok(text.length > 20, 'the ' + name + ' tab has content');
+      assert.deepEqual(await frameBoxes(), frameAtStart, 'the frame does not move on the ' + name + ' tab');
+      if (['Settings', 'Skills', 'Training place', 'Party/Autores', 'Extra'].includes(name)) await page.screenshot({ path: __dirname + '/lean-classic-' + name.toLowerCase().replace(/[^a-z]+/g, '-') + '.png' });
+    }
+    // Headings use SBot's wording, and the pane scrolls on its own while the frame stays.
+    await page.locator('nav').getByRole('button', { name: 'Settings', exact: true }).click();
+    for (const heading of ['Autopotion settings', 'Buy settings', 'Back town settings', 'Pick settings', 'Attack preferences', 'Berserk settings']) {
+      assert.equal(await page.locator('legend', { hasText: heading }).count() > 0, true, heading);
+    }
+    assert.ok(await page.evaluate(() => { const p = document.getElementById('sro-bot-lean').shadowRoot.querySelector('.pane'); p.scrollTop = 400; return p.scrollTop > 0 && p.scrollHeight > p.clientHeight; }), 'the pane scrolls');
+    assert.deepEqual(await frameBoxes(), frameAtStart, 'scrolling the pane does not move the frame');
+    // One source of truth: a setting changed in the classic window is the same setting in the compact pages.
+    const hpBefore = await page.evaluate(() => SROLean.settings.profile.potion.hp.on);
+    await page.getByLabel('Use HP', { exact: true }).setChecked(!hpBefore);
+    assert.equal(await page.evaluate(() => SROLean.settings.profile.potion.hp.on), !hpBefore);
+    // Menus open the existing dialogs and pages.
+    await page.getByRole('button', { name: 'Lists', exact: true }).click();
+    await page.getByRole('button', { name: 'Item rules', exact: true }).click();
+    assert.equal(await page.locator('nav').getByRole('button', { name: 'Items/Storage', exact: true }).getAttribute('aria-selected'), 'true');
+    assert.equal(await page.locator('.menu').count(), 0, 'a menu closes after a choice');
+    // Remembered across a re-mount; a narrow screen always gets the compact window.
+    await page.setViewportSize({ width: 800, height: 1000 });
+    assert.ok((await host.boundingBox()).width < 500);
+    assert.ok((await page.evaluate(() => [...document.getElementById('sro-bot-lean').shadowRoot.querySelectorAll('nav button')].map(b => b.textContent))).includes('Combat'));
+    await page.setViewportSize({ width: 1200, height: 1000 });
+    assert.equal(Math.round((await host.boundingBox()).width), 840);
+    await page.getByRole('button', { name: 'Compact', exact: true }).click();
+    assert.equal(Math.round((await host.boundingBox()).width), Math.round(compactWidth));
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('sroLean:ui')).classic), false);
+    await page.getByRole('button', { name: 'Supplies', exact: true }).click();
+    assert.equal(await page.getByLabel('Use HP', { exact: true }).isChecked(), !hpBefore, 'the compact page shows the setting changed in classic');
+    await page.getByLabel('Use HP', { exact: true }).setChecked(hpBefore);
     // Items page: the catalogue with a rule per item, set by row buttons, the right-click menu and bulk buttons.
     await page.getByRole('button', { name: 'Items', exact: true }).click();
     const itemSummary = page.locator('.item-table').locator('xpath=..').locator('p.muted').first();

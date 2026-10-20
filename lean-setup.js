@@ -24,7 +24,7 @@ const Setup = {
   },
   potions() { return World.items().filter(i => ItemType.isPotion(i.typeFlags)).reduce((n, i) => n + (i.quantity || 0), 0); },
   town() { return this.townPick || Town.detect()?.key || Town.towns[0].key; },
-  open(page, tab) { UI.current = page; if (tab) UI.combatTab = tab; UI.draw(); },
+  open(page, tab) { UI.show(page, tab); },
   // The checklist. `state` is ok, warn (works but could be better) or bad (the bot cannot do its job yet).
   steps() {
     const p = Settings.profile, H = p.hunt, T = Town.cfg(), inWorld = World.inWorld(), gp = World.gp;
@@ -73,7 +73,7 @@ const Setup = {
   choose(id) {
     const preset = SETUP_PRESETS[id], next = ProfileShare.overlay(preset.settings), rows = ProfileShare.changes(Settings.profile, next);
     this.preview = { id, preset, rows, next }; ProfileShare.pending = { preset: preset.settings, next, rows };
-    if (UI.current !== 'Setup') this.open('Setup'); else this.drawPreview();
+    if (!UI.is('Setup')) this.open('Setup'); else this.drawPreview();
   },
   drawPreview() {
     if (!this.previewNote) return;
@@ -97,7 +97,7 @@ const Setup = {
     this.key = this.signature();
   },
   // Rebuilt only when a row's state or text changes, so buttons are not replaced under the pointer.
-  refresh() { if (UI.current === 'Setup' && this.rows && this.signature() !== this.key) this.render(); },
+  refresh() { if (UI.is('Setup') && this.rows && this.signature() !== this.key) this.render(); },
   isNew() { const p = Settings.profile; return !p.hunt.center && !this.skills() && !Store.get('setup:seen', false); },
   draw(parent) {
     this.score = el('p', '', 'sx-score');

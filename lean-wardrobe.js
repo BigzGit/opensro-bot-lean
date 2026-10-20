@@ -56,7 +56,7 @@ const LeanWardrobe = {
     if (this.loading) return this.loading;
     this.loading = WdData.load(force).then(ok => {
       if (ok) { Wardrobe.body = WdData.bodyOf(World.local()?.refObjId); Wardrobe.learn(); Wardrobe.applyNow(); }
-      if (UI.current === 'Wardrobe') UI.draw();
+      if (UI.is('Wardrobe')) UI.draw();
       return ok;
     }).finally(() => { this.loading = null; });
     return this.loading;

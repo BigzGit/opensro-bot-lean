@@ -185,35 +185,29 @@ const UI = {
     const version = this.button(VERSION, () => this.showNotes());
     version.className = 'version'; version.title = 'What’s new: patch notes';
     const name = el('strong', 'nixxane bot '); name.append(version);
-    this.layoutButton = this.button('Wide', () => this.setWide(!this.wide));
+    this.layoutButton = this.button('Wide', () => this.classic ? this.setClassic(false) : this.setWide(!this.wide));
     this.layoutButton.className = 'layout'; this.layoutButton.title = 'Switch between the wide and the compact window';
-    header.append(name, this.layoutButton, discord, this.updateButton, fold);
+    this.classicButton = this.button('Classic', () => this.setClassic(true));
+    this.classicButton.className = 'layout'; this.classicButton.title = 'Switch to the classic window: tabs and layout after SBot';
+    header.append(name, this.layoutButton, this.classicButton, discord, this.updateButton, fold);
     this.body = el('div', null, 'body'); this.status = el('div', 'Waiting for game…', 'status'); this.status.setAttribute('role', 'status');
     this.updateNote = el('div', '', 'update-note'); this.updateNote.hidden = true;
     Updates.render();
     const controls = this.row(this.button('Start / stop · F8', () => toggleBot()), this.button('Return & hunt', () => WalkBack.start(true)), this.button('Stop all', () => stopAll()), this.button('Session', () => this.showSession()));
     controls.classList.add('controls');
     this.nav = el('nav'); this.nav.setAttribute('aria-label', 'Bot settings');
-    // Page icons are the game's own action-bar icons; they show only in the wide window's page list.
-    const navIcons = { Items: 'action\\cos_cmd_inventory', Party: 'action\\icon_cha_party', Combat: 'action\\icon_cha_auto_attack', Loot: 'action\\icon_cha_autoget', Supplies: 'action\\icon_cha_recovery', Town: 'item\\etc\\mall_return_scroll',
-      Alchemy: 'action\\icon_cha_alchemy', Wardrobe: 'action\\icon_cha_shop', Settings: 'action\\icon_cha_helper', Setup: 'action\\icon_cha_camp' };
-    for (const name of ['Setup', 'Map', 'Combat', 'Party', 'Loot', 'Items', 'Supplies', 'Town', 'Alchemy', 'Wardrobe', 'Settings']) {
-      const tab = this.button(name, () => { this.current = name; this.draw(); });
-      if (name === 'Map') this.paintPath(tab, MAP_ART + 'interface/minimap/mm_map_button.png');
-      else Icons.paint(tab, navIcons[name] + '.ddj');
-      this.nav.append(tab);
-    }
+    this.buildNav();
     this.pane = el('div', null, 'pane'); this.feedback = el('div', null, 'feedback'); this.feedback.setAttribute('role', 'status');
     this.waitNote = el('div', '', 'waiting'); this.waitNote.setAttribute('role', 'status');
-    this.body.append(this.updateNote, this.makeStrip(), this.status, this.waitNote, controls, this.nav, this.pane, this.makeSide(), this.feedback, this.makeLog());
+    this.body.append(this.makeMenubar(), this.updateNote, this.makeStrip(), this.status, this.waitNote, controls, this.nav, this.pane, this.makeSide(), this.feedback, this.makeLog());
     for (const corner of ['lu', 'mu', 'ru', 'ls', 'rs', 'ld', 'md', 'rd']) panel.append(el('div', null, 'frame ' + corner));
     panel.append(header, this.body); this.root.append(style, panel, this.makeOrb());
     this.panel = panel;
     this.tip = el('div', null, 'skill-tip'); this.tip.hidden = true; this.root.append(this.tip);
     // The panel's spot is remembered across reloads (global, like the minimised icon's).
     this.dragBy(header, host, () => { if (host.style.left) this.uiPrefs({ panel: { x: host.offsetLeft, y: host.offsetTop } }); });
-    W.addEventListener('resize', () => { this.fitWindow(this.reportBox); this.fitWindow(this.notesBox); this.fitWindow(this.sessionBox); this.fitWindow(this.activityExportBox); if (this.minimised) this.placeOrb(host.offsetLeft, host.offsetTop); else if (host.style.left) this.fitWindow(host); });
-    this.setWide(!!this.uiPrefs().wide, false);
+    W.addEventListener('resize', () => { this.applyClassic(); this.fitWindow(this.reportBox); this.fitWindow(this.notesBox); this.fitWindow(this.sessionBox); this.fitWindow(this.activityExportBox); if (this.minimised) this.placeOrb(host.offsetLeft, host.offsetTop); else if (host.style.left) this.fitWindow(host); });
+    this.setWide(!!this.uiPrefs().wide && !this.uiPrefs().classic, false); this.applyClassic();
     this.draw(); this.update();
     this.restorePanel();
     if (this.uiPrefs().minimised) this.minimise(true);
@@ -252,6 +246,7 @@ const UI = {
   // Wide window: status strip on top, page list on the left, session numbers on the right, activity log below.
   // The pages themselves are the same as in the compact window. A global choice, kept with the window position.
   setWide(on, save = true) {
+    if (on && this.uiPrefs().classic) { this.uiPrefs({ classic: false }); this.applyClassic(); }
     this.wide = on;
     this.root.host.classList.toggle('wide', on);
     this.layoutButton.textContent = on ? 'Compact' : 'Wide';
@@ -277,7 +272,12 @@ const UI = {
     }
     this.stripState = el('div', null, 'state'); this.stripLabel = el('strong'); this.stripReason = el('span');
     this.stripState.append(el('i', null, 'state-dot'), this.stripLabel, this.stripReason);
-    strip.append(who, bars, this.stripState);
+    this.cstat = el('div', null, 'cstat classic-only'); this.cstatFields = {};
+    for (const [key, label] of [['bot', 'Bot status:'], ['mode', 'Mode:'], ['game', 'Game:'], ['spot', 'Hunting spot:']]) {
+      const value = el('b'); value.setAttribute('aria-label', 'Status: ' + label.replace(':', ''));
+      const row = el('div'); row.append(el('span', label), value); this.cstat.append(row); this.cstatFields[key] = value;
+    }
+    strip.append(who, bars, this.stripState, this.cstat);
     return strip;
   },
   makeSide() {
@@ -290,10 +290,15 @@ const UI = {
     for (const [key, label] of [['hp', 'HP potions'], ['mp', 'MP potions'], ['bag', 'Free bag slots'], ['pet', 'Pet bag'], ['spot', 'Hunting spot']])
       this.sideFields[key] = this.readout(supplies, label, 'Supplies');
     side.append(session, supplies);
+    const actions = el('div', null, 'side-actions classic-only');
+    actions.append(this.button('Save settings', () => { Settings.saveProfile(); this.toast('Settings saved.'); }),
+      this.button('Session log', () => this.showSession(true)), this.button('Hide client', () => this.minimise(true)),
+      this.button('Start training', () => { if (!Hunt.running) toggleBot(); }), this.button('Stop training', () => { if (Hunt.running) toggleBot(); }));
+    side.append(actions);
     return side;
   },
   updateWide() {
-    if (!this.wide || !this.bars || this.minimised) return;
+    if ((!this.wide && !this.classic) || !this.bars || this.minimised) return;
     const me = World.me(), p = World.gp?.progression || {}, live = World.inWorld();
     const level = p.level, required = Stats.integer(Stats.levels?.[level]?.expRequired), xp = Stats.integer(p.experience);
     const xpPct = required && xp !== null ? Number(xp * 10000n / required) / 100 : null;
@@ -310,6 +315,13 @@ const UI = {
     const state = this.botState();
     this.stripState.dataset.state = state.key; this.stripLabel.textContent = state.label;
     this.stripReason.textContent = state.note || (Hunt.running ? `Mode: ${Controller.mode}` : 'Press F8 to start');
+    if (this.classic) {
+      const spot = Settings.profile.hunt.center, away = spot && live ? dist2D(World.pose(), spot) : Infinity;
+      this.cstatFields.bot.textContent = state.label;
+      this.cstatFields.mode.textContent = Hunt.running ? String(Controller.mode) : 'idle';
+      this.cstatFields.game.textContent = live ? 'in game' : World.phase || 'waiting';
+      this.cstatFields.spot.textContent = Number.isFinite(away) ? Math.round(away / 10) + ' m away' : spot ? 'another region' : 'not saved';
+    }
     const s = Stats.display();
     for (const key of ['time', 'rate', 'xp', 'gold', 'kills', 'deaths', 'sox', 'items', 'potions']) this.sideFields[key].textContent = s[key];
     const pet = live ? Loot.pet() : null, center = Settings.profile.hunt.center, distance = center && live ? dist2D(World.pose(), center) : Infinity;
@@ -498,6 +510,7 @@ const UI = {
   },
   draw() {
     if (!this.pane) return;
+    if (this.classic) return this.drawClassic();
     if (this.tip) this.tip.hidden = true;
     this.lastSkillKey = this.skillKey();
     // Rebuilding the pane resets scrolling; keep the position when redrawing the same view.
@@ -541,6 +554,133 @@ const UI = {
     this.balance();
     this.update();
     this.pane.scrollTop = scroll;
+  },
+  // ---- Classic layout: an SBot-style frame and tab order (opt-in, screens at least 900 px wide) ----
+  // Each tab is a list of the page sections above (title = the heading it gets here); a tab only exists when we have
+  // the feature, so there is no Chat, Union Party, Quest, Stall or Alarms tab yet.
+  classicTabs() {
+    return [
+      { name: 'Settings', icon: 'action\\icon_cha_helper', pages: ['Supplies', 'Loot', 'Town', 'Combat', 'Settings'], sections: [
+        ['suppliesPotions', 'Autopotion settings'], ['suppliesRestock', 'Buy settings'], ['townWhen', 'Back town settings'],
+        ['lootCollection', 'Pick settings'], ['lootWho', 'Who picks up what'], ['combatMonsters', 'Attack preferences'],
+        ['combatBerserk', 'Berserk settings'], ['settingsBehaviour', 'Attack behaviour / Protection'], ['settingsObstacles'], ['settingsAntiStuck']] },
+      { name: 'Skills', icon: 'action\\icon_cha_auto_attack', pages: ['Combat'], sections: [
+        ['combatRotation'], ['combatOptions'], ['combatBuffs'], ['combatImbue']] },
+      { name: 'Items/Storage', icon: 'action\\cos_cmd_inventory', pages: ['Items', 'Town'], draw() {
+        this.drawItems(); this.sections('townTrip', 'townCycle', 'townAmmo'); } },
+      { name: 'Training place', icon: 'action\\icon_cha_camp', pages: ['Combat', 'Party'], sections: [['combatHuntArea', 'Training place'], ['partyTrace']] },
+      { name: 'Party/Autores', icon: 'action\\icon_cha_party', pages: ['Party'], sections: [
+        ['partyMembers', 'Current party'], ['partyParty', 'Party settings'], ['partyHeal']] },
+      { name: 'Player buffing', icon: 'action\\icon_cha_party', pages: ['Party'], sections: [['partyBuffs', 'Player buffing']] },
+      { name: 'Auto alchemy', icon: 'action\\icon_cha_alchemy', pages: ['Alchemy'], draw() { Alchemy.draw(); } },
+      { name: 'Extra', icon: 'action\\icon_cha_helper', pages: ['Settings'], sections: [
+        ['settingsStats'], ['settingsMastery'], ['settingsStatPoints'], ['settingsProfiles'], ['settingsShare'], ['settingsReports'], ['settingsActivity']] },
+      { name: 'Map', pages: ['Map'], draw() { LeanMap.draw(this.pane); } },
+      { name: 'Wardrobe', icon: 'action\\icon_cha_shop', pages: ['Wardrobe'], draw() { LeanWardrobe.draw(this.pane); } },
+      { name: 'Setup', icon: 'action\\icon_cha_camp', pages: ['Setup'], draw() { Setup.draw(this.pane); } },
+    ];
+  },
+  // The classic tab that holds a compact page (so Setup and the checklist can open the right place).
+  tabFor(page, combatTab) {
+    if (page === 'Combat') return combatTab === 'Hunt area' ? 'Training place' : 'Skills';
+    return { Loot: 'Settings', Supplies: 'Settings', Town: 'Items/Storage', Party: 'Party/Autores', Items: 'Items/Storage', Alchemy: 'Auto alchemy', Settings: 'Extra' }[page] || page;
+  },
+  // Is this compact page (and optional Combat sub-tab) what the window shows right now, in either layout?
+  is(page, tab) {
+    if (this.classic) return !!this.classicTabs().find(t => t.name === this.ctab)?.pages.includes(page);
+    return this.current === page && (!tab || this.combatTab === tab);
+  },
+  // Open a page (and Combat sub-tab) in whichever layout is active.
+  show(page, tab) {
+    this.current = page; if (tab) this.combatTab = tab;
+    if (this.classic) this.ctab = this.tabFor(page, this.combatTab);
+    this.draw();
+  },
+  setClassic(on) {
+    this.uiPrefs(on ? { classic: true, wide: false } : { classic: false });
+    if (on) this.setWide(false, false);
+    this.applyClassic();
+  },
+  applyClassic() {
+    if (!this.root || !this.nav) return;
+    const host = this.root.host, was = !!this.classic, on = !!this.uiPrefs().classic && W.innerWidth >= 900;
+    this.classic = on;
+    host.classList.toggle('classic', on);
+    this.classicButton.hidden = on;
+    this.layoutButton.textContent = on || this.wide ? 'Compact' : 'Wide';
+    if (on) { host.classList.remove('wide'); this.wide = false; Stats.loadLevels(); if (!was) this.ctab = this.tabFor(this.current, this.combatTab); }
+    else if (was && this.uiPrefs().wide) this.setWide(true, false);
+    if (on !== was) { this.buildNav(); if (this.pane) this.draw(); }
+    if (!this.minimised && host.style.left) this.fitWindow(host);
+  },
+  buildNav() {
+    this.nav.replaceChildren();
+    const icons = { Items: 'action\\cos_cmd_inventory', Party: 'action\\icon_cha_party', Combat: 'action\\icon_cha_auto_attack', Loot: 'action\\icon_cha_autoget', Supplies: 'action\\icon_cha_recovery', Town: 'item\\etc\\mall_return_scroll',
+      Alchemy: 'action\\icon_cha_alchemy', Wardrobe: 'action\\icon_cha_shop', Settings: 'action\\icon_cha_helper', Setup: 'action\\icon_cha_camp' };
+    const entries = this.classic ? this.classicTabs().map(t => ({ name: t.name, icon: t.icon, open: () => { this.ctab = t.name; this.draw(); } }))
+      : ['Setup', 'Map', 'Combat', 'Party', 'Loot', 'Items', 'Supplies', 'Town', 'Alchemy', 'Wardrobe', 'Settings'].map(name => ({ name, icon: icons[name], open: () => { this.current = name; this.draw(); } }));
+    // Page icons are the game's own action-bar icons; they show only in the wide and classic windows' page lists.
+    for (const entry of entries) {
+      const tab = this.button(entry.name, entry.open);
+      tab.dataset.tab = entry.name;
+      if (entry.name === 'Map') this.paintPath(tab, MAP_ART + 'interface/minimap/mm_map_button.png');
+      else if (entry.icon) Icons.paint(tab, entry.icon + '.ddj');
+      this.nav.append(tab);
+    }
+  },
+  drawClassic() {
+    if (this.tip) this.tip.hidden = true;
+    this.lastSkillKey = this.skillKey();
+    const tabs = this.classicTabs();
+    if (!tabs.some(t => t.name === this.ctab)) this.ctab = tabs[0].name;
+    const view = ['classic', this.ctab, this.rotationClass].join('|'), scroll = view === this.drawnView ? this.pane.scrollTop : 0;
+    this.drawnView = view;
+    this.refreshers = []; this.pane.replaceChildren();
+    [...this.nav.children].forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === this.ctab)));
+    const tab = tabs.find(t => t.name === this.ctab);
+    if (tab.draw) tab.draw.call(this);
+    else for (const [name, title] of tab.sections) {
+      const first = this.pane.children.length;
+      this['section_' + name](this.pane);
+      const legend = title && this.pane.children[first]?.querySelector?.(':scope > legend');
+      if (legend) legend.textContent = title;
+    }
+    this.update();
+    this.pane.scrollTop = scroll;
+  },
+  exportBackup() {
+    const url = URL.createObjectURL(new Blob([JSON.stringify({ app: 'sro-bot-lean', version: VERSION, profile: Settings.profile }, null, 2)], { type: 'application/json' }));
+    const link = el('a'); link.href = url; link.download = 'nixxane-bot-settings.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  },
+  // The classic window's menu bar: shortcuts to things that already exist elsewhere in the panel.
+  makeMenubar() {
+    const bar = el('div', null, 'menubar classic-only');
+    const menus = [
+      ['Settings', [['Export full backup', () => this.exportBackup()], ['Profiles and sharing', () => this.show('Settings')], ['Send bug report', () => Reports.open()]]],
+      ['Lists', [['Item rules', () => this.show('Items')], ['Wardrobe', () => this.show('Wardrobe')], ['Map', () => this.show('Map')]]],
+      ['Help', [['Patch notes', () => this.showNotes()], ['Setup checklist', () => this.show('Setup')], ['Session totals and log', () => this.showSession(true)], ['Discord', () => W.open(DISCORD_URL, '_blank', 'noopener,noreferrer')]]],
+    ];
+    for (const [name, items] of menus) {
+      const title = this.button(name, () => this.openMenu(title, items));
+      title.className = 'menu-title'; bar.append(title);
+    }
+    return bar;
+  },
+  openMenu(anchor, items) {
+    this.closeMenu();
+    const menu = el('div', null, 'menu');
+    for (const [label, action] of items) menu.append(this.button(label, () => { this.closeMenu(); action(); }));
+    const bar = anchor.parentElement;
+    menu.style.left = anchor.offsetLeft + 'px';
+    bar.append(menu);
+    this.menu = menu;
+    const away = event => { if (!event.composedPath().includes(menu) && event.target !== anchor) this.closeMenu(); };
+    this.menuAway = away;
+    W.addEventListener('pointerdown', away, true);
+  },
+  closeMenu() {
+    this.menu?.remove(); this.menu = null;
+    if (this.menuAway) { W.removeEventListener('pointerdown', this.menuAway, true); this.menuAway = null; }
   },
   // A page is a list of sections; each section appends its own boxes to the given parent, so other layouts can reuse them.
   sections(...names) { for (const name of names) this['section_' + name](this.pane); },
@@ -889,10 +1029,7 @@ const UI = {
   section_settingsProfiles(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       host.append(this.group('Profiles', el('p', 'Settings are saved separately for each character.', 'muted'),
-        this.button('Export full backup (with my positions)', () => {
-          const url = URL.createObjectURL(new Blob([JSON.stringify({ app: 'sro-bot-lean', version: VERSION, profile: Settings.profile }, null, 2)], { type: 'application/json' }));
-          const link = el('a'); link.href = url; link.download = 'nixxane-bot-settings.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-        })));
+        this.button('Export full backup (with my positions)', () => this.exportBackup())));
   },
   section_settingsShare(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
@@ -935,7 +1072,7 @@ const UI = {
   drawItems() {
     if (!Items.data.size) {
       this.pane.append(this.group('Items', el('div', 'Loading the game\u2019s item list…', 'empty')));
-      Items.ready().then(() => { if (this.current === 'Items') this.draw(); }, () => { if (this.current === 'Items') this.toast('The item list could not be loaded; try again in a moment.', 'warn'); });
+      Items.ready().then(() => { if (this.is('Items')) this.draw(); }, () => { if (this.is('Items')) this.toast('The item list could not be loaded; try again in a moment.', 'warn'); });
       return;
     }
     const f = this.itemFilter, refresh = () => { f.page = 0; renderTable(); };
@@ -1042,27 +1179,27 @@ const UI = {
   update() {
     Stats.sample(); Stats.render();
     Alchemy.refresh(); Setup.refresh();
-    if (this.current === 'Combat' && this.combatTab === 'Buffs & imbue' && BuffGear.note) BuffGear.note.textContent = BuffGear.status();
+    if (this.is('Combat', 'Buffs & imbue') && BuffGear.note) BuffGear.note.textContent = BuffGear.status();
     Reports.render();
     const diagnosticState = Diagnostics.sample();
     if (this.waitNote) this.waitNote.textContent = Diagnostics.lines(diagnosticState);
     this.updateOrb(); this.updateWide();
     if (this.townNote) this.townNote.textContent = Town.status();
-    if (this.current === 'Settings' && AutoMastery.note) AutoMastery.note.textContent = AutoMastery.status();
-    if (this.current === 'Settings' && StatPoints.note) StatPoints.note.textContent = StatPoints.status();
-    if (this.current === 'Settings' && this.stuckNote) this.stuckNote.textContent = AntiStuck.status();
-    if (this.current === 'Party' && Trace.note) Trace.note.textContent = Trace.status();
-    if (this.current === 'Party' && this.partyNote) {
+    if (this.is('Settings') && AutoMastery.note) AutoMastery.note.textContent = AutoMastery.status();
+    if (this.is('Settings') && StatPoints.note) StatPoints.note.textContent = StatPoints.status();
+    if (this.stuckNote) this.stuckNote.textContent = AntiStuck.status();
+    if (this.is('Party') && Trace.note) Trace.note.textContent = Trace.status();
+    if (this.is('Party') && this.partyNote) {
       const notes = [Settings.profile.party.autoRecruit ? Party.message : 'Auto-recruit off.'];
       if (Settings.profile.party.autoRes) notes.push(Resurrect.message);
       this.partyNote.textContent = notes.join(' ');
     }
     if (!this.status) return;
-    if (this.current === 'Supplies' && this.petPotionNote) this.petPotionNote.textContent = PetPotion.message;
-    if (this.current === 'Supplies' && this.speedNote) this.speedNote.textContent = SpeedScroll.message;
-    if (this.current === 'Loot' && this.petNote) { this.petNote.hidden = !Loot.petMode(); this.petNote.textContent = Loot.petStatus(); }
+    if (this.is('Supplies') && this.petPotionNote) this.petPotionNote.textContent = PetPotion.message;
+    if (this.is('Supplies') && this.speedNote) this.speedNote.textContent = SpeedScroll.message;
+    if (this.is('Loot') && this.petNote) { this.petNote.hidden = !Loot.petMode(); this.petNote.textContent = Loot.petStatus(); }
     Learned.repair();
-    if (this.current === 'Combat' && this.lastSkillKey !== this.skillKey()) { this.draw(); return; }
+    if (this.is('Combat') && this.lastSkillKey !== this.skillKey()) { this.draw(); return; }
     const me = World.me(), center = Settings.profile.hunt.center;
     const distance = center ? dist2D(World.pose(), center) : Infinity;
     this.status.textContent = `${World.charName || 'No character'} · ${World.inWorld() ? Controller.mode : World.phase}\nHP ${Math.round(me.hpPct)}% · MP ${Math.round(me.mpPct)}% · Potions ${Potion.count('hp')}/${Potion.count('mp')} · Pickups ${Stats.values.loot}\nHunting spot: ${Number.isFinite(distance) ? Math.round(distance / 10) + ' m away' : center ? 'another region' : 'not saved'}${Restock.recording ? '\nRecording route: ' + Restock.draft.route.length + ' points' : ''}`;

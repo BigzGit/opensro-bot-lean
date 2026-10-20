@@ -159,7 +159,7 @@ const Stats = {
     parent.append(box); this.render();
   },
   render() {
-    if (UI.current !== 'Settings') return;
+    if (!UI.is('Settings')) return;
     const data = this.display();
     for (const [key, value] of Object.entries(data)) if (this.fields[key]) this.fields[key].textContent = value;
   },

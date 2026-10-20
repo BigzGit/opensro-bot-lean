@@ -416,7 +416,7 @@ const Alchemy = {
     }
   },
   refresh() {
-    if (UI.current !== 'Alchemy' || !UI.alchemyNote) return;
+    if (!UI.is('Alchemy') || !UI.alchemyNote) return;
     const item = this.item(), r = this.result, c = this.cfg();
     const fmt = n => !Number.isFinite(n) ? 'a huge number of' : n < 100 ? n.toFixed(n < 10 ? 1 : 0) : n < 1e6 ? Math.round(n).toLocaleString('en-US') : n.toExponential(1);
     const attributes = item && this.gear(item) ? '\nStones on the item: ' + Object.entries(STONES).map(([kind, s]) => {
