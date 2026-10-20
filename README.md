@@ -143,6 +143,8 @@ If the game shows **Your session ended while the connection was gone. Please log
 
 If the character was killed while the connection was gone, the bot starts hunting again once it is back, so the usual death handling revives it and walks it back to the hunting spot (subject to your **On death** setting).
 
+An application to the main's party that has not been answered after 30 seconds is sent again, so several alt accounts can join one main.
+
 ## Returning after death
 
 Leave **Revive in town and reverse to last scroll point** enabled under **Town → Go to town when…**. With the town cycle enabled, the bot revives, completes town services and reverses back to hunt. Hunting resumes within 30 metres of the last scroll point, or within your saved hunting area after death. Carry reverse scrolls.

@@ -878,6 +878,14 @@ test('alt account applies to the main account listing and waits for the answer',
   f.advance(5000); f.Controller.tick(); assert.equal(f.commands.length, 1);
 });
 
+test('alt account applies again when the main never answered its application', () => {
+  const f = joinMainFixture({ rows: [{ id: 7, name: 'MainChar', members: 2, type: 1, min: 1, max: 90 }] });
+  f.Controller.tick(); assert.equal(f.commands.length, 1);
+  f.World.gp.partyMatching = { ...f.World.gp.partyMatching, joining: { id: 7 } };
+  f.advance(10000); f.Controller.tick(); assert.equal(f.commands.length, 1, 'still waiting for the answer');
+  f.advance(25000); f.Controller.tick(); assert.deepEqual(jm(f.commands[1]), { kind: 'party-match-join', id: 7 });
+});
+
 test('alt account pages the board until it finds the main, then rests', () => {
   const f = joinMainFixture({ pages: 2, rows: [{ id: 3, name: 'Other', members: 1, type: 0, min: 1, max: 90 }] });
   f.Controller.tick(); assert.deepEqual(jm(f.commands[0]), { kind: 'party-match-page', page: 1 });

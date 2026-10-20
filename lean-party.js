@@ -27,7 +27,10 @@ const Party = {
       if (key !== this.joinedKey && Cmd.spaced('social-consent') && Cmd.raw({ kind: 'social-consent', accept: true }, 'Accept party invitation from ' + c.mainName.trim())) this.joinedKey = key;
       this.joinMessage = 'Accepting the invitation from ' + c.mainName.trim() + '.'; return;
     }
-    if (matching.pending || matching.joining) { this.joinMessage = 'Waiting for the party board…'; return; }
+    // An application the main never answered (it handles one at a time, so a second alt can be dropped) must not wait
+    // forever: after 30 seconds the application is made again.
+    const stale = this.lastJoinAt > -Infinity && now() - this.lastJoinAt > 30000;
+    if ((matching.pending || matching.joining) && !stale) { this.joinMessage = 'Waiting for the party board…'; return; }
     const level = World.gp?.progression?.level, row = (matching.rows || []).find(r => named(r) === main);
     if (row) {
       const full = row.members >= ((row.type & 1) ? 8 : 4);
