@@ -242,11 +242,18 @@ const Town = {
   ruled(item) { const act = ItemRules.get(item.refObjId)?.act; return act && act !== 'store' ? act : ''; },
   stone(item) { return !this.ruled(item) && this.disposable(item) && ['magicStones', 'attrStones'].includes(Loot.category(item.typeFlags)); },
   eligible(item) { return !this.ruled(item) && (this.depositItem(item) || this.disposable(item) && this.kept.includes(Loot.category(item.typeFlags))); },
-  // Pet loot only (the character bag is never sold). A Sell rule sells it; keep, store and drop rules never do.
+  // Pet loot, and the character bag when "Sell items from the character bag" is on. A Sell rule sells it; keep, store and drop rules never do.
   sellable(item) {
     const act = ItemRules.get(item.refObjId)?.act;
     if (act) return act === 'sell';
     return this.disposable(item) && !this.kept.includes(Loot.category(item.typeFlags));
+  },
+  // From the bag, never what the trip itself needs, the weapon chosen for alchemy or a saved buff set's gear.
+  sellableBag(item) {
+    if (this.needed(item) || Alchemy.selected && Alchemy.selected.slot === item.slot) return false;
+    const key = BuffGear.key(item);
+    if (BuffGear.cfg().buffSets.some(s => s.weapon === key || s.shield === key)) return false;
+    return this.sellable(item);
   },
   autoRevive() { return this.cfg().enabled && this.cfg().revive; },
   reason() {
@@ -470,14 +477,20 @@ const Town = {
     if (!Restock.activeShop() || gp.shop.npc !== this.npc('smith')?.gid || gp.shop.error) return this.fail(gp.shop?.error || 'Weapon merchant selection changed.');
     if (t.petRef && (!pet || pet.rec.refObjId !== t.petRef)) return this.fail('Pickup pet is missing or changed.');
     if (t.salePetGid && pet?.rec.gid !== t.salePetGid) return this.fail('Pickup pet changed during selling.');
-    if (!this.pendingDone(p => !pet.rec.inventory.some(i => i.slot === p.source && i.refObjId === p.ref)) || !this.trip || gp.inventoryPending) return;
-    const item = pet?.rec.inventory.find(i => this.sellable(i));
+    if (!this.pendingDone(p => p.bag ? !World.items().some(i => i.slot === p.source && i.refObjId === p.ref) : !pet.rec.inventory.some(i => i.slot === p.source && i.refObjId === p.ref)) || !this.trip || gp.inventoryPending) return;
+    const petItem = pet?.rec.inventory.find(i => this.sellable(i));
+    const bagItem = !petItem && this.cfg().sellBag ? World.items().find(i => this.sellableBag(i)) : null;
+    const item = petItem || bagItem;
     if (!item) {
       if (this.cfg().petFull && pet && pet.rec.status - pet.rec.inventory.length <= this.cfg().petFree) return this.fail('Protected pet items still fill the bag.');
       this.enter(this.ammoSupplies().length ? 'ammo' : 'repair'); return;
     }
     const quantity = item.quantity ?? 1;
-    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 65535) return this.fail('Invalid pet item sale quantity.');
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 65535) return this.fail('Invalid item sale quantity.');
+    if (bagItem) {
+      if (Cmd.raw({ kind: 'shop-sell', slot: item.slot, quantity }, 'Town: sell bag item at weapon merchant')) t.pending = { bag: true, source: item.slot, ref: item.refObjId, quantity, at: now() };
+      return;
+    }
     if (Cmd.raw({ kind: 'cos-shop-sell', gid: pet.rec.gid, slot: item.slot, quantity }, 'Town: sell pet loot at weapon merchant')) {
       t.salePetGid = pet.rec.gid;
       t.pending = { source: item.slot, ref: item.refObjId, quantity, at: now() };

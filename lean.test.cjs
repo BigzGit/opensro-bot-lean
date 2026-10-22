@@ -2821,6 +2821,26 @@ test('town sells ordinary pet equipment while leaving valuable equipment in the 
   assert.equal(f.commands.filter(c => c.kind === 'cos-shop-sell').length, 1);
 });
 
+test('town sells unprotected character bag items only when the bag switch is on', () => {
+  const ware = { slot: 30, refObjId: 1100, typeFlags: 44 | (6 << 7), quantity: 1, name: 'Sword', plus: 0, magic: [], tooltip: { fields: { rarity: 0 } } };
+  const run = on => {
+    const f = townFixture(), gp = f.World.gp; f.Town.cfg().sellBag = on; f.Town.cfg().storeSox = false;
+    f.pet.inventory = []; gp.inventory.push({ ...ware });
+    f.Town.begin(); f.Town.enter('sell'); gp.target = 62; gp.shop = { npc: 62 };
+    return f;
+  };
+  const off = run(false); off.Town.tick();
+  assert.equal(off.commands.some(c => c.kind === 'shop-sell'), false); assert.equal(off.Town.trip.phase, 'repair');
+  const f = run(true), gp = f.World.gp, potions = f.World.items().filter(i => f.Town.needed(i)).length;
+  f.Town.tick(); const sale = f.commands.at(-1); assert.equal(sale.kind, 'shop-sell'); assert.equal(sale.slot, 30); assert.equal(sale.quantity, 1);
+  f.advance(1000); f.Town.tick(); assert.equal(f.commands.filter(c => c.kind === 'shop-sell').length, 1);
+  gp.inventory = gp.inventory.filter(i => i.slot !== 30); f.advance(1000); f.Town.tick();
+  assert.equal(f.Town.trip.phase, 'repair'); assert.equal(f.commands.filter(c => c.kind === 'shop-sell').length, 1);
+  assert.equal(f.World.items().filter(i => f.Town.needed(i)).length, potions);
+  const keep = run(true); keep.Town.cfg().keep = 'sword'; keep.Town.tick();
+  assert.equal(keep.commands.some(c => c.kind === 'shop-sell'), false);
+});
+
 test('town refuses selling at the wrong merchant or after the pet is replaced', () => {
   const f = townFixture(); f.Town.begin(); f.Town.enter('sell');
   f.World.gp.target = 61; f.World.gp.shop = { npc: 61 };
