@@ -341,7 +341,7 @@ const Town = {
     this.trip = { phase: 'recall', at: now(), started: now(), origin: { ...origin }, revival, reverseChoice, why,
       huntArea: revival && !(reverseChoice === TOWN_REVERSE.death && this.deathPoint) && Hunt.cfg().center ? { center: { ...Hunt.cfg().center }, radius: Hunt.cfg().radius } : null,
       manualAt: Manual.lastAt, character: World.charName, petRef: Loot.pet()?.rec.refObjId,
-      config: JSON.stringify(this.cfg()), supplies: this.supplies() };
+      config: JSON.stringify(this.cfg()), supplies: this.supplies(), sellFirst: !!this.cfg().sellBag };
     Hunt.targetGid = Hunt.lootGid = 0;
     // Stop the worker's repeating attack/movement as well as the bot's next tick.
     // Pending inventory work still settles before item-use is admitted below.
@@ -353,9 +353,16 @@ const Town = {
   },
   arrived() {
     this.trip.scrollAttempts = 0; this.trip.scrollRequest = null;
-    if (World.freeBagSlots() < 1) return this.fail('Returned to town; free a character bag slot for storage and refills.');
+    // With bag selling on, the trip sells first, so a full bag can still make room for refills.
+    if (World.freeBagSlots() < 1 && !this.trip.sellFirst) return this.fail('Returned to town; free a character bag slot for storage and refills.');
     if (this.cfg().petFull && this.reason() === 'pickup pet nearly full' && !Loot.pet()?.rec.inventory.some(i => this.disposable(i) || this.eligible(i))) return this.fail('Returned to town; pet is full of protected items. Empty it manually.');
-    this.enter(this.cfg().storage ? 'walk-storage' : 'walk-vendor');
+    this.enter(this.cfg().storage ? 'walk-storage' : this.trip.sellFirst ? 'walk-smith' : 'walk-vendor');
+  },
+  // The merchant to walk to after closing a window: potions come before repair and selling, unless bag selling is on,
+  // which sells and repairs first so a full bag has room to buy.
+  closeNext(phase) {
+    const sellFirst = this.trip?.sellFirst;
+    return { 'close-storage': sellFirst ? 'walk-smith' : 'walk-vendor', 'close-smith': sellFirst ? 'walk-vendor' : 'walk-gate', 'close-vendor': sellFirst ? 'walk-gate' : 'walk-smith' }[phase];
   },
   enter(phase) {
     const t = this.trip;
@@ -479,7 +486,7 @@ const Town = {
     if (t.salePetGid && pet?.rec.gid !== t.salePetGid) return this.fail('Pickup pet changed during selling.');
     if (!this.pendingDone(p => p.bag ? !World.items().some(i => i.slot === p.source && i.refObjId === p.ref) : !pet.rec.inventory.some(i => i.slot === p.source && i.refObjId === p.ref)) || !this.trip || gp.inventoryPending) return;
     const petItem = pet?.rec.inventory.find(i => this.sellable(i));
-    const bagItem = !petItem && this.cfg().sellBag ? World.items().find(i => this.sellableBag(i)) : null;
+    const bagItem = !petItem && t.sellFirst ? World.items().find(i => this.sellableBag(i)) : null;
     const item = petItem || bagItem;
     if (!item) {
       if (this.cfg().petFull && pet && pet.rec.status - pet.rec.inventory.length <= this.cfg().petFree) return this.fail('Protected pet items still fill the bag.');
@@ -669,7 +676,7 @@ const Town = {
     else if (t.phase === 'repair') this.repair();
     else if (t.phase.startsWith('close-')) {
       if (now() - t.at > 15000) this.fail('NPC window did not close.');
-      else this.close({ 'close-storage': 'walk-vendor', 'close-vendor': 'walk-smith', 'close-smith': 'walk-gate' }[t.phase]);
+      else this.close(this.closeNext(t.phase));
     } else if (t.phase === 'reverse') {
       if (t.recovery) {
         this.trip = null;

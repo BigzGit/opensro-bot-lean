@@ -2841,6 +2841,20 @@ test('town sells unprotected character bag items only when the bag switch is on'
   assert.equal(keep.commands.some(c => c.kind === 'shop-sell'), false);
 });
 
+test('with bag selling on, a full bag sells at the repair merchant before potions are bought', () => {
+  const f = townFixture(), gp = f.World.gp; f.Town.cfg().sellBag = true; f.Town.cfg().petFull = false; f.Town.cfg().storage = null;
+  const equip = gp.equipmentSlotCount || 13, held = f.World.items().length;
+  gp.inventorySlotCount = equip + held + 4;
+  for (let n = 0; n < 4; n++) gp.inventory.push({ slot: equip + held + n, refObjId: 3000 + n, typeFlags: 108, quantity: 1, name: 'Junk ' + n });
+  assert.equal(f.World.freeBagSlots(), 0);
+  f.Town.begin(); f.Town.arrived();
+  assert.equal(f.Town.trip.phase, 'walk-smith');
+  for (const [from, to] of [['close-storage', 'walk-smith'], ['close-smith', 'walk-vendor'], ['close-vendor', 'walk-gate']]) assert.equal(f.Town.closeNext(from), to);
+  const off = townFixture(); off.Town.cfg().sellBag = false;
+  off.Town.begin(); assert.equal(off.Town.closeNext('close-storage'), 'walk-vendor'); assert.equal(off.Town.closeNext('close-vendor'), 'walk-smith');
+  assert.equal(off.Town.trip.sellFirst, false);
+});
+
 test('town refuses selling at the wrong merchant or after the pet is replaced', () => {
   const f = townFixture(); f.Town.begin(); f.Town.enter('sell');
   f.World.gp.target = 61; f.World.gp.shop = { npc: 61 };
