@@ -2821,6 +2821,24 @@ test('town sells ordinary pet equipment while leaving valuable equipment in the 
   assert.equal(f.commands.filter(c => c.kind === 'cos-shop-sell').length, 1);
 });
 
+test('town never sells items the game marks unsellable, and skips a refused sale instead of ending the trip', () => {
+  const f = townFixture(), gp = f.World.gp;
+  const ware = (slot, ref, fields) => ({ slot, refObjId: ref, typeFlags: 44 | (6 << 7), quantity: 1, plus: 0, magic: [], tooltip: { fields: { rarity: 0, ...fields } } });
+  const quest = ware(4, 1099, { canSell: 0 }), refused = ware(5, 1100, { canSell: 1 }), other = ware(6, 1101, { canSell: 1 });
+  f.Town.cfg().storeSox = false;
+  assert.equal(f.Town.sellable(quest), false, 'CanSell 0 is never offered');
+  f.ItemRules.set([quest.refObjId], { act: 'sell' }); assert.equal(f.Town.sellable(quest), false, 'not even with a Sell rule');
+  f.pet.status = 20; f.pet.inventory = [quest, refused, other];
+  f.Town.begin(); f.Town.enter('sell'); gp.target = 62; gp.shop = { npc: 62 };
+  f.Town.tick(); assert.equal(f.commands.at(-1).slot, 5);
+  gp.error = 'Inventory rejected: 2'; f.advance(1000); f.Town.tick();
+  assert.equal(f.Town.trip?.phase, 'sell', 'a refused item does not end the trip');
+  assert.equal(f.commands.filter(c => c.kind === 'cos-shop-sell').at(-1).slot, 6, 'the next item is sold');
+  gp.error = null; f.pet.inventory = [quest, refused]; f.advance(1000); f.Town.tick();
+  assert.equal(f.Town.trip.phase, 'repair');
+  assert.equal(f.commands.filter(c => c.kind === 'cos-shop-sell').length, 2, 'the refused item is not offered again');
+});
+
 test('town sells unprotected character bag items only when the bag switch is on', () => {
   const ware = { slot: 30, refObjId: 1100, typeFlags: 44 | (6 << 7), quantity: 1, name: 'Sword', plus: 0, magic: [], tooltip: { fields: { rarity: 0 } } };
   const run = on => {

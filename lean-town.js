@@ -244,6 +244,8 @@ const Town = {
   eligible(item) { return !this.ruled(item) && (this.depositItem(item) || this.disposable(item) && this.kept.includes(Loot.category(item.typeFlags))); },
   // Pet loot, and the character bag when "Sell items from the character bag" is on. A Sell rule sells it; keep, store and drop rules never do.
   sellable(item) {
+    // itemdata CanSell 0 (quest and event items): the merchant refuses the sale with inventory code 2.
+    if (item.tooltip?.fields?.canSell === 0) return false;
     const act = ItemRules.get(item.refObjId)?.act;
     if (act) return act === 'sell';
     return this.disposable(item) && !this.kept.includes(Loot.category(item.typeFlags));
@@ -484,9 +486,19 @@ const Town = {
     if (!Restock.activeShop() || gp.shop.npc !== this.npc('smith')?.gid || gp.shop.error) return this.fail(gp.shop?.error || 'Weapon merchant selection changed.');
     if (t.petRef && (!pet || pet.rec.refObjId !== t.petRef)) return this.fail('Pickup pet is missing or changed.');
     if (t.salePetGid && pet?.rec.gid !== t.salePetGid) return this.fail('Pickup pet changed during selling.');
+    // A refused sale leaves the item where it was. Skip it and sell the rest: one item the merchant will not take
+    // must not end the trip.
+    const p = t.pending;
+    if (p && gp.error && !gp.inventoryPending && now() - p.at >= 500 &&
+        (p.bag ? World.items() : pet?.rec.inventory || []).some(i => i.slot === p.source && i.refObjId === p.ref)) {
+      (t.unsold ||= []).push((p.bag ? 'bag:' : 'pet:') + p.source + ':' + p.ref);
+      Activity.emit({ category: 'town', code: 'sale-refused', level: 'warn', text: 'Town sell: merchant refused an item (' + gp.error + '); skipped.', userText: 'The merchant refused one item; it was kept and selling continued.', outcome: 'refused', operationId: Activity.contexts.town?.id });
+      t.pending = null;
+    }
     if (!this.pendingDone(p => p.bag ? !World.items().some(i => i.slot === p.source && i.refObjId === p.ref) : !pet.rec.inventory.some(i => i.slot === p.source && i.refObjId === p.ref)) || !this.trip || gp.inventoryPending) return;
-    const petItem = pet?.rec.inventory.find(i => this.sellable(i));
-    const bagItem = !petItem && t.sellFirst ? World.items().find(i => this.sellableBag(i)) : null;
+    const unsold = (where, i) => t.unsold?.includes(where + i.slot + ':' + i.refObjId);
+    const petItem = pet?.rec.inventory.find(i => this.sellable(i) && !unsold('pet:', i));
+    const bagItem = !petItem && t.sellFirst ? World.items().find(i => this.sellableBag(i) && !unsold('bag:', i)) : null;
     const item = petItem || bagItem;
     if (!item) {
       if (this.cfg().petFull && pet && pet.rec.status - pet.rec.inventory.length <= this.cfg().petFree) return this.fail('Protected pet items still fill the bag.');
