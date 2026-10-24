@@ -18,7 +18,7 @@ const images = ['ic_attack', 'ic_recovery', 'ic_autoget', 'ic_sit'].map((key, i)
 });
 const media = process.argv[4];
 if (media) for (const name of ['action/icon_cha_auto_attack', 'action/icon_cha_autoget', 'action/icon_cha_recovery', 'action/icon_cha_alchemy', 'action/icon_cha_shop',
-  'action/icon_cha_helper', 'action/icon_cha_party', 'action/icon_cha_camp', 'action/icon_cha_sit', 'item/etc/mall_return_scroll', 'item/etc/mall_warehouse_ticket', 'item/etc/all_potion_03', 'item/etc/mall_repair_hammer',
+  'action/icon_cha_helper', 'action/icon_cha_party', 'action/icon_cha_camp', 'action/icon_cha_sit', 'action/cos_cmd_inventory', 'item/etc/mall_return_scroll', 'item/etc/mall_warehouse_ticket', 'item/etc/all_potion_03', 'item/etc/mall_repair_hammer',
   'item/etc/mall_reverse_return_scroll', '../interface/minimap/mm_map_button']) {
   const raw = fs.readFileSync(path.join(media, 'icon', name + '.png'));
   images.push({ raw, compressed: zlib.gzipSync(raw), path: path.posix.normalize(`/assets/images/Media_extracted/icon/${name}.png`), transport: `/assets/test-icons/real-${images.length}.png.gz` });
@@ -73,7 +73,7 @@ const gameplay = { localGid: 1, target: 0, targetPending: false, inventoryPendin
     await page.addInitScript(v => { try { localStorage.setItem('sroBotLean:v1:seenVersion', JSON.stringify(v)); } catch {} }, version);
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.addScriptTag({ content: script });
-    await page.getByText(/^nixxane bot 1\./).waitFor();
+    await page.getByText(/^NIX 1\./).waitFor();
     await page.evaluate(game => {
       const code = `onmessage = e => { if (e.data.kind === 'fixture') postMessage(e.data.message); };`;
       window.testSim = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })), { name: 'sro-simulation' });
@@ -132,7 +132,12 @@ const gameplay = { localGid: 1, target: 0, targetPending: false, inventoryPendin
     await page.setViewportSize({ width: 1200, height: 1000 });
     await page.evaluate(() => SROLean.ui.setWide(true));
     await tab('Party'); await snap('15-wide-party'); await tab('Settings'); await snap('15-wide-settings'); await tab('Alchemy'); await snap('15-wide-alchemy');
-    await page.evaluate(() => SROLean.ui.setWide(false)); await page.setViewportSize({ width: 1280, height: 900 }); await tab('Settings');
+    await page.evaluate(() => SROLean.ui.setWide(false));
+    // The Classic window (SBot layout); the website shows its Skills tab.
+    await page.evaluate(() => SROLean.ui.setClassic(true));
+    const classicTab = async name => { await page.locator('#sro-bot-lean nav').getByRole('button', { name, exact: true }).click(); await page.waitForTimeout(200); };
+    await classicTab('Skills'); await snap('16-classic-skills'); await classicTab('Party/Autores'); await snap('16-classic-party');
+    await page.evaluate(() => SROLean.ui.setClassic(false)); await page.setViewportSize({ width: 1280, height: 900 }); await tab('Settings');
     await page.getByRole('button', { name: 'Send bug report', exact: true }).click();
     await page.getByRole('textbox', { name: 'Report preview', exact: true }).waitFor();
     await page.setViewportSize({ width: 1000, height: 1010 });
