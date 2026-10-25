@@ -4209,7 +4209,7 @@ test('buff gear takes any copy of identical weapons and skips ones above the cha
   f.BuffGear.run=null;
   gp.inventory.find(i=>i.slot===15).durability=0;
   assert.equal(f.BuffGear.pick([14]).slot,16,'a broken weapon is not picked');
-  gp.progression={level:10}; f.ItemRules.requiredLevel=()=>50;
+  gp.progression={level:10}; for(const i of gp.inventory.filter(i=>i.slot>=13))i.tooltip={fields:{reqLevelType1:1,requiredLevel:50}};
   assert.equal(f.BuffGear.pick([14]),null,'a weapon the character cannot wield is not picked');
 });
 test('buff gear never picks a weapon the game refused to equip again, and stops safely',()=>{

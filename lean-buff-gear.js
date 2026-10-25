@@ -43,7 +43,7 @@ const BuffGear = {
   pick(kinds) {
     const gp = World.gp, level = gp?.progression?.level;
     const list = this.items().filter(i => i.slot >= (gp.equipmentSlotCount || 13) && this.weapon(i) && kinds.includes(this.kind(i)) &&
-      (i.durability ?? 1) > 0 && !this.bad.has(this.key(i)) && !(level >= 0 && ItemRules.requiredLevel(i) > level));
+      (i.durability ?? 1) > 0 && !this.bad.has(this.key(i)) && !(level >= 0 && Town.requiredLevel(i) > level));
     list.sort((a, b) => (b.plus ?? 0) - (a.plus ?? 0) || a.slot - b.slot);
     return list[0] || null;
   },
