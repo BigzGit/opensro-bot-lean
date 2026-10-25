@@ -2105,6 +2105,25 @@ test('after reconnecting in town, far from the hunting spot, the bot does town s
   f.advance(4000); f.Controller.tick(); f.advance(4000); f.Controller.tick();
   assert.equal(began, true, 'revival-style town trip'); assert.equal(f.WalkBack.active, null); assert.equal(f.Reconnect.active(), false);
 });
+test('after reconnecting in town away from the scroll landing spot, the services start from where the character stands', () => {
+  const town = { key: 'KT' }, setup = f => {
+    const c = f.Town.cfg(); c.enabled = true; c.revive = true; c.arrival = { regionId: 1, x: 190000, y: 0, z: 100 };
+    for (const [index, role] of ['storage', 'vendor', 'smith', 'gate'].entries()) c[role] = { gid: 60 + index, refObjId: 600 + index, regionId: 1, x: 200100 + index * 40, y: 0, z: 100 };
+    const r = f.Restock.cfg(); r.hp.on = false; r.mp.refObjId = 15; r.mp.low = 5; r.mp.target = 50;
+    f.World.gp.inventory = [{ slot: 13, refObjId: 200, typeFlags: 0x09ec, quantity: 3 }, { slot: 14, refObjId: 201, typeFlags: 0x19ec, quantity: 2 }, { slot: 15, refObjId: 15, typeFlags: 4332, quantity: 1 }];
+  };
+  const { f, lose, back } = reconnectFixture(); f.Town.detect = () => town; setup(f);
+  lose(); back(); setup(f); f.World.gp.pose = { ...f.World.gp.pose, x: 200000 }; f.World.pose = () => f.World.gp.pose;
+  f.advance(4000); f.Controller.tick(); f.advance(4000); f.Controller.tick();
+  assert.ok(f.Town.trip, f.Town.message); assert.equal(f.Town.trip.revival, true);
+  assert.equal(f.Town.trip.phase, 'walk-storage', 'no waiting at the landing spot 1 km away');
+  assert.equal(f.Reconnect.active(), false);
+  // In another town none of the saved services are near: no town cycle (it would only time out).
+  const g = reconnectFixture(); let n = 0; g.f.Town.detect = () => (n++ % 2 ? { key: 'KT' } : { key: 'DW' }); setup(g.f);
+  g.lose(); g.back(); setup(g.f); g.f.World.gp.pose = { ...g.f.World.gp.pose, x: 200000 }; g.f.World.pose = () => g.f.World.gp.pose;
+  g.f.advance(4000); g.f.Controller.tick(); g.f.advance(4000); g.f.Controller.tick();
+  assert.equal(g.f.Town.trip, null); assert.equal(g.f.Reconnect.active(), false);
+});
 test('reconnect never fights the player: logout, disconnect, exit or a manual login cancel it; a lost login is reported', () => {
   for (const kind of ['logout', 'disconnect', 'exit', 'restart', 'login', 'enter-world']) {
     const { f, sent, lose } = reconnectFixture(); lose(); f.Hook.observers.forEach(fn => fn({ kind, password: 'secret' }));
@@ -2842,7 +2861,7 @@ test('town never sells items the game marks unsellable, and skips a refused sale
 test('town sells unprotected character bag items only when the bag switch is on', () => {
   const ware = { slot: 30, refObjId: 1100, typeFlags: 44 | (6 << 7), quantity: 1, name: 'Sword', plus: 0, magic: [], tooltip: { fields: { rarity: 0 } } };
   const run = on => {
-    const f = townFixture(), gp = f.World.gp; f.Town.cfg().sellBag = on; f.Town.cfg().storeSox = false;
+    const f = townFixture(), gp = f.World.gp; f.Town.cfg().sellBag = on; f.Items.data.set(1100, { name: 'Sword', code: 'ITEM_CH_SWORD_01_A' }); f.Town.cfg().storeSox = false;
     f.pet.inventory = []; gp.inventory.push({ ...ware });
     f.Town.begin(); f.Town.enter('sell'); gp.target = 62; gp.shop = { npc: 62 };
     return f;
@@ -2871,6 +2890,43 @@ test('with bag selling on, a full bag sells at the repair merchant before potion
   const off = townFixture(); off.Town.cfg().sellBag = false;
   off.Town.begin(); assert.equal(off.Town.closeNext('close-storage'), 'walk-vendor'); assert.equal(off.Town.closeNext('close-vendor'), 'walk-smith');
   assert.equal(off.Town.trip.sellFirst, false);
+});
+
+test('bag selling sells only ordinary race gear: never pet summons, avatars, job suits, mall items or unknown gear', () => {
+  // Item types from 1.150 itemdata, all of which the merchant buys (CanSell 1).
+  const kinds = [
+    { refObjId: 1200, typeFlags: 12 | (2 << 5) | (1 << 7) | (2 << 11), code: 'ITEM_COS_P_RABBIT_SCROLL', name: 'Rabbit summon scroll' },
+    { refObjId: 1201, typeFlags: 44 | (13 << 7), code: 'ITEM_MALL_AVATAR_M_HAT', name: 'Avatar hat', tooltip: { fields: { rarity: 0 } } },
+    { refObjId: 1202, typeFlags: 44 | (7 << 7), code: 'ITEM_CH_M_TRADE_01', name: 'Trader suit', tooltip: { fields: { rarity: 0 } } },
+    { refObjId: 1203, typeFlags: 108 | (13 << 7) | (14 << 11), code: 'ITEM_MALL_PREMIUM_GOLDTIME', name: 'Premium' },
+    { refObjId: 1204, typeFlags: 108 | (11 << 7) | (3 << 11), code: 'ITEM_ETC_ARCHEMY_MAGICTABLET_STR_01', name: 'Tablet' },
+    { refObjId: 1205, typeFlags: 44 | (6 << 7), code: 'ITEM_FORT_FORTRESS_SWORD', name: 'Fortress sword', tooltip: { fields: { rarity: 0 } } },
+    { refObjId: 1206, typeFlags: 44 | (6 << 7), code: '', name: 'Uncatalogued blade', tooltip: { fields: { rarity: 0 } } },
+  ];
+  const f = townFixture(), gp = f.World.gp; f.Town.cfg().sellBag = true; f.Town.cfg().storeSox = false; f.pet.inventory = [];
+  kinds.forEach((k, n) => { if (k.code) f.Items.data.set(k.refObjId, { name: k.name, code: k.code }); gp.inventory.push({ slot: 40 + n, quantity: 1, magic: [], ...k, code: undefined }); });
+  for (const item of f.World.items().filter(i => i.slot >= 40)) assert.equal(f.Town.sellableBag(item), false, item.name);
+  f.Town.begin(); f.Town.enter('sell'); gp.target = 62; gp.shop = { npc: 62 }; f.Town.tick();
+  assert.equal(f.commands.some(c => c.kind === 'shop-sell'), false); assert.equal(f.Town.trip.phase, 'repair');
+  // An explicit Sell rule still sells a non-gear item from the bag; plain race gear needs none.
+  f.ItemRules.set([1204], { act: 'sell' }); assert.equal(f.Town.sellableBag(f.World.items().find(i => i.refObjId === 1204)), true);
+  f.Items.data.set(1300, { name: 'Bow', code: 'ITEM_CH_BOW_02_B' });
+  assert.equal(f.Town.sellableBag({ slot: 60, refObjId: 1300, typeFlags: 44 | (6 << 7), quantity: 1, magic: [], tooltip: { fields: { rarity: 0 } } }), true);
+});
+
+test('with bag selling on and a full bag, the trip sells before the warehouse so pet loot has a bag slot to pass through', () => {
+  const f = townFixture(), gp = f.World.gp; f.Town.cfg().sellBag = true; f.Town.cfg().petFull = false;
+  const equip = gp.equipmentSlotCount || 13, held = f.World.items().length;
+  gp.inventorySlotCount = equip + held + 2;
+  for (let n = 0; n < 2; n++) gp.inventory.push({ slot: equip + held + n, refObjId: 3100 + n, typeFlags: 44 | (6 << 7), quantity: 1, name: 'Spare ' + n, magic: [], tooltip: { fields: { rarity: 0 } } });
+  assert.equal(f.World.freeBagSlots(), 0); assert.ok(f.pet.inventory.some(i => f.Town.eligible(i)), 'the pet holds warehouse loot');
+  f.Town.begin(); f.Town.arrived();
+  assert.equal(f.Town.trip.phase, 'walk-smith');
+  assert.deepEqual([...f.Town.trip.order], ['smith', 'storage', 'vendor', 'gate']);
+  for (const [from, to] of [['close-smith', 'walk-storage'], ['close-storage', 'walk-vendor'], ['close-vendor', 'walk-gate']]) assert.equal(f.Town.closeNext(from), to);
+  // With room in the bag the warehouse still comes first.
+  const g = townFixture(); g.Town.cfg().sellBag = true; g.Town.cfg().petFull = false; g.Town.begin(); g.Town.arrived();
+  assert.equal(g.Town.trip.phase, 'walk-storage'); assert.equal(g.Town.closeNext('close-storage'), 'walk-smith'); assert.equal(g.Town.closeNext('close-smith'), 'walk-vendor');
 });
 
 test('town refuses selling at the wrong merchant or after the pet is replaced', () => {

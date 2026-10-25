@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.128
+// @version      1.2.129
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[NIX] Another SRO assistant is active. Disable it and reload to use NIX.');
   return;
 }
-const VERSION = '1.2.128';
+const VERSION = '1.2.129';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -3891,11 +3891,24 @@ const Town = {
     return this.disposable(item) && !this.kept.includes(Loot.category(item.typeFlags));
   },
   // From the bag, never what the trip itself needs, the weapon chosen for alchemy or a saved buff set's gear.
+  // The bag holds the player's own things, not just drops: without a Sell rule only ordinary Chinese / European
+  // weapons, armour, shields and accessories are sold. Pet summon scrolls, avatars, devil spirits, job suits,
+  // fortress weapons, item mall and event items, tablets, powders and anything with an unknown codename stay.
   sellableBag(item) {
     if (this.needed(item) || Alchemy.selected && Alchemy.selected.slot === item.slot) return false;
     const key = BuffGear.key(item);
     if (BuffGear.cfg().buffSets.some(s => s.weapon === key || s.shield === key)) return false;
-    return this.sellable(item);
+    if (!this.sellable(item)) return false;
+    return ItemRules.get(item.refObjId)?.act === 'sell' || this.plainGear(item);
+  },
+  // Ordinary race gear: equipment of TID3 1-6 or 9-12 (garments to accessories; 7 is job suits, 13 avatars and
+  // devil spirits) with an ITEM_CH_ / ITEM_EU_ codename.
+  // The codename comes from the item catalogue; until it has loaded nothing is sold from the bag.
+  plainGear(item) {
+    Loot.ensureCatalogue();
+    const tf = item.typeFlags, code = item.codename || Items.data?.get(item.refObjId)?.code || '';
+    return Number.isInteger(tf) && ItemType.isEquipment(tf) && [1, 2, 3, 4, 5, 6, 9, 10, 11, 12].includes((tf >>> 7) & 15) &&
+      /^ITEM_(CH|EU)_/.test(code);
   },
   autoRevive() { return this.cfg().enabled && this.cfg().revive; },
   reason() {
@@ -3985,6 +3998,8 @@ const Town = {
       manualAt: Manual.lastAt, character: World.charName, petRef: Loot.pet()?.rec.refObjId,
       config: JSON.stringify(this.cfg()), supplies: this.supplies(), sellFirst: !!this.cfg().sellBag };
     Hunt.targetGid = Hunt.lootGid = 0;
+    // Bag selling reads codenames from the item catalogue: start loading it now, well before the merchant.
+    if (this.trip.sellFirst) Loot.ensureCatalogue();
     // Stop the worker's repeating attack/movement as well as the bot's next tick.
     // Pending inventory work still settles before item-use is admitted below.
     this.trip.haltSent = Cmd.move(World.pose());
@@ -3994,17 +4009,26 @@ const Town = {
     else this.message = 'Using return scroll; recall must be bound to your town.';
   },
   arrived() {
-    this.trip.scrollAttempts = 0; this.trip.scrollRequest = null;
+    const t = this.trip, full = World.freeBagSlots() < 1;
+    t.scrollAttempts = 0; t.scrollRequest = null;
     // With bag selling on, the trip sells first, so a full bag can still make room for refills.
-    if (World.freeBagSlots() < 1 && !this.trip.sellFirst) return this.fail('Returned to town; free a character bag slot for storage and refills.');
+    if (full && !t.sellFirst) return this.fail('Returned to town; free a character bag slot for storage and refills.');
     if (this.cfg().petFull && this.reason() === 'pickup pet nearly full' && !Loot.pet()?.rec.inventory.some(i => this.disposable(i) || this.eligible(i))) return this.fail('Returned to town; pet is full of protected items. Empty it manually.');
-    this.enter(this.cfg().storage ? 'walk-storage' : this.trip.sellFirst ? 'walk-smith' : 'walk-vendor');
+    t.order = this.order(full);
+    this.enter('walk-' + t.order[0]);
   },
-  // The merchant to walk to after closing a window: potions come before repair and selling, unless bag selling is on,
-  // which sells and repairs first so a full bag has room to buy.
-  closeNext(phase) {
+  // The services in visiting order. Potions come before repair and selling, unless bag selling is on, which sells and
+  // repairs first so a full bag has room to buy. A full bag also sells before the warehouse: pet loot reaches the
+  // warehouse through a free bag slot.
+  order(full) {
     const sellFirst = this.trip?.sellFirst;
-    return { 'close-storage': sellFirst ? 'walk-smith' : 'walk-vendor', 'close-smith': sellFirst ? 'walk-vendor' : 'walk-gate', 'close-vendor': sellFirst ? 'walk-gate' : 'walk-smith' }[phase];
+    const order = !sellFirst ? ['storage', 'vendor', 'smith', 'gate'] : full ? ['smith', 'storage', 'vendor', 'gate'] : ['storage', 'smith', 'vendor', 'gate'];
+    return this.cfg().storage ? order : order.filter(role => role !== 'storage');
+  },
+  // The service to walk to after closing a window.
+  closeNext(phase) {
+    const order = this.trip?.order || this.order(false), role = phase.replace(/^close-/, '');
+    return 'walk-' + (order[order.indexOf(role) + 1] || 'gate');
   },
   enter(phase) {
     const t = this.trip;
@@ -5978,12 +6002,16 @@ const Reconnect = {
       this.clear(i.hunting && World.isDead() ? 'Back in the game, but the character is dead; hunting was not resumed.' : 'Back in the game.');
       return UI.toast(this.message, 'info', 4000);
     }
-    // Back in town (a death while disconnected respawns there, or the drop came during a town trip) and far from the
-    // hunting spot: do the town services and reverse, as after a death, instead of walking.
+    // Back in the town of the saved services (a death while disconnected respawns there, or the drop came during a
+    // town trip) and far from the hunting spot: do the town services and reverse, as after a death, instead of walking.
+    // The character may stand anywhere in town, so the services start from here instead of waiting at the scroll's
+    // landing spot. Another town has none of the saved services: walk-back handles that.
     const H = Hunt.cfg(), spot = H.center && World.pose() ? dist2D(World.pose(), H.center) : NaN;
-    if (Town.autoRevive() && Number.isFinite(spot) && spot > Math.max(H.radius * 1.5, 600) && Town.detect()) {
+    const c = Town.cfg(), here = Town.detect(), home = Town.detect(c.vendor || c.storage || c.arrival || {});
+    if (Town.autoRevive() && Number.isFinite(spot) && spot > Math.max(H.radius * 1.5, 600) && here && home && here.key === home.key) {
       UI.toast('Back in the game, in town; doing town services and reversing to the hunting spot.', 'info', 4000);
       Controller.returnAfterRevive();
+      if (Town.trip?.phase === 'revive-arrival') Town.arrived();
       return this.clear(Town.trip ? '' : 'Back in the game, but the town cycle could not start: ' + Town.message);
     }
     const outcome = Controller.resumeHunting('Back in the game');
@@ -8824,7 +8852,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.128", "title": "Town trips no longer stop on an item the merchant won't buy", "items": ["A town trip could stop at the weapon merchant with \"Inventory rejected: 2\". The bot had tried to sell an item the game does not allow merchants to buy (quest and event items, for example), and one refusal ended the whole trip.", "Items the game marks unsellable are now never offered, even with a Sell rule. They stay in the pet or bag.", "If the merchant still refuses an item, the bot keeps it, logs a warning and sells the rest, then carries on with the trip.", "Written from the code and simulated game state; not yet seen on a live server."]}, {"version": "1.2.127", "title": "Bag selling no longer stops on a full bag", "items": ["With **Sell items from the character bag too** on, a town trip with a completely full bag stopped before it ever reached the merchant that sells: at arrival (\"free a character bag slot\"), or at the potion merchant (no room for potions).", "Now, with that switch on, the trip goes to the repair merchant first (sell, ammunition, repair), then the potion merchant, then the world statue. A full bag is emptied before potions are bought. With the switch off, the order is unchanged.", "Written from the code and simulated game state; not yet seen on a live server."]}, {"version": "1.2.126", "title": "Sell from the character bag on town trips", "items": ["New switch in Scroll town cycle: **Sell items from the character bag too**. When on, the town trip sells unprotected items from your own bag at the repair merchant, after the pet loot, by the same rules as pet loot. Off by default.", "Never sold from the bag: potions, scrolls, supplies, Keep names, buff-set gear, the alchemy weapon, and anything with a Store, Keep or Drop rule. A Sell rule always sells.", "Tested in simulation only; not yet confirmed on the live server."]}, {"version": "1.2.125", "title": "Keep reconnecting through a long outage", "items": ["Overnight the bot could end up stopped with the game's \"Disconnected from the server.\" box on screen. Two gaps: that plain box (no \"session ended\" text) only ever repeated the same enter-character attempts, which fail once the server has dropped the login; and the limit of 3 page reloads per 30 minutes was permanent, so a server that was down for hours used up the reloads and the bot never tried again.", "Now, when the resume and three fresh entries have failed, the bot reloads the page just like after \"session ended\": the game restores the login from its own session cookie, the bot enters the character and hunting resumes.", "The reload limit is a pause: once the oldest reload is 30 minutes old, the bot tries again, for up to the 12 hours it keeps reconnecting."], "note": "Written from the code and simulated game state; not yet seen on a live server."}, {"version": "1.2.124", "title": "After a disconnect in town, do the town services and reverse", "items": ["After reconnecting, the bot walked from town to the hunting spot in short legs. From town that route often does not exist (\"no walkable route to the hunting spot\"), so it gave up and the character stayed in town.", "Now, when the character is back in a town far from the hunting spot and the town cycle's \"Revive in town and reverse to last scroll point\" is on, the bot runs the same trip as after a death: town services (potions, repairs, storage), then the reverse scroll to the last scroll point, then hunting. This covers a disconnect in town, while loading town, or a death while disconnected.", "Without that setting, or when the character is not in a known town, it still walks back as before."], "note": "Written from the code and simulated game state; not yet seen on a live server."}, {"version": "1.2.123", "title": "Alt accounts keep applying to the main's party", "items": ["With two alt accounts joining the same main, one could get in while the other sat on \"Waiting for the party board…\" forever. The main answers one application at a time, so the second application could be dropped, and the alt never tried again.", "An application that has not been answered after 30 seconds is now sent again, for as long as the alt is outside the main's party. The check already ran on every tick; only this wait was open-ended."], "note": "Found by reading the code with two alts in mind; not yet confirmed on a live server. If an alt still fails to join, its status line under Party says why."}, {"version": "1.2.122", "title": "Revive and return after dying while disconnected", "items": ["If the character was killed while the connection was gone (mobs kept hitting it), the bot came back, saw a dead character and gave up: \"hunting was not resumed\". It never revived or walked back to the hunting spot.", "Now, when hunting was running and the character comes back dead, the bot starts hunting again so the normal death handling takes over: it revives (with \"Revive at return point and continue\" or the town auto-revive on) and walks back to the hunting spot. With \"On death\" set to \"Stop hunting\", it stops after the death, as it always does."]}, {"version": "1.2.121", "title": "Recover from \"Your session ended while the connection was gone\"", "items": ["When the connection is gone for more than about 30 seconds the server ends the game session, and the game shows \"Your session ended while the connection was gone. Please log in again.\" The bot used to keep trying to resume that session, which can no longer work, and the window stayed on screen.", "The bot now skips the resume and enters the character again straight away. If that has not brought the character back after 30 seconds, it reloads the page: the game restores your login from its own session cookie, the bot enters the character and hunting resumes, as after a failed load (1.2.120). It shares that reload limit of 3 per 30 minutes.", "The window's Confirm button is never pressed, because it logs you out. If the login really is gone, the status line says so and the bot waits for you."], "note": "Written from the game's own code and simulated game state; not yet seen on a live server."}];
+const RELEASE_NOTES = [{"version": "1.2.129", "title": "Bag selling only sells ordinary gear", "items": ["**Sell items from the character bag** used the pet-loot rules, which are meant for drops. In your own bag that could sell pet summon scrolls and flutes, avatars, devil spirits, job suits and item mall items such as Premium or stat-reset scrolls. It now sells only ordinary Chinese and European weapons, armour, shields and accessories (renamed **Sell ordinary gear from the character bag too**). Other bag items are sold only if you give them a Sell rule.", "With bag selling on and a full bag, the trip no longer stops at the warehouse with \"No temporary character bag slot\": it sells at the repair merchant first, then visits the warehouse.", "After reconnecting in town, the town cycle starts from where the character stands instead of waiting at the return-scroll landing spot (which timed out after 90 s and stopped hunting). In a different town from your saved services the bot walks back instead."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.128", "title": "Town trips no longer stop on an item the merchant won't buy", "items": ["A town trip could stop at the weapon merchant with \"Inventory rejected: 2\". The bot had tried to sell an item the game does not allow merchants to buy (quest and event items, for example), and one refusal ended the whole trip.", "Items the game marks unsellable are now never offered, even with a Sell rule. They stay in the pet or bag.", "If the merchant still refuses an item, the bot keeps it, logs a warning and sells the rest, then carries on with the trip.", "Written from the code and simulated game state; not yet seen on a live server."]}, {"version": "1.2.127", "title": "Bag selling no longer stops on a full bag", "items": ["With **Sell items from the character bag too** on, a town trip with a completely full bag stopped before it ever reached the merchant that sells: at arrival (\"free a character bag slot\"), or at the potion merchant (no room for potions).", "Now, with that switch on, the trip goes to the repair merchant first (sell, ammunition, repair), then the potion merchant, then the world statue. A full bag is emptied before potions are bought. With the switch off, the order is unchanged.", "Written from the code and simulated game state; not yet seen on a live server."]}, {"version": "1.2.126", "title": "Sell from the character bag on town trips", "items": ["New switch in Scroll town cycle: **Sell items from the character bag too**. When on, the town trip sells unprotected items from your own bag at the repair merchant, after the pet loot, by the same rules as pet loot. Off by default.", "Never sold from the bag: potions, scrolls, supplies, Keep names, buff-set gear, the alchemy weapon, and anything with a Store, Keep or Drop rule. A Sell rule always sells.", "Tested in simulation only; not yet confirmed on the live server."]}, {"version": "1.2.125", "title": "Keep reconnecting through a long outage", "items": ["Overnight the bot could end up stopped with the game's \"Disconnected from the server.\" box on screen. Two gaps: that plain box (no \"session ended\" text) only ever repeated the same enter-character attempts, which fail once the server has dropped the login; and the limit of 3 page reloads per 30 minutes was permanent, so a server that was down for hours used up the reloads and the bot never tried again.", "Now, when the resume and three fresh entries have failed, the bot reloads the page just like after \"session ended\": the game restores the login from its own session cookie, the bot enters the character and hunting resumes.", "The reload limit is a pause: once the oldest reload is 30 minutes old, the bot tries again, for up to the 12 hours it keeps reconnecting."], "note": "Written from the code and simulated game state; not yet seen on a live server."}, {"version": "1.2.124", "title": "After a disconnect in town, do the town services and reverse", "items": ["After reconnecting, the bot walked from town to the hunting spot in short legs. From town that route often does not exist (\"no walkable route to the hunting spot\"), so it gave up and the character stayed in town.", "Now, when the character is back in a town far from the hunting spot and the town cycle's \"Revive in town and reverse to last scroll point\" is on, the bot runs the same trip as after a death: town services (potions, repairs, storage), then the reverse scroll to the last scroll point, then hunting. This covers a disconnect in town, while loading town, or a death while disconnected.", "Without that setting, or when the character is not in a known town, it still walks back as before."], "note": "Written from the code and simulated game state; not yet seen on a live server."}, {"version": "1.2.123", "title": "Alt accounts keep applying to the main's party", "items": ["With two alt accounts joining the same main, one could get in while the other sat on \"Waiting for the party board…\" forever. The main answers one application at a time, so the second application could be dropped, and the alt never tried again.", "An application that has not been answered after 30 seconds is now sent again, for as long as the alt is outside the main's party. The check already ran on every tick; only this wait was open-ended."], "note": "Found by reading the code with two alts in mind; not yet confirmed on a live server. If an alt still fails to join, its status line under Party says why."}, {"version": "1.2.122", "title": "Revive and return after dying while disconnected", "items": ["If the character was killed while the connection was gone (mobs kept hitting it), the bot came back, saw a dead character and gave up: \"hunting was not resumed\". It never revived or walked back to the hunting spot.", "Now, when hunting was running and the character comes back dead, the bot starts hunting again so the normal death handling takes over: it revives (with \"Revive at return point and continue\" or the town auto-revive on) and walks back to the hunting spot. With \"On death\" set to \"Stop hunting\", it stops after the death, as it always does."]}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -10529,7 +10557,7 @@ const UI = {
       const services = this.group('Scroll town cycle',
         this.check('Use return scroll → town services → reverse return', () => town().enabled, v => { town().enabled = v; this.draw(); }),
         this.check('Deposit SoX gear in the warehouse (character and pet bags)', () => town().storeSox, v => town().storeSox = v),
-        this.check('Sell items from the character bag too (same rules as pet loot)', () => town().sellBag, v => town().sellBag = v),
+        this.check('Sell ordinary gear from the character bag too', () => town().sellBag, v => town().sellBag = v),
         this.text('Also deposit gear requiring level', () => town().storeLevels, v => town().storeLevels = v, 'e.g. 85 or 80-90, 100'),
         this.number('Town arrival tolerance (m)', () => town().arrivalRadius / 10, v => town().arrivalRadius = v * 10, 10, 150),
         el('p', 'Bind your recall to Hotan, Jangan, Donwhang, Constantinople or Samarkand in the game. Quickest: pick your town and press Set up this town; the arrival point is where its return scroll always lands, so you do not have to be in town. It fills the arrival point and the four services. To do it by hand instead, save the arrival point where a return scroll places you, then stand near, select and save the warehouse, potion merchant, repair merchant and world statue / teleport. Open the potion shop before saving its merchant. Saves your standing position for each approach. Uses collision-aware walking between services. Overrides the recorded walking restock while enabled.', 'muted'));
@@ -10540,7 +10568,7 @@ const UI = {
       services.append(this.select('Town', townOptions, () => this.townPick, v => this.townPick = v),
         this.button('Set up this town', () => Town.autoSetup(true, this.townPick)),
         this.button('Auto-set town services', () => Town.autoSetup(false)), this.button('Redo all automatically', () => Town.autoSetup(true)));
-      services.append(el('p', 'Pet loot: store elixirs, and Star / Moon / Sun gear when SoX deposit is on (needs the saved warehouse; SoX gear in your own bag goes in too, all other character items stay). Nothing is deposited right after pickup, only on the next town trip. Gear requiring one of the levels you list above (for example 85) is deposited the same way and never sold. SoX gear that is part of a saved buff set, the weapon chosen for alchemy, or matches the Keep names stays in your bag. Sell other unprotected pet items at the saved weapon / repair merchant before repairing. Other seal/rare equipment and equipment with unknown rarity stays in the pet. Ordinary equipment is sold regardless of + or blue options. Character bag items are sold only with the switch above, by the same rules as pet loot (never potions, scrolls, supplies, Keep names, buff-set gear or the alchemy weapon).', 'muted'));
+      services.append(el('p', 'Pet loot: store elixirs, and Star / Moon / Sun gear when SoX deposit is on (needs the saved warehouse; SoX gear in your own bag goes in too, all other character items stay). Nothing is deposited right after pickup, only on the next town trip. Gear requiring one of the levels you list above (for example 85) is deposited the same way and never sold. SoX gear that is part of a saved buff set, the weapon chosen for alchemy, or matches the Keep names stays in your bag. Sell other unprotected pet items at the saved weapon / repair merchant before repairing. Other seal/rare equipment and equipment with unknown rarity stays in the pet. Ordinary equipment is sold regardless of + or blue options. With the switch above, ordinary weapons, armour, shields and accessories in the character bag are sold too; other bag items only with a Sell rule. Never sold from the bag: potions, scrolls, supplies, pet summons, avatars, devil spirits, job suits, item mall items, Keep names, buff-set gear or the alchemy weapon.', 'muted'));
       services.append(this.text('Keep in pet (names)', () => town().keep, v => town().keep = v),
         el('p', 'Town buys X-Large potions using the Buy HP/MP switches, low-stock thresholds and refill counts above. Keep each low-stock threshold below its refill target. Potion selections apply to walking-route restock. Returns when the character bag has at most one free slot. Free at least two slots before hunting again; existing character items stay protected. Revival uses the saved town services and a reverse scroll, without using a return scroll in town. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. F8 cancels.', 'muted'));
       this.townNote = el('p', Town.status(), 'muted'); services.append(this.townNote); host.append(services);

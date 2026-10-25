@@ -251,11 +251,24 @@ const Town = {
     return this.disposable(item) && !this.kept.includes(Loot.category(item.typeFlags));
   },
   // From the bag, never what the trip itself needs, the weapon chosen for alchemy or a saved buff set's gear.
+  // The bag holds the player's own things, not just drops: without a Sell rule only ordinary Chinese / European
+  // weapons, armour, shields and accessories are sold. Pet summon scrolls, avatars, devil spirits, job suits,
+  // fortress weapons, item mall and event items, tablets, powders and anything with an unknown codename stay.
   sellableBag(item) {
     if (this.needed(item) || Alchemy.selected && Alchemy.selected.slot === item.slot) return false;
     const key = BuffGear.key(item);
     if (BuffGear.cfg().buffSets.some(s => s.weapon === key || s.shield === key)) return false;
-    return this.sellable(item);
+    if (!this.sellable(item)) return false;
+    return ItemRules.get(item.refObjId)?.act === 'sell' || this.plainGear(item);
+  },
+  // Ordinary race gear: equipment of TID3 1-6 or 9-12 (garments to accessories; 7 is job suits, 13 avatars and
+  // devil spirits) with an ITEM_CH_ / ITEM_EU_ codename.
+  // The codename comes from the item catalogue; until it has loaded nothing is sold from the bag.
+  plainGear(item) {
+    Loot.ensureCatalogue();
+    const tf = item.typeFlags, code = item.codename || Items.data?.get(item.refObjId)?.code || '';
+    return Number.isInteger(tf) && ItemType.isEquipment(tf) && [1, 2, 3, 4, 5, 6, 9, 10, 11, 12].includes((tf >>> 7) & 15) &&
+      /^ITEM_(CH|EU)_/.test(code);
   },
   autoRevive() { return this.cfg().enabled && this.cfg().revive; },
   reason() {
@@ -345,6 +358,8 @@ const Town = {
       manualAt: Manual.lastAt, character: World.charName, petRef: Loot.pet()?.rec.refObjId,
       config: JSON.stringify(this.cfg()), supplies: this.supplies(), sellFirst: !!this.cfg().sellBag };
     Hunt.targetGid = Hunt.lootGid = 0;
+    // Bag selling reads codenames from the item catalogue: start loading it now, well before the merchant.
+    if (this.trip.sellFirst) Loot.ensureCatalogue();
     // Stop the worker's repeating attack/movement as well as the bot's next tick.
     // Pending inventory work still settles before item-use is admitted below.
     this.trip.haltSent = Cmd.move(World.pose());
@@ -354,17 +369,26 @@ const Town = {
     else this.message = 'Using return scroll; recall must be bound to your town.';
   },
   arrived() {
-    this.trip.scrollAttempts = 0; this.trip.scrollRequest = null;
+    const t = this.trip, full = World.freeBagSlots() < 1;
+    t.scrollAttempts = 0; t.scrollRequest = null;
     // With bag selling on, the trip sells first, so a full bag can still make room for refills.
-    if (World.freeBagSlots() < 1 && !this.trip.sellFirst) return this.fail('Returned to town; free a character bag slot for storage and refills.');
+    if (full && !t.sellFirst) return this.fail('Returned to town; free a character bag slot for storage and refills.');
     if (this.cfg().petFull && this.reason() === 'pickup pet nearly full' && !Loot.pet()?.rec.inventory.some(i => this.disposable(i) || this.eligible(i))) return this.fail('Returned to town; pet is full of protected items. Empty it manually.');
-    this.enter(this.cfg().storage ? 'walk-storage' : this.trip.sellFirst ? 'walk-smith' : 'walk-vendor');
+    t.order = this.order(full);
+    this.enter('walk-' + t.order[0]);
   },
-  // The merchant to walk to after closing a window: potions come before repair and selling, unless bag selling is on,
-  // which sells and repairs first so a full bag has room to buy.
-  closeNext(phase) {
+  // The services in visiting order. Potions come before repair and selling, unless bag selling is on, which sells and
+  // repairs first so a full bag has room to buy. A full bag also sells before the warehouse: pet loot reaches the
+  // warehouse through a free bag slot.
+  order(full) {
     const sellFirst = this.trip?.sellFirst;
-    return { 'close-storage': sellFirst ? 'walk-smith' : 'walk-vendor', 'close-smith': sellFirst ? 'walk-vendor' : 'walk-gate', 'close-vendor': sellFirst ? 'walk-gate' : 'walk-smith' }[phase];
+    const order = !sellFirst ? ['storage', 'vendor', 'smith', 'gate'] : full ? ['smith', 'storage', 'vendor', 'gate'] : ['storage', 'smith', 'vendor', 'gate'];
+    return this.cfg().storage ? order : order.filter(role => role !== 'storage');
+  },
+  // The service to walk to after closing a window.
+  closeNext(phase) {
+    const order = this.trip?.order || this.order(false), role = phase.replace(/^close-/, '');
+    return 'walk-' + (order[order.indexOf(role) + 1] || 'gate');
   },
   enter(phase) {
     const t = this.trip;
