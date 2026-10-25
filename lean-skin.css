@@ -228,6 +228,9 @@ fieldset>input[type=search]{width:100%;margin:2px 0 6px}
 :host(.classic) button{height:22px;min-width:0;padding:0 8px;color:#fff;background:#000;border:1px solid var(--c-line);border-image:none;font-size:11px}
 :host(.classic) button:hover{background:#17173a;border-image:none;color:#fff}
 :host(.classic) button:active{background:#262660;border-image:none}
+:host(.classic) button.slot{width:34px;min-width:34px;height:34px;padding:0;border:1px solid #4e4532;background:#050505}
+:host(.classic) button.slot:hover{background:#050505;border-color:#d9b765}
+:host(.classic) button.slot.on{border-color:#ffe08a;box-shadow:0 0 5px 1px #ffd678a6}
 :host(.classic) button:disabled{color:#777;border-color:#555;background:#000;border-image:none}
 :host(.classic) nav{grid-area:nav;flex-direction:column;align-items:stretch;flex-wrap:nowrap;gap:2px;padding:0 0 0 6px}
 :host(.classic) nav button{flex:none;justify-content:flex-start;gap:6px;height:23px;padding:0 4px;border:0;background:none;color:#fff;font-size:12px;text-align:left}

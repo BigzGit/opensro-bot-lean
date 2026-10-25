@@ -502,7 +502,11 @@ const UI = {
     const selected = current && (World.bestOfGroup(current.group, current.id) || current.id);
     parent.append(el('p', selected ? 'Selected: ' + World.skillName(selected) + ' · ' + this.skillDetails(selected) : 'No weapon imbue selected.', 'muted'));
     parent.append(this.button('No imbue', () => { Settings.profile.macro.imbue = null; Settings.saveProfile(); this.draw(); }));
-    for (const s of this.learnedSkills(true)) grid.append(this.skillSlot(s.id, () => {
+    // Only weapon imbues and poison coatings, unless the character has none of those (or all skills are asked for).
+    const all = this.learnedSkills(true), imbues = all.filter(s => /GIGONGTA|POISON\w*_BLADE|MALL_PET_SKILL/.test(s.nameSymbol || ''));
+    const list = imbues.length && !this.allImbues ? imbues : all;
+    if (imbues.length) parent.append(this.button(this.allImbues ? 'Show imbues only' : 'Show all self skills', () => { this.allImbues = !this.allImbues; this.draw(); }));
+    for (const s of list) grid.append(this.skillSlot(s.id, () => {
       Settings.profile.macro.imbue = { id: s.id, group: s.group ?? s.id };
       Settings.saveProfile(); this.draw();
     }, 'Use imbue ' + World.skillName(s.id), current?.group === (s.group ?? s.id)));
