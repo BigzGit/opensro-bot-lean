@@ -246,6 +246,9 @@ const Town = {
   sellable(item) {
     // itemdata CanSell 0 (quest and event items): the merchant refuses the sale with inventory code 2.
     if (item.tooltip?.fields?.canSell === 0) return false;
+    // Pet summon scrolls and flutes (TID1 3, TID2 2): the pet itself. The merchant buys every one of them, and players
+    // keep other pets' scrolls in the pickup pet, so they are never sold, not even with a Sell rule.
+    if (!Number.isInteger(item.typeFlags) || (item.typeFlags & 124) === 76) return false;
     const act = ItemRules.get(item.refObjId)?.act;
     if (act) return act === 'sell';
     return this.disposable(item) && !this.kept.includes(Loot.category(item.typeFlags));

@@ -2929,6 +2929,21 @@ test('with bag selling on and a full bag, the trip sells before the warehouse so
   assert.equal(g.Town.trip.phase, 'walk-storage'); assert.equal(g.Town.closeNext('close-storage'), 'walk-smith'); assert.equal(g.Town.closeNext('close-smith'), 'walk-vendor');
 });
 
+test('pet summon scrolls and flutes are never sold, from the pet or the bag, even with a Sell rule', () => {
+  const summons = [
+    { refObjId: 9000, typeFlags: 12 | (2 << 5) | (1 << 7) | (2 << 11), quantity: 1, name: 'Rabbit summon scroll' },
+    { refObjId: 9001, typeFlags: 12 | (2 << 5) | (1 << 7) | (1 << 11), quantity: 1, name: 'Pet flute' },
+  ];
+  const f = townFixture(), gp = f.World.gp; f.Town.cfg().sellBag = true;
+  f.pet.inventory = summons.map((s, n) => ({ slot: n, ...s }));
+  summons.forEach((s, n) => { gp.inventory.push({ slot: 40 + n, ...s }); f.Items.data.set(s.refObjId, { name: s.name, code: 'ITEM_COS_P_RABBIT_SCROLL' }); });
+  f.Town.begin(); f.Town.enter('sell'); gp.target = 62; gp.shop = { npc: 62 }; f.Town.tick();
+  assert.equal(f.commands.some(c => /sell/.test(c.kind)), false, 'nothing offered to the merchant');
+  assert.equal(f.Town.trip.phase, 'repair'); assert.equal(f.pet.inventory.length, 2);
+  f.ItemRules.set([9000, 9001], { act: 'sell' });
+  for (const s of summons) { assert.equal(f.Town.sellable(s), false, s.name); assert.equal(f.Town.sellableBag({ slot: 40, ...s }), false, s.name); }
+});
+
 test('town refuses selling at the wrong merchant or after the pet is replaced', () => {
   const f = townFixture(); f.Town.begin(); f.Town.enter('sell');
   f.World.gp.target = 61; f.World.gp.shop = { npc: 61 };
