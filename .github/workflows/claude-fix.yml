@@ -25,6 +25,9 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: |
+            --max-turns 40
+            --allowedTools "Read,Glob,Grep,Edit,Write,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr create:*),Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(node:*),Bash(npm test:*),Bash(python:*)"
           prompt: |
             Issue #${{ github.event.issue.number }} in ${{ github.repository }} needs a fix.
             Read it with `gh issue view ${{ github.event.issue.number }}`.
