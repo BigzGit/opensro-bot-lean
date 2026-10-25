@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.132
+// @version      1.2.133
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[NIX] Another SRO assistant is active. Disable it and reload to use NIX.');
   return;
 }
-const VERSION = '1.2.132';
+const VERSION = '1.2.133';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -202,7 +202,7 @@ const DEFAULT_PROFILE = {
     eq: {}, av: {}, pet: { atk: 0, pick: 0, mount: 0 }, presets: {}, undo: null },
   macro: {
     rotations: { normal: [], champion: [], giant: [], party: [], elite: [], unique: [] },
-    fallbackToNormal: true, normalAttack: true, buffs: [], imbue: null, buffSwap: false, buffSets: [],
+    fallbackToNormal: true, normalAttack: true, buffs: [], imbue: null, buffSwap: false, buffAuto: true, buffSets: [],
     imbueBeforeAttack: true, berserkClasses: { normal: false, champion: false, giant: true, giantParty: false, party: false, elite: false, unique: false, titan: false },
     minMpPct: 0, castGapMs: 350,
   },
@@ -4380,7 +4380,7 @@ const Town = {
 
 // Confirm every native inventory move before casting or restoring combat gear.
 const BuffGear = {
-  run: null, recovery: null, message: 'Buff weapon swapping off.', skipped: new Map(), waiting: '', started: false,
+  run: null, recovery: null, message: 'Buff weapon swapping off.', skipped: new Map(), waiting: '', started: false, bad: new Set(),
   cfg() { return Settings.profile.macro; },
   items() { return World.gp?.inventory || []; },
   at(slot) { return this.items().find(i => i.slot === slot) || null; },
@@ -4392,9 +4392,44 @@ const BuffGear = {
     const matches = this.items().filter(i => this.key(i) === key);
     return matches.length === 1 ? matches[0] : null;
   },
-  setup() { return { weapon: this.key(this.at(6)), shield: this.key(this.at(7)) }; },
+  // Identical copies are interchangeable, so a skill-driven (auto) set accepts any copy: the equipped one first, then the lowest slot.
+  findAny(key) {
+    if (!key) return null;
+    const matches = this.items().filter(i => this.key(i) === key).sort((a, b) => (a.slot > 7) - (b.slot > 7) || a.slot - b.slot);
+    return matches[0] || null;
+  },
+  lookup(set, key) { return set.auto ? this.findAny(key) : this.find(key); },
+  kind(i) { return i ? i.typeFlags >>> 11 & 31 : 0; },
+  KIND_NAMES: { 2: 'sword', 3: 'blade', 4: 'spear', 5: 'glaive', 6: 'bow', 7: 'sword', 8: 'two-handed sword', 9: 'axe', 10: 'dark staff', 11: 'staff', 12: 'crossbow', 13: 'dagger', 14: 'harp', 15: 'staff' },
+  kindName(kinds) { return [...new Set(kinds.map(k => this.KIND_NAMES[k] || 'weapon type ' + k))].join(' or '); },
+  oneHanded(kind) { return [10, 15, 2, 3, 7, 13].includes(kind); },
+  // Weapon types the game says this skill needs (admit.weaponKinds: 255 = any, 1 = bare hands), or null when any weapon works.
+  // Skills gated by required items (reqi) are judged by the server on those items instead, so they are left alone.
+  need(id) {
+    const admit = World.skill(id)?.admit;
+    if (!admit || admit.reqi || !Array.isArray(admit.weaponKinds)) return null;
+    const kinds = admit.weaponKinds.filter(k => k !== 255 && k !== 1);
+    return kinds.length ? kinds : null;
+  },
+  // The skill needs a weapon type the equipped weapon is not.
+  mismatch(id) {
+    const kinds = this.need(id), w = this.at(6);
+    return kinds && this.weapon(w) ? !kinds.includes(this.kind(w)) : false;
+  },
+  auto() { const c = this.cfg(); return !!(c.buffSwap && c.buffAuto); },
+  // Buffs the gear cycle owns for the weapon they need, not the weapon someone assigned.
+  owns(b) { return this.auto() && !!b.enabled && !b.gearSet && this.mismatch(Combat.resolve(b)); },
+  // The bag weapon to wear for this skill: the highest plus the character can wield, or why there is none.
+  pick(kinds) {
+    const gp = World.gp, level = gp?.progression?.level;
+    const list = this.items().filter(i => i.slot >= (gp.equipmentSlotCount || 13) && this.weapon(i) && kinds.includes(this.kind(i)) &&
+      (i.durability ?? 1) > 0 && !this.bad.has(this.key(i)) && !(level >= 0 && ItemRules.requiredLevel(i) > level));
+    list.sort((a, b) => (b.plus ?? 0) - (a.plus ?? 0) || a.slot - b.slot);
+    return list[0] || null;
+  },
+  setup() { return { weapon: this.key(this.at(6)), shield: this.key(this.at(7)), auto: true }; },
   matches(set) { return set.weapon === this.key(this.at(6)) && set.shield === this.key(this.at(7)); },
-  signature() { return JSON.stringify([this.cfg().buffSwap, this.cfg().buffSets, this.cfg().buffs]); },
+  signature() { return JSON.stringify([this.cfg().buffSwap, this.cfg().buffAuto, this.cfg().buffSets, this.cfg().buffs]); },
   init() {
     if (this.started) return;
     this.started = true;
@@ -4417,7 +4452,7 @@ const BuffGear = {
     Settings.saveProfile(); UI.draw();
   },
   reset() {
-    this.run = this.recovery = null; this.skipped.clear();
+    this.run = this.recovery = null; this.skipped.clear(); this.bad.clear();
     this.message = 'Buff gear reset. Check equipped weapons after reconnecting.';
   },
   interrupt(text) {
@@ -4445,8 +4480,8 @@ const BuffGear = {
     return { home, queue, restoring: false, pending: null, cast: null, effects: [],
       at: now(), manualAt: Manual.lastAt, character: World.charName, profile: Settings.profile, signature: this.signature() };
   },
-  due(b) {
-    if (!b.enabled || !b.gearSet) return 0;
+  due(b, auto) {
+    if (!b.enabled || !b.gearSet && !auto) return 0;
     const id = Combat.resolve(b), info = World.skill(id);
     if (!id || !info || info.targetRequired || Combat.blocked(id) || !Cmd.canCast(id) || !Combat.mpOk(id, World.me())) return 0;
     const skip = this.skipped.get(b.group);
@@ -4468,20 +4503,39 @@ const BuffGear = {
       const buffs = this.cfg().buffs.filter(b => Number(b.gearSet) === set.id).map(b => ({ b, id: this.due(b) })).filter(b => b.id);
       if (buffs.length) queue.push({ set, buffs });
     }
-    if (!queue.length) { this.waiting = ''; return false; }
-    // A buff is due, so say why the swap cannot start instead of waiting silently.
+    // Buffs without an assigned set wear whichever bag weapon their skill requires; buffs sharing a weapon share one swap.
     const wait = text => { this.waiting = text; return false; };
     const home = this.setup();
+    let note = '';
+    if (this.auto()) {
+      const byWeapon = new Map();
+      for (const b of this.cfg().buffs) {
+        if (!this.owns(b)) continue;
+        const id = this.due(b, true);
+        if (!id) continue;
+        const kinds = this.need(id), weapon = this.pick(kinds);
+        if (!weapon) { note = `${World.skillName(id)} needs a ${this.kindName(kinds)}, and none you can use is in your bag.`; continue; }
+        const key = this.key(weapon);
+        if (!byWeapon.has(key)) {
+          const shield = this.oneHanded(this.kind(weapon)) && this.shield(this.at(7)) ? home.shield : null;
+          byWeapon.set(key, { set: { id: 'auto:' + key, name: weapon.name || Items.name(weapon.refObjId), auto: true, weapon: key, shield }, buffs: [] });
+        }
+        byWeapon.get(key).buffs.push({ b, id });
+      }
+      queue.push(...byWeapon.values());
+    }
+    if (!queue.length) { this.waiting = note; return false; }
+    // A buff is due, so say why the swap cannot start instead of waiting silently.
     if (!this.weapon(this.at(6))) return wait('Equip your combat weapon before hunting.');
     for (const set of [home, ...queue.map(q => q.set)]) {
-      const name = set === home ? 'your combat gear' : 'the saved set "' + set.name + '"';
-      if (!this.find(set.weapon)) return wait(`Cannot find ${name}: its weapon is not in your bag or equipped (or two copies look identical). Save the buff set again.`);
-      if (!this.weapon(this.find(set.weapon))) return wait(`${name} is not a weapon any more. Save the buff set again.`);
-      if (set.shield && (!this.find(set.shield) || set !== home && !this.shield(this.find(set.shield)))) return wait(`Cannot find the shield of ${name} (or two copies look identical). Save the buff set again.`);
+      const name = set === home ? 'your combat gear' : set.auto ? set.name : 'the saved set "' + set.name + '"';
+      if (!this.lookup(set, set.weapon)) return wait(`Cannot find ${name}: its weapon is not in your bag or equipped (or two copies look identical). Save the buff set again.`);
+      if (!this.weapon(this.lookup(set, set.weapon))) return wait(`${name} is not a weapon any more. Save the buff set again.`);
+      if (set.shield && (!this.lookup(set, set.shield) || set !== home && !this.shield(this.lookup(set, set.shield)))) return wait(`Cannot find the shield of ${name} (or two copies look identical). Save the buff set again.`);
     }
     // One free bag slot permits explicit shield removal before two-handed swaps.
     if (World.freeBagSlots() < 1) return wait('Buff swaps need one free bag slot.');
-    this.waiting = '';
+    this.waiting = note;
     if (!Cmd.move(World.pose())) return false;
     Loot.suspend(); Hunt.state = 'buff'; this.run = this.create(home, queue);
     this.message = 'Pausing combat for buff gear.';
@@ -4496,7 +4550,7 @@ const BuffGear = {
   },
   equip(set) {
     if (this.matches(set)) return true;
-    const weapon = this.find(set.weapon), shield = this.find(set.shield);
+    const weapon = this.lookup(set, set.weapon), shield = this.lookup(set, set.shield);
     if (!weapon || !this.weapon(weapon) || set.shield && (!shield || set !== this.run.home && !this.shield(shield))) { this.fail('Required equipment missing or ambiguous.'); return false; }
     if (this.at(7) && this.key(this.at(7)) !== set.shield) {
       const gp = World.gp;
@@ -4520,7 +4574,14 @@ const BuffGear = {
     if (r.pending) {
       const p = r.pending;
       if (!gp.inventoryPending && this.key(this.at(p.destination)) === p.from && this.key(this.at(p.source)) === p.to) r.pending = null;
-      else { if (now() - p.at > 15000) this.fail('Equipment move unconfirmed; no retry sent.'); return true; }
+      else {
+        if (now() - p.at > 15000) {
+          // The game refused to wear it (level, class): do not pick that weapon again for this session.
+          if (r.queue[0]?.set.auto && p.destination === 6) this.bad.add(p.from);
+          this.fail('Equipment move unconfirmed; no retry sent.');
+        }
+        return true;
+      }
     }
     if (r.cast) {
       const p = r.cast, remaining = World.buffRemaining(p.id);
@@ -4548,7 +4609,7 @@ const BuffGear = {
     if (!this.equip(q.set)) return true;
     const entry = q.buffs[0];
     if (!entry) { r.queue.shift(); return true; }
-    if (!this.due(entry.b)) { q.buffs.shift(); return true; }
+    if (!this.due(entry.b, q.set.auto)) { q.buffs.shift(); return true; }
     if (Combat.cast(entry.id, 0)) {
       Combat.buffCastAt.set(entry.b.group, now()); q.buffs.shift();
       r.cast = { id: entry.id, group: entry.b.group, at: now(), until: now() + Math.max(1000, World.skill(entry.id)?.actionMs || 6000) + 500, accepted: false, visible: false };
@@ -4563,13 +4624,27 @@ const BuffGear = {
       return { name: World.skillName(id || b.id), left: id ? World.buffRemaining(id) : 0, learned: !!id && World.learned(id), skip: this.skipped.get(b.group) };
     });
   },
+  // Enabled buffs the cycle wears a weapon for on its own, with the bag weapon it would pick.
+  autoList() {
+    if (!this.auto()) return [];
+    return this.cfg().buffs.filter(b => this.owns(b)).map(b => {
+      const id = Combat.resolve(b), kinds = this.need(id), w = this.pick(kinds);
+      return { name: World.skillName(id), left: World.buffRemaining(id), kinds: this.kindName(kinds), weapon: w && (w.name || Items.name(w.refObjId)), skip: this.skipped.get(b.group) };
+    });
+  },
   status() {
     if (this.run || this.recovery) return this.message;
     if (!this.cfg().buffSwap) return 'Buff weapon swapping off.';
-    const sets = this.cfg().buffSets, list = this.assigned();
-    if (!sets.length) return 'Buff weapon swapping is on, but no buff set is saved yet. Equip the buff weapon and press Save equipped buff set.';
-    if (!list.length) return 'Buff weapon swapping is on, but no buff skill is assigned to a set yet. Use Gear for <skill> under your buffs.';
+    const sets = this.cfg().buffSets, list = this.assigned(), auto = this.autoList();
+    if (!auto.length && !sets.length) return 'Buff weapon swapping is on, but no buff set is saved yet. Equip the buff weapon and press Save equipped buff set.' + (this.cfg().buffAuto ? ' Buffs that need a different weapon than yours are swapped automatically; none do right now.' : '');
+    if (!auto.length && !list.length) return 'Buff weapon swapping is on, but no buff skill is assigned to a set yet. Use Gear for <skill> under your buffs.';
     const lines = [];
+    for (const a of auto) {
+      if (a.skip && a.skip.signature === this.signature() && now() < a.skip.until) lines.push(`${a.name}: skipped because ${a.skip.why}.`);
+      else if (!a.weapon) lines.push(`${a.name}: needs a ${a.kinds}, and none you can use is in your bag.`);
+      else if (a.left > 0) lines.push(`${a.name}: active, ${Math.ceil(a.left / 1000)} s left; your ${a.weapon} is worn for it when it is about to end.`);
+      else lines.push(`${a.name}: due now; your ${a.weapon} is worn for it.`);
+    }
     for (const a of list) {
       if (!a.learned) lines.push(`${a.name}: not learned on this character, so it is never cast.`);
       else if (a.skip && a.skip.signature === this.signature() && now() < a.skip.until) lines.push(`${a.name}: skipped because ${a.skip.why}.`);
@@ -4580,8 +4655,9 @@ const BuffGear = {
   },
   draw(parent) {
     const box = UI.group('Buff weapon sets');
-    box.append(UI.check('Swap weapons for assigned buffs', () => this.cfg().buffSwap, v => this.cfg().buffSwap = v),
-      el('p', 'Equip a buff weapon and optional shield, save the set, then put your combat gear back on. Assign each buff below to its set. Multiple sets run in turn while hunting; original combat gear is restored afterward. Keep one bag slot free. Buffs tied to the removed weapon may end.', 'muted'));
+    box.append(UI.check('Swap weapons for buffs', () => this.cfg().buffSwap, v => this.cfg().buffSwap = v),
+      UI.check('Wear the weapon each buff needs (from your bag)', () => this.cfg().buffAuto, v => this.cfg().buffAuto = v),
+      el('p', 'With both on, a buff your weapon cannot cast is cast with a matching weapon from your bag, then your combat weapon and shield come back. Saved sets below are only for buffs you assign to one. Keep one bag slot free. Buffs tied to the removed weapon may end.', 'muted'));
     const name = el('input'); name.type = 'text'; name.maxLength = 40; name.value = 'Buff set ' + (this.cfg().buffSets.length + 1);
     box.append(UI.field('New buff set name', name), UI.button('Save equipped buff set', () => this.save(name.value)));
     for (const set of this.cfg().buffSets) {
@@ -4605,7 +4681,7 @@ const normalBuffs = Combat.buffs;
 Combat.buffs = function (hunting) {
   // Assigned buffs are owned exclusively by the gear cycle, including when off.
   const original = Settings.profile.macro.buffs;
-  Settings.profile.macro.buffs = original.filter(b => !b.gearSet);
+  Settings.profile.macro.buffs = original.filter(b => !b.gearSet && !BuffGear.owns(b));
   try { return normalBuffs.call(this, hunting); }
   finally { Settings.profile.macro.buffs = original; }
 };
@@ -8860,7 +8936,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.132", "title": "Berserk has its own Giant party switch", "items": ["**Combat -> Berserk** now has a **Giant party** switch, right under Giants. Berserk on party Giants follows it; other party monsters still follow **Party monsters**, so you can save Berserk for party Giants without spending it on every party mob.", "Saved profiles keep working: until you change it, **Giant party** takes whatever **Party monsters** was set to, so nobody loses Berserk on party Giants after updating. New profiles start with it off.", "Reported by Rebraxin (PR #11)."], "note": "Tested in simulation, and a player confirmed Berserk fired on party Giants on the live server."}, {"version": "1.2.131", "title": "Type in or copy hunting spot coordinates on the Map", "items": ["The **Map** page's **Hunting area** now has **X** and **Y** fields: type the outdoor coordinates (whole metres, as shown on the map) and press **Set spot** to save that place as the hunting spot. Wrong values, dungeons and not being in the world are refused with a message.", "**Set actual position** saves where you stand, as **Set hunting spot here** did. **Get position** fills in your current coordinates and **Copy** copies them, without changing the saved spot.", "Clicking the map and pressing **Make this the hunting spot** works as before. A typed spot uses your current height, the same as a map click.", "Contributed by BigzGit (PR #3)."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.130", "title": "Pet summon scrolls are never sold", "items": ["Town trips sold pet summon scrolls and flutes kept in the pickup pet's bag at the weapon merchant, because the pet-loot rules treated them as ordinary items. Selling one loses that pet. From 1.2.126 to 1.2.128, **Sell items from the character bag too** could also sell them from your own bag.", "Pet summon scrolls and flutes are now never sold, from the pet or the bag, not even with a Sell rule.", "If you lost one, the merchant's buyback list keeps your last 5 sold items; it may still be there if little was sold after it."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.129", "title": "Bag selling only sells ordinary gear", "items": ["**Sell items from the character bag** used the pet-loot rules, which are meant for drops. In your own bag that could sell pet summon scrolls and flutes, avatars, devil spirits, job suits and item mall items such as Premium or stat-reset scrolls. It now sells only ordinary Chinese and European weapons, armour, shields and accessories (renamed **Sell ordinary gear from the character bag too**). Other bag items are sold only if you give them a Sell rule.", "With bag selling on and a full bag, the trip no longer stops at the warehouse with \"No temporary character bag slot\": it sells at the repair merchant first, then visits the warehouse.", "After reconnecting in town, the town cycle starts from where the character stands instead of waiting at the return-scroll landing spot (which timed out after 90 s and stopped hunting). In a different town from your saved services the bot walks back instead."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.128", "title": "Town trips no longer stop on an item the merchant won't buy", "items": ["A town trip could stop at the weapon merchant with \"Inventory rejected: 2\". The bot had tried to sell an item the game does not allow merchants to buy (quest and event items, for example), and one refusal ended the whole trip.", "Items the game marks unsellable are now never offered, even with a Sell rule. They stay in the pet or bag.", "If the merchant still refuses an item, the bot keeps it, logs a warning and sells the rest, then carries on with the trip.", "Written from the code and simulated game state; not yet seen on a live server."]}, {"version": "1.2.127", "title": "Bag selling no longer stops on a full bag", "items": ["With **Sell items from the character bag too** on, a town trip with a completely full bag stopped before it ever reached the merchant that sells: at arrival (\"free a character bag slot\"), or at the potion merchant (no room for potions).", "Now, with that switch on, the trip goes to the repair merchant first (sell, ammunition, repair), then the potion merchant, then the world statue. A full bag is emptied before potions are bought. With the switch off, the order is unchanged.", "Written from the code and simulated game state; not yet seen on a live server."]}, {"version": "1.2.126", "title": "Sell from the character bag on town trips", "items": ["New switch in Scroll town cycle: **Sell items from the character bag too**. When on, the town trip sells unprotected items from your own bag at the repair merchant, after the pet loot, by the same rules as pet loot. Off by default.", "Never sold from the bag: potions, scrolls, supplies, Keep names, buff-set gear, the alchemy weapon, and anything with a Store, Keep or Drop rule. A Sell rule always sells.", "Tested in simulation only; not yet confirmed on the live server."]}, {"version": "1.2.125", "title": "Keep reconnecting through a long outage", "items": ["Overnight the bot could end up stopped with the game's \"Disconnected from the server.\" box on screen. Two gaps: that plain box (no \"session ended\" text) only ever repeated the same enter-character attempts, which fail once the server has dropped the login; and the limit of 3 page reloads per 30 minutes was permanent, so a server that was down for hours used up the reloads and the bot never tried again.", "Now, when the resume and three fresh entries have failed, the bot reloads the page just like after \"session ended\": the game restores the login from its own session cookie, the bot enters the character and hunting resumes.", "The reload limit is a pause: once the oldest reload is 30 minutes old, the bot tries again, for up to the 12 hours it keeps reconnecting."], "note": "Written from the code and simulated game state; not yet seen on a live server."}];
+const RELEASE_NOTES = [{"version": "1.2.133", "title": "Buffs now wear the weapon they need", "items": ["With **Swap weapons for buffs** on, a buff your current weapon cannot cast is now cast with a matching weapon from your bag, picked from the skill's own weapon requirement. No saved buff set is needed. Your combat weapon and shield come back afterward.", "The best usable bag weapon is used (highest +, not broken, within your level). Identical copies of a weapon no longer block the swap. A weapon the game refuses to equip is not tried again.", "One-handed buff weapons keep your shield on; two-handed ones take it off and put it back. Keep one bag slot free.", "The Buffs & imbue page shows what each automatic buff is waiting for, or that no usable weapon is in your bag. **Wear the weapon each buff needs** switches this off; saved sets still work for buffs you assign to one.", "Every equipment move is still confirmed before the next step or the cast. Imbues and attack skills are not swapped."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.132", "title": "Berserk has its own Giant party switch", "items": ["**Combat -> Berserk** now has a **Giant party** switch, right under Giants. Berserk on party Giants follows it; other party monsters still follow **Party monsters**, so you can save Berserk for party Giants without spending it on every party mob.", "Saved profiles keep working: until you change it, **Giant party** takes whatever **Party monsters** was set to, so nobody loses Berserk on party Giants after updating. New profiles start with it off.", "Reported by Rebraxin (PR #11)."], "note": "Tested in simulation, and a player confirmed Berserk fired on party Giants on the live server."}, {"version": "1.2.131", "title": "Type in or copy hunting spot coordinates on the Map", "items": ["The **Map** page's **Hunting area** now has **X** and **Y** fields: type the outdoor coordinates (whole metres, as shown on the map) and press **Set spot** to save that place as the hunting spot. Wrong values, dungeons and not being in the world are refused with a message.", "**Set actual position** saves where you stand, as **Set hunting spot here** did. **Get position** fills in your current coordinates and **Copy** copies them, without changing the saved spot.", "Clicking the map and pressing **Make this the hunting spot** works as before. A typed spot uses your current height, the same as a map click.", "Contributed by BigzGit (PR #3)."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.130", "title": "Pet summon scrolls are never sold", "items": ["Town trips sold pet summon scrolls and flutes kept in the pickup pet's bag at the weapon merchant, because the pet-loot rules treated them as ordinary items. Selling one loses that pet. From 1.2.126 to 1.2.128, **Sell items from the character bag too** could also sell them from your own bag.", "Pet summon scrolls and flutes are now never sold, from the pet or the bag, not even with a Sell rule.", "If you lost one, the merchant's buyback list keeps your last 5 sold items; it may still be there if little was sold after it."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.129", "title": "Bag selling only sells ordinary gear", "items": ["**Sell items from the character bag** used the pet-loot rules, which are meant for drops. In your own bag that could sell pet summon scrolls and flutes, avatars, devil spirits, job suits and item mall items such as Premium or stat-reset scrolls. It now sells only ordinary Chinese and European weapons, armour, shields and accessories (renamed **Sell ordinary gear from the character bag too**). Other bag items are sold only if you give them a Sell rule.", "With bag selling on and a full bag, the trip no longer stops at the warehouse with \"No temporary character bag slot\": it sells at the repair merchant first, then visits the warehouse.", "After reconnecting in town, the town cycle starts from where the character stands instead of waiting at the return-scroll landing spot (which timed out after 90 s and stopped hunting). In a different town from your saved services the bot walks back instead."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.128", "title": "Town trips no longer stop on an item the merchant won't buy", "items": ["A town trip could stop at the weapon merchant with \"Inventory rejected: 2\". The bot had tried to sell an item the game does not allow merchants to buy (quest and event items, for example), and one refusal ended the whole trip.", "Items the game marks unsellable are now never offered, even with a Sell rule. They stay in the pet or bag.", "If the merchant still refuses an item, the bot keeps it, logs a warning and sells the rest, then carries on with the trip.", "Written from the code and simulated game state; not yet seen on a live server."]}, {"version": "1.2.127", "title": "Bag selling no longer stops on a full bag", "items": ["With **Sell items from the character bag too** on, a town trip with a completely full bag stopped before it ever reached the merchant that sells: at arrival (\"free a character bag slot\"), or at the potion merchant (no room for potions).", "Now, with that switch on, the trip goes to the repair merchant first (sell, ammunition, repair), then the potion merchant, then the world statue. A full bag is emptied before potions are bought. With the switch off, the order is unchanged.", "Written from the code and simulated game state; not yet seen on a live server."]}, {"version": "1.2.126", "title": "Sell from the character bag on town trips", "items": ["New switch in Scroll town cycle: **Sell items from the character bag too**. When on, the town trip sells unprotected items from your own bag at the repair merchant, after the pet loot, by the same rules as pet loot. Off by default.", "Never sold from the bag: potions, scrolls, supplies, Keep names, buff-set gear, the alchemy weapon, and anything with a Store, Keep or Drop rule. A Sell rule always sells.", "Tested in simulation only; not yet confirmed on the live server."]}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -10235,7 +10311,7 @@ const UI = {
       up.setAttribute('aria-label', 'Move up ' + World.skillName(id)); down.setAttribute('aria-label', 'Move down ' + World.skillName(id)); remove.setAttribute('aria-label', 'Delete ' + World.skillName(id));
       row.append(this.skillSlot(id, () => {}, World.skillName(id)), info, up, down, remove); parent.append(row);
       if (buff) parent.append(this.select('Gear for ' + World.skillName(id),
-        () => [[0, 'Current combat gear'], ...Settings.profile.macro.buffSets.map(s => [s.id, s.name])],
+        () => [[0, BuffGear.auto() ? 'Automatic: the weapon the skill needs' : 'Current combat gear'], ...Settings.profile.macro.buffSets.map(s => [s.id, s.name])],
         () => entry.gearSet || 0, value => entry.gearSet = Number(value)));
     });
     const search = el('input'); search.type = 'search'; search.placeholder = 'Find a skill…'; search.setAttribute('aria-label', buff ? 'Search buff skills' : 'Search attack skills');

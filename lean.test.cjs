@@ -4164,6 +4164,64 @@ test('buff gear status lists each assigned buff, and a cast that was only unconf
   f.BuffGear.skipped.set(group, { signature: f.BuffGear.signature(), until: 0, why: 'x' });
   assert.ok(f.BuffGear.due(f.Settings.profile.macro.buffs[1]) > 0, 'the skip has expired'); assert.equal(f.BuffGear.skipped.has(group), false);
 });
+// Skill-driven swapping: the game's own weaponKinds say which weapon a buff needs; no saved set is involved.
+function autoGearFixture(){
+  const f=buffGearFixture(), gp=f.World.gp;
+  f.World.catalog.set(20,{...f.World.catalog.get(20),admit:{weaponKinds:[15,255]}});
+  f.World.catalog.set(30,{...f.World.catalog.get(30),admit:{weaponKinds:[14,255]}});
+  f.Settings.profile.macro.buffSets=[]; f.Settings.profile.macro.buffAuto=true;
+  f.Settings.profile.macro.buffs=[{id:20,group:20,gearSet:0,enabled:true,mode:'hunt'},{id:30,group:30,gearSet:0,enabled:true,mode:'hunt'}];
+  return f;
+}
+test('buff gear wears the weapon each buff needs and restores the combat weapon and shield',()=>{
+  const f=autoGearFixture(), gp=f.World.gp, home=JSON.stringify(f.BuffGear.setup());
+  assert.equal(f.BuffGear.owns(f.Settings.profile.macro.buffs[0]),true);
+  assert.equal(f.BuffGear.tick(),true);
+  const casts=[]; const cast=f.Combat.cast.bind(f.Combat); f.Combat.cast=(id,...a)=>{casts.push([id,gp.inventory.find(i=>i.slot===6).refObjId,gp.inventory.find(i=>i.slot===7)?.refObjId]);return cast(id,...a);};
+  f.drive();
+  assert.deepEqual(casts.map(c=>c[0]),[20,30]);
+  assert.deepEqual(casts[0].slice(1),[200,101],'one-handed staff keeps the shield on');
+  assert.deepEqual(casts[1].slice(1),[300,undefined],'the harp is worn without the shield');
+  assert.equal(JSON.stringify(f.BuffGear.setup()),home);
+  assert.equal(f.BuffGear.recovery,null);
+});
+test('buff gear leaves buffs the worn weapon already satisfies to the normal buff loop',()=>{
+  const f=autoGearFixture(), gp=f.World.gp;
+  gp.inventory.find(i=>i.slot===6).typeFlags=(15<<11)|(6<<7)|44;
+  assert.equal(f.BuffGear.owns(f.Settings.profile.macro.buffs[0]),false);
+  assert.equal(f.BuffGear.owns(f.Settings.profile.macro.buffs[1]),true);
+  f.Settings.profile.macro.buffAuto=false; assert.equal(f.BuffGear.owns(f.Settings.profile.macro.buffs[1]),false);
+});
+test('buff gear says when no bag weapon fits a buff and sends nothing',()=>{
+  const f=autoGearFixture(), gp=f.World.gp;
+  gp.inventory=gp.inventory.filter(i=>i.slot!==15);
+  f.Settings.profile.macro.buffs=[f.Settings.profile.macro.buffs[1]];
+  const count=f.commands.length;
+  assert.equal(f.BuffGear.tick(),false); assert.equal(f.commands.length,count);
+  assert.match(f.BuffGear.waiting,/needs a harp, and none you can use is in your bag/);
+  assert.match(f.BuffGear.status(),/needs a harp/);
+});
+test('buff gear takes any copy of identical weapons and skips ones above the character level or broken',()=>{
+  const f=autoGearFixture(), gp=f.World.gp;
+  gp.inventory.push({...gp.inventory.find(i=>i.slot===15),slot:16});
+  f.Settings.profile.macro.buffs=[f.Settings.profile.macro.buffs[1]];
+  assert.equal(f.BuffGear.tick(),true,'identical copies do not block the swap');
+  f.BuffGear.run=null;
+  gp.inventory.find(i=>i.slot===15).durability=0;
+  assert.equal(f.BuffGear.pick([14]).slot,16,'a broken weapon is not picked');
+  gp.progression={level:10}; f.ItemRules.requiredLevel=()=>50;
+  assert.equal(f.BuffGear.pick([14]),null,'a weapon the character cannot wield is not picked');
+});
+test('buff gear never picks a weapon the game refused to equip again, and stops safely',()=>{
+  const f=autoGearFixture(), gp=f.World.gp;
+  f.Settings.profile.macro.buffs=[f.Settings.profile.macro.buffs[0]];
+  f.BuffGear.tick(); f.BuffGear.tick();
+  assert.ok(f.BuffGear.run.pending,'the move is sent and waits for confirmation');
+  for(let n=0;n<60;n++){f.advance(300);f.BuffGear.tick();}
+  assert.equal(f.BuffGear.run,null); assert.equal(f.Hunt.running,false);
+  assert.ok(f.BuffGear.bad.size===1);
+  assert.equal(f.BuffGear.pick([15]),null);
+});
 test('buff gear waits for actual inventory confirmation and never casts with stale equipment',()=>{
   const f=buffGearFixture(); f.BuffGear.tick(); f.BuffGear.tick();
   const count=f.commands.length; assert.ok(f.BuffGear.run.pending);

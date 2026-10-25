@@ -89,9 +89,13 @@ The XP and timer clocks run only while hunting and restart with every trip, so a
 
 ## Buff weapon swapping
 
+With **Swap weapons for buffs** and **Wear the weapon each buff needs** on, a buff your current weapon cannot cast is cast with a matching weapon from your bag (taken from the skill's own weapon requirement), then your combat weapon and shield are restored. No saved set is needed. Keep one bag slot free. Imbues and attack skills are not swapped.
+
+Saved sets, described below, are for buffs you assign to one.
+
 In **Combat → Buffs & imbue**, equip your buff weapon and optional shield, name the set and click **Save equipped buff set**. Repeat for other sets (such as cleric and bard), then put your combat gear back on.
 
-Assign each selected buff to its set and enable **Swap weapons for assigned buffs**. While hunting, the bot equips each needed set, casts its buffs and restores your original combat weapon and off-hand. Keep one bag slot free. Assigned buffs are skipped while swapping is off.
+Assign each selected buff to its set and enable **Swap weapons for buffs**. While hunting, the bot equips each needed set, casts its buffs and restores your original combat weapon and off-hand. Keep one bag slot free. Assigned buffs are skipped while swapping is off.
 
 The Buffs & imbue page shows, for each buff assigned to a set, how long it has left and what the swap is waiting for, and says why when a buff is due but the swap cannot start (for example a saved weapon that cannot be found in the bag). The swap happens when a buff is about to end, not when you start hunting. A buff whose cast was only unconfirmed is tried again after two minutes.
 
