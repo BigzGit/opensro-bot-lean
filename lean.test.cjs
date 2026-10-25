@@ -4212,15 +4212,34 @@ test('buff gear takes any copy of identical weapons and skips ones above the cha
   gp.progression={level:10}; for(const i of gp.inventory.filter(i=>i.slot>=13))i.tooltip={fields:{reqLevelType1:1,requiredLevel:50}};
   assert.equal(f.BuffGear.pick([14]),null,'a weapon the character cannot wield is not picked');
 });
-test('buff gear never picks a weapon the game refused to equip again, and stops safely',()=>{
+test('buff gear never picks a weapon the game refused to equip again',()=>{
   const f=autoGearFixture(), gp=f.World.gp;
   f.Settings.profile.macro.buffs=[f.Settings.profile.macro.buffs[0]];
   f.BuffGear.tick(); f.BuffGear.tick();
   assert.ok(f.BuffGear.run.pending,'the move is sent and waits for confirmation');
   for(let n=0;n<60;n++){f.advance(300);f.BuffGear.tick();}
-  assert.equal(f.BuffGear.run,null); assert.equal(f.Hunt.running,false);
+  assert.equal(f.BuffGear.run,null); assert.equal(f.Hunt.running,true);
   assert.ok(f.BuffGear.bad.size===1);
   assert.equal(f.BuffGear.pick([15]),null);
+});
+test('buff gear carries on when the game refuses a picked weapon, and restores gear',()=>{
+  const f=autoGearFixture(), gp=f.World.gp, home=JSON.stringify(f.BuffGear.setup());
+  f.Settings.profile.macro.buffs=[f.Settings.profile.macro.buffs[0]];
+  f.BuffGear.tick(); f.BuffGear.tick();
+  assert.ok(f.BuffGear.run.pending);
+  for(let n=0;n<20&&f.BuffGear.run?.pending;n++){f.advance(300);f.BuffGear.tick();}
+  assert.equal(f.BuffGear.run?.pending??null,null,'a refused move is dropped without waiting fifteen seconds');
+  assert.equal(f.BuffGear.recovery,null); assert.equal(f.Hunt.running,true,'hunting is not stopped');
+  assert.equal(f.BuffGear.bad.size,1);
+  for(let n=0;n<10&&f.BuffGear.run;n++){f.BuffGear.tick();f.advance(1200);}
+  assert.equal(JSON.stringify(f.BuffGear.setup()),home);
+  assert.match(f.BuffGear.message,/would not equip/);
+});
+test('buff gear failure names the move that was not confirmed',()=>{
+  const f=buffGearFixture(); f.BuffGear.tick(); f.BuffGear.tick();
+  f.World.gp.inventoryPending=true;
+  for(let n=0;n<60;n++){f.advance(300);f.BuffGear.tick();}
+  assert.match(f.BuffGear.message,/Equipment move unconfirmed \(.*slot \d+ to \d+\)/);
 });
 test('buff gear waits for actual inventory confirmation and never casts with stale equipment',()=>{
   const f=buffGearFixture(); f.BuffGear.tick(); f.BuffGear.tick();

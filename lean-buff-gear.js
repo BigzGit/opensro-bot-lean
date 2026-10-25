@@ -195,10 +195,17 @@ const BuffGear = {
       const p = r.pending;
       if (!gp.inventoryPending && this.key(this.at(p.destination)) === p.from && this.key(this.at(p.source)) === p.to) r.pending = null;
       else {
+        const item = this.at(p.source) || this.at(p.destination), what = item ? item.name || Items.name(item.refObjId) : 'an item';
+        // Nothing moved and nothing is pending: the game refused it (level, class). Skip that weapon, put gear back, carry on.
+        const refused = !gp.inventoryPending && now() - p.at > 2000 && this.key(this.at(p.source)) === p.from && this.key(this.at(p.destination)) === p.to;
+        if (refused && !r.restoring && r.queue[0]?.set.auto && p.destination === 6) {
+          this.bad.add(p.from); r.pending = null; r.queue.shift();
+          r.refused = `The game would not equip ${what}; another weapon is tried next time.`; this.message = r.refused + ' Restoring combat gear.';
+          return true;
+        }
         if (now() - p.at > 15000) {
-          // The game refused to wear it (level, class): do not pick that weapon again for this session.
           if (r.queue[0]?.set.auto && p.destination === 6) this.bad.add(p.from);
-          this.fail('Equipment move unconfirmed; no retry sent.');
+          this.fail(`Equipment move unconfirmed (${what}, slot ${p.source} to ${p.destination}); no retry sent.`);
         }
         return true;
       }
@@ -221,7 +228,7 @@ const BuffGear = {
         this.skipped.set(p.group, { signature: r.signature, until: Infinity, why: 'it ended when the weapon changed back, so it stays with your combat weapon until buff settings change' });
         this.message = 'A buff ended after changing weapons; skipped until buff settings change.';
       }
-      if (this.message === 'Restoring combat gear.') this.message = 'Combat gear restored.';
+      if (this.message === 'Restoring combat gear.') this.message = (r.refused ? r.refused + ' ' : '') + 'Combat gear restored.';
       this.run = null; this.recovery = null; return true;
     }
     const q = r.queue[0];
