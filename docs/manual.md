@@ -233,7 +233,7 @@ Open **Settings → Session stats** for hunting time, XP/hour, net gold, confirm
 
 ## Map
 
-The **Map** page draws the game's minimap around you with your hunt radius (yellow circle) and chase distance (dashed ring), and shows you, monsters, party members (also ones out of sight, at the edge), other players, NPCs and pets. Click the map to mark a point and press **Make this the hunting spot** to hunt there; the point uses your current height, as the game's own map does. Drag to look around, use **+** and **−** or the mouse wheel to zoom, and **Follow me** to centre on yourself again. Hunt radius and chase distance can be changed under the map. Dungeons have no map yet.
+The **Map** page draws the game's minimap around you with your hunt radius (yellow circle) and chase distance (dashed ring), and shows you, monsters, party members (also ones out of sight, at the edge), other players, NPCs and pets. Click the map to mark a point and press **Make this the hunting spot** to hunt there; the point uses your current height, as the game's own map does. Under the map, **Hunting area** also takes outdoor **X** / **Y** coordinates in whole metres: **Set spot** saves them as the hunting spot, **Set actual position** saves where you stand, and **Get position** and **Copy** show and copy your current coordinates without changing the spot. Drag to look around, use **+** and **−** or the mouse wheel to zoom, and **Follow me** to centre on yourself again. Hunt radius and chase distance can be changed under the map. Dungeons have no map yet.
 
 ## Wide window
 
