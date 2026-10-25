@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, Trade, WalkBack, Navigation, Route, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound, LeanMap};\n})();';
+  'globalThis.bot = {Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, Trade, WalkBack, Navigation, Route, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, Lure, stopAll, toggleBot, boot, Ticker, Sound, LeanMap};\n})();';
 function fixture(document) {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -2956,6 +2956,99 @@ test('saved Berserk choices give party Giants the old Party monsters setting', (
   assert.equal(f.botProfile({ macro: { berserkClasses: { giant: true, party: false } } }).macro.berserkClasses.giantParty, false);
   assert.equal(f.botProfile({ macro: { berserkClasses: { party: true, giantParty: false } } }).macro.berserkClasses.giantParty, false, 'A saved Giant party choice wins');
   assert.equal(f.botProfile({}).macro.berserkClasses.giantParty, false);
+});
+// Lure: points A (30 m east of the spot) and B (20 m north), a single-target taunt and an area taunt.
+function lure() {
+  const f = fixture();
+  f.World.gp.skills = [3001, 3002];
+  f.World.rebuildCatalog([
+    { id: 3001, group: 950, level: 1, name: 'Taunt', targetRequired: true, targets: 4, range: 150 },
+    { id: 3002, group: 951, level: 1, name: 'Howling', targetRequired: false, targets: 1 },
+  ]);
+  Object.assign(f.Settings.profile.lure, { enabled: true, points: [{ regionId: 1, x: 400, y: 0, z: 100 }, { regionId: 1, x: 100, y: 0, z: 300 }],
+    taunt: { id: 3001, group: 950 }, area: { id: 3002, group: 951 } });
+  const mob = (gid, x, z = 100) => { const e = { gid, kind: 'monster', name: 'Mob ' + gid, rarity: 0, regionId: 1, x, y: 0, z, attackFlags: 16, appearanceState: [0] }; f.World.ents.set(gid, e); return e; };
+  const at = (x, z = 100) => { f.World.gp.pose = { regionId: 1, x, y: 0, z }; };
+  const step = () => { f.advance(1000); f.Hunt.tick(); };
+  const casts = id => f.commands.filter(c => c.kind === 'skill' && c.skillId === id);
+  // The game's cooldowns: 5 s for the single-target taunt, 10 s for the area taunt.
+  const post = f.Hook.post; f.World.gp.skillCooldowns = [];
+  f.Hook.post = msg => { post(msg); const c = msg.command.command; if (c.kind === 'skill') f.World.gp.skillCooldowns.push({ skill: c.skillId, startedAtMs: f.World.simNow(), durationMs: c.skillId === 3001 ? 5000 : 10000 }); };
+  f.Hunt.start();
+  return { f, mob, at, step, casts };
+}
+test('the lure walks to a pull point, taunts the nearest monster there and never attacks', () => {
+  const { f, mob, at, step, casts } = lure();
+  mob(40, 410); mob(41, 520);
+  step(); assert.equal(f.Lure.index, 0, 'starts with point A'); step(); assert.equal(f.Hunt.state, 'lure'); assert.equal(f.Lure.phase, 'out');
+  assert.equal(f.commands.at(-1).kind, 'move', 'walks towards point A');
+  assert.equal(casts(3002).length, 0, 'no area taunt with no monster near');
+  at(400); step(); assert.equal(casts(3002).length, 1, 'the area taunt goes out as soon as a monster is near');
+  step(); assert.equal(f.Lure.phase, 'taunt');
+  step(); assert.deepEqual(f.commands.filter(c => c.kind === 'select').map(c => c.gid), [40], 'the monster nearest the point');
+  f.World.gp.target = 40; step();
+  assert.equal(casts(3001).length, 1); assert.equal(casts(3001)[0].gid, 40);
+  assert.equal(f.Lure.phase, 'back'); assert.equal(f.Lure.pulled, true);
+  assert.equal(f.commands.some(c => c.kind === 'attack'), false, 'the lure never attacks');
+});
+test('after a pull the lure brings the monsters back, holds without the area taunt, then goes to the next point', () => {
+  const { f, mob, at, step, casts } = lure();
+  mob(40, 410); step(); at(400); step(); step(); step(); f.World.gp.target = 40; step();
+  assert.equal(f.Lure.phase, 'back');
+  const area = casts(3002).length;
+  at(100); f.World.ents.get(40).x = 110; step();
+  assert.equal(f.Lure.phase, 'hold');
+  f.World.gp.skillCooldowns = []; // the area taunt is ready and the monster is near
+  step(); step(); assert.equal(f.Lure.phase, 'hold', 'holds for the configured 4 s');
+  assert.equal(casts(3002).length, area, 'no area taunt while the party takes over');
+  assert.equal(f.commands.some(c => c.kind === 'attack'), false);
+  step(); step(); assert.equal(f.Lure.phase, 'out'); assert.equal(f.Lure.index, 1);
+  f.World.ents.delete(40); step(); const move = f.commands.at(-1);
+  assert.equal(move.kind, 'move'); assert.ok(move.destination.z > 100, 'walks towards point B');
+});
+test('a pull point with no monster sends the lure straight back with no hold', () => {
+  const { f, at, step } = lure();
+  step(); at(400); step(); assert.equal(f.Lure.phase, 'taunt');
+  step(); assert.equal(f.Lure.phase, 'back'); assert.equal(f.Lure.pulled, false);
+  at(100); step(); assert.equal(f.Lure.phase, 'out', 'nothing pulled, so no hold'); assert.equal(f.Lure.index, 1);
+});
+test('the lure gives up a pull below the HP threshold and brings the character back', () => {
+  const { f, mob, at, step } = lure();
+  mob(40, 410); step(); at(300); step(); assert.equal(f.Lure.phase, 'out');
+  f.World.me = () => ({ hpPct: 30, mpPct: 100 }); step();
+  assert.equal(f.Lure.phase, 'back'); assert.ok(f.commands.at(-1).destination.x < 300, 'walks back to the spot');
+});
+test('the Lure panel picks the two taunts and adds or removes pull points', () => {
+  const nodes = [];
+  const document = { createElement(tag) {
+    const events = {}, node = { tag, children: [], className: '', value: '', dataset: {}, style: {},
+      classList: { add() {} }, setAttribute() {}, append(...children) { this.children.push(...children); }, replaceChildren(...children) { this.children = children; },
+      addEventListener(name, fn) { events[name] = fn; }, click() { events.click?.(); }, querySelectorAll() { return []; } };
+    nodes.push(node); return node;
+  } };
+  const f = fixture(document); f.UI.draw = () => {};
+  f.World.gp.skills = [3001, 3002];
+  f.World.rebuildCatalog([{ id: 3001, group: 950, level: 1, name: 'Taunt', targetRequired: true, targets: 4 }, { id: 3002, group: 951, level: 1, name: 'Howling', targetRequired: false, targets: 1 }]);
+  f.Lure.draw(document.createElement('div'));
+  const text = n => n.textContent ?? '', labels = nodes.map(text);
+  for (const label of ['Lure instead of hunting', 'Single-target taunt', 'Area taunt', 'Hold at the spot (s)', 'Add pull point here']) assert.ok(labels.includes(label), label);
+  f.World.gp.pose = { regionId: 1, x: 400, y: 0, z: 100 };
+  nodes.find(n => n.tag === 'button' && text(n) === 'Add pull point here').click();
+  assert.deepEqual(JSON.parse(JSON.stringify(f.Settings.profile.lure.points)), [{ regionId: 1, x: 400, y: 0, z: 100 }]);
+  nodes.length = 0; f.Lure.draw(document.createElement('div'));
+  assert.ok(nodes.some(n => text(n) === 'Point A: 30 m from the spot'));
+  nodes.find(n => n.tag === 'button' && text(n) === 'Remove point A').click();
+  assert.equal(f.Settings.profile.lure.points.length, 0);
+});
+test('the lure needs points and a saved spot, and pull points stay with their character', () => {
+  const { f, step } = lure();
+  f.Settings.profile.lure.points = []; assert.equal(f.Lure.on(), false, 'no points: hunting as usual');
+  f.Settings.profile.lure.points = [{ regionId: 1, x: 400, y: 0, z: 100 }]; f.Settings.profile.hunt.center = null; step();
+  assert.equal(f.Hunt.running, false, 'no hunting spot: stops instead of guessing');
+  const points = [{ regionId: 1, x: 1, y: 0, z: 2 }];
+  assert.deepEqual(JSON.parse(JSON.stringify(f.botProfile({ lure: { points } }).lure.points)), points);
+  assert.equal(f.botProfile({}).lure.enabled, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(f.ProfileShare.personal(f.Settings.profile).pullPoints)), [{ regionId: 1, x: 400, y: 0, z: 100 }]);
 });
 test('town cycle does not repeat unconfirmed pet transfers and stops on full storage', () => {
   const f = townFixture(); f.Town.begin(); f.Town.enter('store');

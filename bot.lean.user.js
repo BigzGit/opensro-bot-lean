@@ -197,6 +197,7 @@ const DEFAULT_PROFILE = {
   trade: { from: 'CH', to: 'WC', trips: 1, potions: true, goods: 0 },
   trace: { enabled: false, name: '', distance: 12, fight: true },
   mastery: { enabled: false, ids: [], gap: 0, skills: false, scope: 'rotation', reserve: 0, order: 'masteries' },
+  lure: { enabled: false, points: [], taunt: { id: 0, group: 0 }, area: { id: 0, group: 0 }, holdS: 4, radius: 15, returnHpPct: 50 },
   party: { autoAcceptMatching: false, autoRecruit: false, joinMain: false, mainName: '', autoRes: false, acceptRes: false, resRadius: 300, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true,
     support: { enabled: false, whileStopped: false, range: 30, heal: { id: 0, group: 0, pct: 60, self: false }, group: { id: 0, group: 0, pct: 60, count: 2 }, buffs: [] } },
   wardrobe: { on: true, phantom: true, realAnim: true, hideAvatars: false,
@@ -242,7 +243,7 @@ const DEFAULT_PROFILE = {
 function botProfile(input) {
   const result = deepMerge(DEFAULT_PROFILE, {});
   if (!input || typeof input !== 'object') return result;
-  for (const key of ['macro', 'potion', 'hunt', 'wardrobe', 'party', 'alchemy', 'mastery', 'statPoints', 'trace', 'items', 'trade']) {
+  for (const key of ['macro', 'potion', 'hunt', 'lure', 'wardrobe', 'party', 'alchemy', 'mastery', 'statPoints', 'trace', 'items', 'trade']) {
     if (!input[key] || typeof input[key] !== 'object') continue;
     for (const field of Object.keys(DEFAULT_PROFILE[key])) {
       if (field in input[key]) result[key][field] = deepMerge(DEFAULT_PROFILE[key][field], input[key][field]);
@@ -5143,12 +5144,139 @@ const Trade = {
 };
 
 
+// Lure: a tank pulls monsters to the party instead of hunting. It walks to each saved pull point in turn, taunts the
+// nearest monster there, walks back to the hunting spot and holds a few seconds so the damage dealers take over,
+// then goes to the next point. It never attacks. The area taunt is cast whenever it is ready and a monster is near,
+// except while holding at the spot. No stuck handling yet: a point without a walkable route stops hunting.
+const LURE_ARRIVAL = 30;      // 3 m
+const LURE_TAUNT_MS = 10000;  // give up on a pull point's target after this long and walk back
+const Lure = {
+  phase: 'back', index: -1, holdUntil: 0, phaseAt: 0, target: 0, pulled: false, sentAt: -Infinity, travel: null, message: 'Lure off.',
+  cfg() { return Settings.profile.lure; },
+  on() { return !!this.cfg().enabled && this.cfg().points.length > 0; },
+  // Every start begins at the hunting spot, with no hold since nothing was pulled yet; the next point is then A.
+  reset() { this.enter('back'); this.index = -1; this.pulled = false; },
+  enter(phase) { this.phase = phase; this.phaseAt = now(); this.target = 0; this.travel = null; this.sentAt = -Infinity; },
+  addPoint() {
+    const p = World.pose();
+    if (!World.inWorld() || !p) return UI.toast('Enter the game first.', 'warn');
+    if (this.cfg().points.length >= 26) return UI.toast('Up to 26 pull points (A to Z).', 'warn');
+    this.cfg().points.push({ regionId: p.regionId, x: p.x, y: p.y, z: p.z });
+    this.reset(); Settings.saveProfile(); UI.draw();
+  },
+  removePoint(i) { this.cfg().points.splice(i, 1); this.reset(); Settings.saveProfile(); UI.draw(); },
+  skill(entry) { return entry?.group ? World.bestOfGroup(entry.group, entry.id) || entry.id : 0; },
+  ready(id) { return !!id && !Combat.blocked(id) && Cmd.canCast(id) && Combat.mpOk(id, World.me()); },
+  // The living monster closest to `from` within the search radius.
+  nearest(from) {
+    const radius = (Number(this.cfg().radius) || 15) * 10;
+    let best = null, bestD = Infinity;
+    for (const e of World.ents.values()) {
+      if (!isAttackableMob(e)) continue;
+      const d = dist2D(from, e);
+      if (d <= radius && d < bestD) { best = e; bestD = d; }
+    }
+    return best;
+  },
+  // One step towards `destination`; true once there.
+  walk(destination, arrival = LURE_ARRIVAL) {
+    if (dist2D(World.pose(), destination) <= arrival) return true;
+    const move = Navigation.next(this, destination, false, arrival);
+    if (move.error && !move.waiting) { this.message = 'Lure: ' + move.error; Hunt.stop(this.message); return false; }
+    if (move.waiting) { this.message = move.error || 'Waiting for the route.'; return false; }
+    if (now() - this.sentAt >= 900 && Cmd.move(move.point)) this.sentAt = now();
+    return false;
+  },
+  areaTaunt() {
+    const id = this.skill(this.cfg().area);
+    if (this.phase === 'hold' || !this.ready(id) || !this.nearest(World.pose())) return false;
+    if (!Combat.cast(id, 0)) return false;
+    if (this.phase !== 'back') this.pulled = true;
+    return true;
+  },
+  tick() {
+    const c = this.cfg(), home = Settings.profile.hunt.center, point = c.points[this.index];
+    Hunt.state = 'lure';
+    if (!home) { this.message = 'Lure: save a hunting spot first.'; return Hunt.stop(this.message); }
+    if (!point && (this.phase === 'out' || this.phase === 'taunt')) this.reset();
+    if (World.isCasting() || now() - Combat.lastCastAt < (Settings.profile.macro.castGapMs ?? 250)) return;
+    if (this.areaTaunt()) return;
+    if (this.phase !== 'back' && this.phase !== 'hold' && World.me().hpPct < c.returnHpPct) {
+      this.enter('back'); this.message = 'Low HP: back to the party.'; Log.info('Lure: ' + this.message);
+    }
+    if (this.phase === 'out') {
+      this.message = 'Walking to pull point ' + String.fromCharCode(65 + this.index) + '.';
+      if (this.walk(point)) this.enter('taunt');
+      return;
+    }
+    if (this.phase === 'taunt') return this.taunt(point);
+    if (this.phase === 'back') {
+      this.message = 'Bringing monsters back to the party.';
+      if (!this.walk(home)) return;
+      if (!this.pulled) return this.next();
+      this.enter('hold'); this.holdUntil = now() + (Number(c.holdS) || 0) * 1000;
+    }
+    if (this.phase === 'hold') {
+      this.message = 'Holding while the party takes over.';
+      if (now() >= this.holdUntil) this.next();
+    }
+  },
+  next() { this.index = (this.index + 1) % this.cfg().points.length; this.pulled = false; this.enter('out'); },
+  // Pick the monster nearest the point, select it, get into range and cast the single-target taunt on it.
+  taunt(point) {
+    const id = this.skill(this.cfg().taunt);
+    if (!id || now() - this.phaseAt > LURE_TAUNT_MS) { this.enter('back'); return; }
+    let e = World.ents.get(this.target);
+    if (!e || !isAttackableMob(e)) {
+      e = this.nearest(point);
+      if (!e) { this.message = 'No monster at this pull point.'; this.enter('back'); return; }
+      this.target = e.gid; this.travel = null;
+    }
+    this.message = 'Taunting ' + (e.name || 'a monster') + '.';
+    const range = Math.max(10, (World.skill(id)?.range || 150) - 5);
+    if (dist2D(World.pose(), e) > range) { this.walk(e, range); return; }
+    if (!Cmd.select(e.gid) || World.gp.target !== e.gid || World.gp.targetPending || !this.ready(id)) return;
+    if (Combat.cast(id, e.gid)) { this.pulled = true; this.enter('back'); }
+  },
+  status() {
+    const c = this.cfg();
+    if (!c.enabled) return 'Lure off.';
+    if (!c.points.length) return 'Add at least one pull point.';
+    if (!this.skill(c.taunt) && !this.skill(c.area)) return 'Choose a taunt skill.';
+    return Hunt.running ? this.message : 'Start the bot to lure.';
+  },
+  draw(host) {
+    const c = () => this.cfg(), letter = i => String.fromCharCode(65 + i);
+    const pick = key => v => { const id = Number(v); c()[key] = { id, group: id ? World.skill(id)?.group ?? id : 0 }; };
+    const options = buff => () => [[0, 'None'], ...UI.learnedSkills(buff).map(s => [s.id, s.name || '#' + s.id])];
+    const box = UI.group('Lure',
+      UI.check('Lure instead of hunting', () => c().enabled, v => { c().enabled = v; this.reset(); }),
+      el('p', 'For a tank. Walks to each pull point in turn, taunts the nearest monster, brings it back to the hunting spot and holds while the party takes over. Never attacks. The area taunt goes out whenever it is ready and a monster is near, except while holding.', 'muted'),
+      UI.select('Single-target taunt', options(false), () => this.skill(c().taunt) || 0, pick('taunt')),
+      UI.select('Area taunt', options(true), () => this.skill(c().area) || 0, pick('area')),
+      UI.number('Hold at the spot (s)', () => c().holdS, v => c().holdS = v, 0, 30),
+      UI.number('Search radius at a point (m)', () => c().radius, v => c().radius = v, 3, 50),
+      UI.number('Back to the party below HP (%)', () => c().returnHpPct, v => c().returnHpPct = v, 0, 95),
+      UI.button('Add pull point here', () => this.addPoint()));
+    const center = Settings.profile.hunt.center;
+    c().points.forEach((p, i) => {
+      const d = center ? dist2D(center, p) : NaN;
+      box.append(UI.row(el('span', 'Point ' + letter(i) + ': ' + (Number.isFinite(d) ? Math.round(d / 10) + ' m from the spot' : 'another region')),
+        UI.button('Remove point ' + letter(i), () => this.removePoint(i))));
+    });
+    if (!center) box.append(el('p', 'Save a hunting spot first: the lure brings monsters back there.', 'muted'));
+    this.note = el('p', this.status(), 'muted'); box.append(this.note); host.append(box);
+  },
+};
+
+
 // Single owner for movement/combat/pickup. Potion use remains a separate emergency lane.
 const startHunting = Hunt.start;
 Hunt.start = function (...args) {
   if (BuffGear.run || BuffGear.recovery) return UI.toast('Restore or review combat gear before hunting.', 'warn');
   if (Alchemy.run || Alchemy.pending) return UI.toast('Stop alchemy and wait for its result before hunting.', 'warn');
   if (Trade.run) return UI.toast('Stop auto trade before hunting.', 'warn');
+  Lure.reset();
   return startHunting.apply(this, args);
 };
 Hunt.lootAllowed = e => Loot.allowed(e);
@@ -5196,7 +5324,7 @@ Hunt.tick = function () {
     return;
   }
   if (this.deathAt) {
-    this.deathAt = 0; this.revived = false; this.targetGid = 0;
+    this.deathAt = 0; this.revived = false; this.targetGid = 0; Lure.reset();
     if (H.center && dist2D(World.pose(), H.center) > H.radius) { Controller.returnAfterRevive(); return; }
   }
   if (Restock.activeShop() || gp.storage || now() - Manual.lastAt < H.manualPauseS * 1000) {
@@ -5230,6 +5358,7 @@ Hunt.tick = function () {
     this.state = 'resting'; return;
   }
   if (Combat.buffs(true)) { this.state = 'buff'; return; }
+  if (Lure.on()) return Lure.tick();
   const target = this.threat(current) || current || this.chooseTarget();
   if (target) { this.engage(target); return; }
   this.targetGid = 0; this.state = Loot.active?.petGid ? 'loot' : 'search';
@@ -6831,12 +6960,12 @@ const ProfileShare = {
   personal(p) {
     const r = p.potion.restock, t = r.town;
     return this.clone({ center: p.hunt.center, vendor: r.vendor, route: r.route, offers: r.offers,
-      town: { arrival: t.arrival, storage: t.storage, vendor: t.vendor, smith: t.smith, gate: t.gate }, buffSets: p.macro.buffSets, wardrobe: p.wardrobe, follow: p.trace.name });
+      town: { arrival: t.arrival, storage: t.storage, vendor: t.vendor, smith: t.smith, gate: t.gate }, buffSets: p.macro.buffSets, wardrobe: p.wardrobe, follow: p.trace.name, pullPoints: p.lure.points });
   },
   restore(p, own) {
     const r = p.potion.restock, t = r.town;
     p.hunt.center = own.center; r.vendor = own.vendor; r.route = own.route; r.offers = own.offers;
-    Object.assign(t, own.town); p.macro.buffSets = own.buffSets; p.wardrobe = own.wardrobe; p.trace.name = own.follow;
+    Object.assign(t, own.town); p.macro.buffSets = own.buffSets; p.wardrobe = own.wardrobe; p.trace.name = own.follow; p.lure.points = own.pullPoints;
     // A buff assigned to a weapon set means nothing without the sets.
     for (const b of p.macro.buffs) if (b && !p.macro.buffSets.some(s => s.id === Number(b.gearSet))) b.gearSet = 0;
     return p;
@@ -10726,7 +10855,7 @@ const UI = {
         tab.setAttribute('aria-selected', String(name === this.combatTab)); subtabs.append(tab);
       }
       this.pane.append(subtabs);
-      if (this.combatTab === 'Hunt area') this.sections('combatHuntArea', 'combatMonsters');
+      if (this.combatTab === 'Hunt area') this.sections('combatHuntArea', 'combatMonsters', 'combatLure');
       if (this.combatTab === 'Skills') this.sections('combatRotation', 'combatOptions', 'combatBerserk');
       if (this.combatTab === 'Buffs & imbue') this.sections('combatBuffs', 'combatImbue');
     } else if (this.current === 'Loot') {
@@ -10770,7 +10899,7 @@ const UI = {
         ['combatRotation'], ['combatOptions'], ['combatBuffs'], ['combatImbue']] },
       { name: 'Items/Storage', icon: 'action\\cos_cmd_inventory', pages: ['Items', 'Town'], draw() {
         this.drawItems(); this.sections('townTrip', 'townCycle', 'townAmmo'); } },
-      { name: 'Training place', icon: 'action\\icon_cha_camp', pages: ['Combat', 'Party'], sections: [['combatHuntArea', 'Training place'], ['partyTrace']] },
+      { name: 'Training place', icon: 'action\\icon_cha_camp', pages: ['Combat', 'Party'], sections: [['combatHuntArea', 'Training place'], ['partyTrace'], ['combatLure']] },
       { name: 'Party/Autores', icon: 'action\\icon_cha_party', pages: ['Party'], sections: [
         ['partyMembers', 'Current party'], ['partyParty', 'Party settings'], ['partyHeal']] },
       { name: 'Player buffing', icon: 'action\\icon_cha_party', pages: ['Party'], sections: [['partyBuffs', 'Player buffing']] },
@@ -11182,6 +11311,7 @@ const UI = {
         this.number('Maximum res distance from hunt spot (m)', () => party().resRadius / 10, v => party().resRadius = v * 10, 1, 100),
         el('p', 'Works during hunting and while stopped. Walks into skill range for visible dead members within the maximum radius, casts Rebirth, then returns. During hunting the radius is measured from the saved hunt spot; while stopped it uses your starting position. Collision data is required for walking. Travel stops after 30 seconds or 12 seconds without progress per leg. The member must accept the revival. Travel, shopping and manual control take priority.', 'muted')));
   },
+  section_combatLure(host) { Lure.draw(host); },
   section_partyTrace(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       Trace.draw(host);
@@ -11397,6 +11527,7 @@ const UI = {
     if (this.is('Settings') && StatPoints.note) StatPoints.note.textContent = StatPoints.status();
     if (this.stuckNote) this.stuckNote.textContent = AntiStuck.status();
     if (this.is('Party') && Trace.note) Trace.note.textContent = Trace.status();
+    if (Lure.note) Lure.note.textContent = Lure.status();
     if (this.is('Party') && this.partyNote) {
       const notes = [Settings.profile.party.autoRecruit ? Party.message : 'Auto-recruit off.'];
       if (Settings.profile.party.joinMain && Party.joinMessage) notes.push(Party.joinMessage);
