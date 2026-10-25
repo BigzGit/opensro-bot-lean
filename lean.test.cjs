@@ -2709,7 +2709,7 @@ test('stones follow the old alchemy switch and Berserk migrates to Giants only',
   let f = fixture(); f.storage.set('sroAsistan:v7:profile:default', JSON.stringify({ hunt: { pickup: { alchemy: false } }, macro: { berserk: 'strong' } }));
   f.Settings.importOriginal();
   assert.equal(f.Settings.profile.hunt.pickup.magicStones, false); assert.equal(f.Settings.profile.hunt.pickup.attrStones, false);
-  assert.deepEqual(JSON.parse(JSON.stringify(f.Settings.profile.macro.berserkClasses)), { normal: false, champion: false, giant: true, party: false, elite: false, unique: false, titan: false });
+  assert.deepEqual(JSON.parse(JSON.stringify(f.Settings.profile.macro.berserkClasses)), { normal: false, champion: false, giant: true, giantParty: false, party: false, elite: false, unique: false, titan: false });
   f = fixture(); f.storage.set('sroAsistan:v7:profile:default', JSON.stringify({ macro: { berserk: 'off' } })); f.Settings.importOriginal();
   assert.equal(Object.values(f.Settings.profile.macro.berserkClasses).some(Boolean), false);
   f = fixture(); f.storage.set('sroAsistan:v7:profile:default', JSON.stringify({ macro: { berserk: 'always' } })); f.Settings.importOriginal();
@@ -2725,6 +2725,22 @@ test('Berserk fires only on ticked classes, with a full gauge', () => {
   f.advance(2000); f.World.berserkGauge = 4; assert.equal(f.Combat.berserk('giant'), false);
   f.World.berserkGauge = 5; f.Settings.profile.macro.berserkClasses.champion = true; assert.equal(f.Combat.berserk('champion'), true);
   f.advance(2000); f.Settings.profile.macro.berserkClasses.giant = false; assert.equal(f.Combat.berserk('giant'), false);
+});
+test('Berserk on party Giants follows its own switch', () => {
+  const f = fixture(), kinds = () => f.commands.filter(c => c.kind === 'berserk').length, B = f.Settings.profile.macro.berserkClasses;
+  f.World.berserkGauge = 5;
+  f.World.ents.set(70, { gid: 70, rarity: 4, rarityAuxIcon: 1 }); f.World.ents.set(71, { gid: 71, rarity: 0, rarityAuxIcon: 1 });
+  B.party = true; f.World.gp.target = 70; assert.equal(f.Combat.berserk('party'), false, 'Party monsters alone does not cover party Giants');
+  B.giantParty = true; assert.equal(f.Combat.berserk('party'), true); assert.equal(kinds(), 1);
+  f.advance(2000); B.party = false; f.World.gp.target = 71; assert.equal(f.Combat.berserk('party'), false, 'Giant party does not cover other party monsters');
+  B.party = true; assert.equal(f.Combat.berserk('party'), true); assert.equal(kinds(), 2);
+});
+test('saved Berserk choices give party Giants the old Party monsters setting', () => {
+  const f = fixture();
+  assert.equal(f.botProfile({ macro: { berserkClasses: { giant: true, party: true } } }).macro.berserkClasses.giantParty, true);
+  assert.equal(f.botProfile({ macro: { berserkClasses: { giant: true, party: false } } }).macro.berserkClasses.giantParty, false);
+  assert.equal(f.botProfile({ macro: { berserkClasses: { party: true, giantParty: false } } }).macro.berserkClasses.giantParty, false, 'A saved Giant party choice wins');
+  assert.equal(f.botProfile({}).macro.berserkClasses.giantParty, false);
 });
 test('town cycle does not repeat unconfirmed pet transfers and stops on full storage', () => {
   const f = townFixture(); f.Town.begin(); f.Town.enter('store');

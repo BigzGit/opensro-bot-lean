@@ -19,7 +19,7 @@ const DEFAULT_PROFILE = {
   macro: {
     rotations: { normal: [], champion: [], giant: [], party: [], elite: [], unique: [] },
     fallbackToNormal: true, normalAttack: true, buffs: [], imbue: null, buffSwap: false, buffSets: [],
-    imbueBeforeAttack: true, berserkClasses: { normal: false, champion: false, giant: true, party: false, elite: false, unique: false, titan: false },
+    imbueBeforeAttack: true, berserkClasses: { normal: false, champion: false, giant: true, giantParty: false, party: false, elite: false, unique: false, titan: false },
     minMpPct: 0, castGapMs: 350,
   },
   potion: {
@@ -85,6 +85,9 @@ function botProfile(input) {
   if (!input.macro?.berserkClasses && (mode === 'off' || mode === 'always')) {
     for (const key of Object.keys(result.macro.berserkClasses)) result.macro.berserkClasses[key] = mode === 'always';
   }
+  // Party Giants used to follow the Party monsters switch.
+  const savedBerserk = input.macro?.berserkClasses;
+  if (savedBerserk && typeof savedBerserk === 'object' && !('giantParty' in savedBerserk)) result.macro.berserkClasses.giantParty = savedBerserk.party === true;
   // Magic and attribute stones used to sit in the alchemy switch, so they keep its setting.
   for (const key of ['magicStones', 'attrStones']) {
     if (pickup && !(key in pickup)) result.hunt.pickup[key] = pickup.alchemy ?? pickup.others ?? true;

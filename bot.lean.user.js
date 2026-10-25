@@ -203,7 +203,7 @@ const DEFAULT_PROFILE = {
   macro: {
     rotations: { normal: [], champion: [], giant: [], party: [], elite: [], unique: [] },
     fallbackToNormal: true, normalAttack: true, buffs: [], imbue: null, buffSwap: false, buffSets: [],
-    imbueBeforeAttack: true, berserkClasses: { normal: false, champion: false, giant: true, party: false, elite: false, unique: false, titan: false },
+    imbueBeforeAttack: true, berserkClasses: { normal: false, champion: false, giant: true, giantParty: false, party: false, elite: false, unique: false, titan: false },
     minMpPct: 0, castGapMs: 350,
   },
   potion: {
@@ -269,6 +269,9 @@ function botProfile(input) {
   if (!input.macro?.berserkClasses && (mode === 'off' || mode === 'always')) {
     for (const key of Object.keys(result.macro.berserkClasses)) result.macro.berserkClasses[key] = mode === 'always';
   }
+  // Party Giants used to follow the Party monsters switch.
+  const savedBerserk = input.macro?.berserkClasses;
+  if (savedBerserk && typeof savedBerserk === 'object' && !('giantParty' in savedBerserk)) result.macro.berserkClasses.giantParty = savedBerserk.party === true;
   // Magic and attribute stones used to sit in the alchemy switch, so they keep its setting.
   for (const key of ['magicStones', 'attrStones']) {
     if (pickup && !(key in pickup)) result.hunt.pickup[key] = pickup.alchemy ?? pickup.others ?? true;
@@ -4867,8 +4870,10 @@ Combat.fight = function (target) {
   return fightBetweenCasts.call(this, target);
 };
 // Berserk fires when the gauge is full and the target's class is ticked in Combat options.
+// A party Giant has its own switch; other party monsters share the Party monsters one.
 Combat.berserk = function (cls) {
-  if (!Settings.profile.macro.berserkClasses?.[cls] || World.berserkGauge < 5) return false;
+  const key = cls === 'party' && RARITY[World.ents.get(World.gp.target)?.rarity] === 'giant' ? 'giantParty' : cls;
+  if (!Settings.profile.macro.berserkClasses?.[key] || World.berserkGauge < 5) return false;
   if (World.local()?.appearanceState?.[2] === 1) return false;
   return Cmd.berserk();
 };
@@ -10481,7 +10486,7 @@ const UI = {
   section_combatBerserk(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       host.append(this.group('Berserk when the gauge is full, on',
-        ...[['giant', 'Giants'], ['titan', 'Titans'], ['unique', 'Uniques'], ['elite', 'Elites'], ['party', 'Party monsters'], ['champion', 'Champions'], ['normal', 'Normal monsters']]
+        ...[['giant', 'Giants'], ['giantParty', 'Giant party'], ['titan', 'Titans'], ['unique', 'Uniques'], ['elite', 'Elites'], ['party', 'Party monsters'], ['champion', 'Champions'], ['normal', 'Normal monsters']]
           .map(([key, label]) => this.check(label, () => M().berserkClasses[key], v => M().berserkClasses[key] = v))));
   },
   section_combatBuffs(host) {

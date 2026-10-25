@@ -139,8 +139,10 @@ Combat.fight = function (target) {
   return fightBetweenCasts.call(this, target);
 };
 // Berserk fires when the gauge is full and the target's class is ticked in Combat options.
+// A party Giant has its own switch; other party monsters share the Party monsters one.
 Combat.berserk = function (cls) {
-  if (!Settings.profile.macro.berserkClasses?.[cls] || World.berserkGauge < 5) return false;
+  const key = cls === 'party' && RARITY[World.ents.get(World.gp.target)?.rarity] === 'giant' ? 'giantParty' : cls;
+  if (!Settings.profile.macro.berserkClasses?.[key] || World.berserkGauge < 5) return false;
   if (World.local()?.appearanceState?.[2] === 1) return false;
   return Cmd.berserk();
 };
