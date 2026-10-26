@@ -4369,16 +4369,6 @@ test('dying with a buff weapon on puts the combat weapon back after revival and 
   f.drive();
   assert.equal(JSON.stringify(f.BuffGear.setup()), home); assert.equal(f.BuffGear.recovery, null);
 });
-  assert.match(g.BuffGear.status(), /no buff skill is assigned/);
-});
-test('buff gear status lists each assigned buff, and a cast that was only unconfirmed is tried again', () => {
-  const f = buffGearFixture(); f.confirmBuff(20);
-  assert.match(f.BuffGear.status(), /Cleric buff: active, \d+ s left/); assert.match(f.BuffGear.status(), /Bard buff: due now/);
-  const group = f.Settings.profile.macro.buffs[1].group;
-  f.BuffGear.skipped.set(group, { signature: f.BuffGear.signature(), until: f.World.simNow() + 120000, why: 'the cast was not confirmed, trying again in two minutes' });
-  assert.match(f.BuffGear.status(), /Bard buff: skipped because the cast was not confirmed/);
-  assert.equal(f.BuffGear.due(f.Settings.profile.macro.buffs[1]), 0);
-  f.BuffGear.skipped.set(group, { signature: f.BuffGear.signature(), until: 0, why: 'x' });
 test('the pet status notes have a fixed height and are never hidden, so the panel below does not shift', () => {
   const fs = require('fs'), css = fs.readFileSync(__dirname + '/lean-skin.css', 'utf8'), ui = fs.readFileSync(__dirname + '/lean-ui.js', 'utf8');
   assert.match(css, /\.pet-note\{height:[\d.]+em;[^}]*overflow-y:auto/);
@@ -4405,6 +4395,16 @@ function autoGearFixture(){
   f.Settings.profile.macro.buffSets=[]; f.Settings.profile.macro.buffAuto=true;
   f.Settings.profile.macro.buffs=[{id:20,group:20,gearSet:0,enabled:true,mode:'hunt'},{id:30,group:30,gearSet:0,enabled:true,mode:'hunt'}];
   return f;
+  assert.match(g.BuffGear.status(), /no buff skill is assigned/);
+});
+test('buff gear status lists each assigned buff, and a cast that was only unconfirmed is tried again', () => {
+  const f = buffGearFixture(); f.confirmBuff(20);
+  assert.match(f.BuffGear.status(), /Cleric buff: active, \d+ s left/); assert.match(f.BuffGear.status(), /Bard buff: due now/);
+  const group = f.Settings.profile.macro.buffs[1].group;
+  f.BuffGear.skipped.set(group, { signature: f.BuffGear.signature(), until: f.World.simNow() + 120000, why: 'the cast was not confirmed, trying again in two minutes' });
+  assert.match(f.BuffGear.status(), /Bard buff: skipped because the cast was not confirmed/);
+  assert.equal(f.BuffGear.due(f.Settings.profile.macro.buffs[1]), 0);
+  f.BuffGear.skipped.set(group, { signature: f.BuffGear.signature(), until: 0, why: 'x' });
 }
 test('buff gear wears the weapon each buff needs and restores the combat weapon and shield',()=>{
   const f=autoGearFixture(), gp=f.World.gp, home=JSON.stringify(f.BuffGear.setup());
@@ -5005,4 +5005,16 @@ test('a plain "Disconnected from the server." that nothing recovers ends in a pa
   assert.ok(g.f.Reconnect.retryAt > Date.now() + 25 * 60000, 'paused until the oldest reload is 30 minutes old'); g.f.Reconnect.retryAt = Date.now() - 1; g.f.storage.set('sro-lean-reload', JSON.stringify({ times: [Date.now() - 31 * 60000, Date.now() - 32 * 60000, Date.now() - 33 * 60000] }));
   for (let i = 0; i < 200 && g.reloads() === 0; i++) { g.f.advance(10000); g.f.Controller.tick(); }
   assert.equal(g.reloads(), 1, 'once the limit window has passed the bot tries again');
+});
+test('buff swaps with a full bag still run when no shield has to come off, and say why when one does', () => {
+  // Full bag, Bard set: a one-handed weapon swap without any shield change needs no free slot.
+  let f = buffGearFixture(), gp = f.World.gp, home = JSON.stringify(f.BuffGear.setup());
+  f.Settings.profile.macro.buffs = f.Settings.profile.macro.buffs.filter(b => b.group === 30);
+  gp.inventory = gp.inventory.filter(i => i.slot !== 7 && i.slot !== 14); gp.inventorySlotCount = 13 + 2;
+  home = JSON.stringify(f.BuffGear.setup()); assert.equal(f.World.freeBagSlots(), 0);
+  assert.equal(f.BuffGear.tick(), true, f.BuffGear.waiting); f.drive();
+  assert.equal(JSON.stringify(f.BuffGear.setup()), home); assert.equal(f.BuffGear.recovery, null);
+  // Full bag with a shield on: it cannot come off, so the swap waits and says so.
+  f = buffGearFixture(); f.World.gp.inventorySlotCount = 13 + 3;
+  assert.equal(f.BuffGear.tick(), false); assert.match(f.BuffGear.waiting, /free bag slot to take off your shield/);
 });

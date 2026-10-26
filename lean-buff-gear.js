@@ -162,8 +162,10 @@ const BuffGear = {
       if (!this.weapon(this.lookup(set, set.weapon))) return wait(`${name} is not a weapon any more. Save the buff set again.`);
       if (set.shield && (!this.lookup(set, set.shield) || set !== home && !this.shield(this.lookup(set, set.shield)))) return wait(`Cannot find the shield of ${name} (or two copies look identical). Save the buff set again.`);
     }
-    // One free bag slot permits explicit shield removal before two-handed swaps.
-    if (World.freeBagSlots() < 1) return wait('Buff swaps need one free bag slot.');
+    // A weapon swaps places with its bag copy, so it needs no space. Only taking the off-hand item off (shield, arrows) needs one free bag slot.
+    let offhand = this.key(this.at(7)), stash = false;
+    for (const set of [...queue.map(q => q.set), home]) { if (offhand && offhand !== set.shield) stash = true; offhand = set.shield; }
+    if (stash && World.freeBagSlots() < 1) return wait('Buff swaps need one free bag slot to take off your shield.');
     this.waiting = note;
     if (!Cmd.move(World.pose())) return false;
     Loot.suspend(); Hunt.state = 'buff'; this.run = this.create(home, queue);
