@@ -1,16 +1,17 @@
 // Lure: a tank pulls monsters to the party instead of hunting. It walks to each saved pull point in turn, taunts the
 // nearest monster there, walks back to the hunting spot and holds a few seconds so the damage dealers take over,
-// then goes to the next point. It never attacks. The area taunt is cast whenever it is ready and a monster is near,
+// then goes to the next point. On the way back with monsters it stops every few metres so they keep up. It never attacks. The area taunt is cast whenever it is ready and a monster is near,
 // except while holding at the spot. No stuck handling yet: a point without a walkable route stops hunting.
 const LURE_ARRIVAL = 30;      // 3 m
 const LURE_TAUNT_MS = 10000;  // give up on a pull point's target after this long and walk back
 const Lure = {
   phase: 'back', index: -1, holdUntil: 0, phaseAt: 0, target: 0, pulled: false, sentAt: -Infinity, travel: null, message: 'Lure off.',
+  legFrom: null, pauseUntil: 0, halted: false, hurry: false,
   cfg() { return Settings.profile.lure; },
   on() { return !!this.cfg().enabled && this.cfg().points.length > 0; },
   // Every start begins at the hunting spot, with no hold since nothing was pulled yet; the next point is then A.
   reset() { this.enter('back'); this.index = -1; this.pulled = false; },
-  enter(phase) { this.phase = phase; this.phaseAt = now(); this.target = 0; this.travel = null; this.sentAt = -Infinity; },
+  enter(phase) { this.phase = phase; this.phaseAt = now(); this.target = 0; this.travel = null; this.sentAt = -Infinity; this.legFrom = null; this.pauseUntil = 0; this.hurry = false; },
   addPoint() {
     const p = World.pose();
     if (!World.inWorld() || !p) return UI.toast('Enter the game first.', 'warn');
@@ -56,7 +57,7 @@ const Lure = {
     if (World.isCasting() || now() - Combat.lastCastAt < (Settings.profile.macro.castGapMs ?? 250)) return;
     if (this.areaTaunt()) return;
     if (this.phase !== 'back' && this.phase !== 'hold' && World.me().hpPct < c.returnHpPct) {
-      this.enter('back'); this.message = 'Low HP: back to the party.'; Log.info('Lure: ' + this.message);
+      this.enter('back'); this.hurry = true; this.message = 'Low HP: back to the party.'; Log.info('Lure: ' + this.message);
     }
     if (this.phase === 'out') {
       this.message = 'Walking to pull point ' + String.fromCharCode(65 + this.index) + '.';
@@ -65,7 +66,8 @@ const Lure = {
     }
     if (this.phase === 'taunt') return this.taunt(point);
     if (this.phase === 'back') {
-      this.message = 'Bringing monsters back to the party.';
+      this.message = this.hurry ? 'Low HP: back to the party.' : 'Bringing monsters back to the party.';
+      if (this.pause(home)) return;
       if (!this.walk(home)) return;
       if (!this.pulled) return this.next();
       this.enter('hold'); this.holdUntil = now() + (Number(c.holdS) || 0) * 1000;
@@ -74,6 +76,20 @@ const Lure = {
       this.message = 'Holding while the party takes over.';
       if (now() >= this.holdUntil) this.next();
     }
+  },
+  // Bringing monsters back: stand still for a few seconds after every stretch so they keep up. Not when hurrying back on low HP.
+  pause(home) {
+    const c = this.cfg(), every = (Number(c.pauseEveryM) || 0) * 10, p = World.pose();
+    if (!this.pulled || this.hurry || every <= 0 || !(Number(c.pauseS) > 0) || !p) return false;
+    if (now() < this.pauseUntil) {
+      this.message = 'Waiting for the monsters to follow.';
+      if (!this.halted && Cmd.move(p)) this.halted = true;
+      return true;
+    }
+    if (!this.legFrom) this.legFrom = { ...p };
+    if (dist2D(p, home) <= LURE_ARRIVAL || dist2D(p, this.legFrom) < every) return false;
+    this.legFrom = { ...p }; this.pauseUntil = now() + Number(c.pauseS) * 1000; this.halted = false;
+    return this.pause(home);
   },
   next() { this.index = (this.index + 1) % this.cfg().points.length; this.pulled = false; this.enter('out'); },
   // Pick the monster nearest the point, select it, get into range and cast the single-target taunt on it.
@@ -105,10 +121,12 @@ const Lure = {
     const options = buff => () => [[0, 'None'], ...UI.learnedSkills(buff).map(s => [s.id, s.name || '#' + s.id])];
     const box = UI.group('Lure',
       UI.check('Lure instead of hunting', () => c().enabled, v => { c().enabled = v; this.reset(); }),
-      el('p', 'For a tank. Walks to each pull point in turn, taunts the nearest monster, brings it back to the hunting spot and holds while the party takes over. Never attacks. The area taunt goes out whenever it is ready and a monster is near, except while holding.', 'muted'),
+      el('p', 'For a tank. Walks to each pull point in turn, taunts the nearest monster, brings it back to the hunting spot, pausing on the way so the monsters keep up (0 m = no pauses; none when coming back on low HP), and holds while the party takes over. Never attacks. The area taunt goes out whenever it is ready and a monster is near, except while holding.', 'muted'),
       UI.select('Single-target taunt', options(false), () => this.skill(c().taunt) || 0, pick('taunt')),
       UI.select('Area taunt', options(true), () => this.skill(c().area) || 0, pick('area')),
       UI.number('Hold at the spot (s)', () => c().holdS, v => c().holdS = v, 0, 30),
+      UI.number('On the way back, pause every (m)', () => c().pauseEveryM, v => c().pauseEveryM = v, 0, 50),
+      UI.number('Pause length (s)', () => c().pauseS, v => c().pauseS = v, 0, 30),
       UI.number('Search radius at a point (m)', () => c().radius, v => c().radius = v, 3, 50),
       UI.number('Back to the party below HP (%)', () => c().returnHpPct, v => c().returnHpPct = v, 0, 95),
       UI.button('Add pull point here', () => this.addPoint()));

@@ -2966,7 +2966,7 @@ function lure() {
     { id: 3002, group: 951, level: 1, name: 'Howling', targetRequired: false, targets: 1 },
   ]);
   Object.assign(f.Settings.profile.lure, { enabled: true, points: [{ regionId: 1, x: 400, y: 0, z: 100 }, { regionId: 1, x: 100, y: 0, z: 300 }],
-    taunt: { id: 3001, group: 950 }, area: { id: 3002, group: 951 } });
+    taunt: { id: 3001, group: 950 }, area: { id: 3002, group: 951 }, holdS: 4 });
   const mob = (gid, x, z = 100) => { const e = { gid, kind: 'monster', name: 'Mob ' + gid, rarity: 0, regionId: 1, x, y: 0, z, attackFlags: 16, appearanceState: [0] }; f.World.ents.set(gid, e); return e; };
   const at = (x, z = 100) => { f.World.gp.pose = { regionId: 1, x, y: 0, z }; };
   const step = () => { f.advance(1000); f.Hunt.tick(); };
@@ -3005,6 +3005,21 @@ test('after a pull the lure brings the monsters back, holds without the area tau
   step(); step(); assert.equal(f.Lure.phase, 'out'); assert.equal(f.Lure.index, 1);
   f.World.ents.delete(40); step(); const move = f.commands.at(-1);
   assert.equal(move.kind, 'move'); assert.ok(move.destination.z > 100, 'walks towards point B');
+});
+test('bringing monsters back, the lure stops for 4 s after every 10 m; a 10 s hold by default', () => {
+  assert.equal(fixture().Settings.profile.lure.holdS, 10);
+  const { f, mob, at, step } = lure();
+  f.Settings.profile.lure.area = { id: 0, group: 0 }; // only the single-target taunt, so no cast interrupts the timing
+  mob(40, 410); step(); at(400); step(); step(); step(); f.World.gp.target = 40; step();
+  assert.equal(f.Lure.phase, 'back');
+  step(); assert.equal(f.commands.at(-1).kind, 'move'); assert.ok(f.commands.at(-1).destination.x < 400, 'heads back');
+  at(350); step(); assert.notEqual(f.Lure.message, 'Waiting for the monsters to follow.', 'only 5 m so far');
+  const moves = f.commands.filter(c => c.kind === 'move').length;
+  at(300); step(); assert.equal(f.Lure.message, 'Waiting for the monsters to follow.', '10 m walked: pause');
+  assert.deepEqual([f.commands.at(-1).kind, f.commands.at(-1).destination.x], ['move', 300], 'stops where it stands');
+  step(); step(); step(); assert.equal(f.commands.filter(c => c.kind === 'move').length, moves + 1, 'stands still during the pause');
+  step(); assert.equal(f.Lure.message, 'Bringing monsters back to the party.'); assert.ok(f.commands.at(-1).destination.x < 300, 'walks on after 4 s');
+  f.Settings.profile.lure.pauseEveryM = 0; at(150); step(); assert.equal(f.Lure.message, 'Bringing monsters back to the party.', '0 m turns the pauses off');
 });
 test('a pull point with no monster sends the lure straight back with no hold', () => {
   const { f, at, step } = lure();
