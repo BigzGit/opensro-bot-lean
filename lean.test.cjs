@@ -1168,16 +1168,6 @@ test('alt account applies to the main account listing and waits for the answer',
   f.advance(5000); f.Controller.tick(); assert.equal(f.commands.length, 1);
 });
 
-test('alt account applies again when the main never answered its application', () => {
-  const f = joinMainFixture({ rows: [{ id: 7, name: 'MainChar', members: 2, type: 1, min: 1, max: 90 }] });
-  f.Controller.tick(); assert.equal(f.commands.length, 1);
-  f.World.gp.partyMatching = { ...f.World.gp.partyMatching, joining: { id: 7 } };
-  f.advance(10000); f.Controller.tick(); assert.equal(f.commands.length, 1, 'still waiting for the answer');
-  f.advance(25000); f.Controller.tick(); assert.deepEqual(jm(f.commands[1]), { kind: 'party-match-join', id: 7 });
-});
-
-test('alt account pages the board until it finds the main, then rests', () => {
-  const f = joinMainFixture({ pages: 2, rows: [{ id: 3, name: 'Other', members: 1, type: 0, min: 1, max: 90 }] });
 test('auto-accept answers only applicants on the name list, and everyone when the list is empty', () => {
   let f = fixture(); partyApplication(f);
   f.Settings.profile.party.acceptNames = 'Friend, other'; f.Party.tick();
@@ -1200,6 +1190,16 @@ test('the alt leaves a party led by someone else only when asked to, and keeps t
   g.Party.tick(); assert.equal(g.commands.filter(c => c.kind === 'party-leave').length, 0, 'the named leader, any letter case');
 });
 
+test('alt account applies again when the main never answered its application', () => {
+  const f = joinMainFixture({ rows: [{ id: 7, name: 'MainChar', members: 2, type: 1, min: 1, max: 90 }] });
+  f.Controller.tick(); assert.equal(f.commands.length, 1);
+  f.World.gp.partyMatching = { ...f.World.gp.partyMatching, joining: { id: 7 } };
+  f.advance(10000); f.Controller.tick(); assert.equal(f.commands.length, 1, 'still waiting for the answer');
+  f.advance(25000); f.Controller.tick(); assert.deepEqual(jm(f.commands[1]), { kind: 'party-match-join', id: 7 });
+});
+
+test('alt account pages the board until it finds the main, then rests', () => {
+  const f = joinMainFixture({ pages: 2, rows: [{ id: 3, name: 'Other', members: 1, type: 0, min: 1, max: 90 }] });
   f.Controller.tick(); assert.deepEqual(jm(f.commands[0]), { kind: 'party-match-page', page: 1 });
   f.advance(3000); f.World.gp.partyMatching = { ...f.World.gp.partyMatching, page: 2 };
   f.Controller.tick(); assert.deepEqual(jm(f.commands[1]), { kind: 'party-match-page', page: 2 });
@@ -4417,16 +4417,6 @@ test('buff gear status lists each assigned buff, and a cast that was only unconf
   assert.match(f.BuffGear.status(), /Bard buff: skipped because the cast was not confirmed/);
   assert.equal(f.BuffGear.due(f.Settings.profile.macro.buffs[1]), 0);
   f.BuffGear.skipped.set(group, { signature: f.BuffGear.signature(), until: 0, why: 'x' });
-}
-test('buff gear wears the weapon each buff needs and restores the combat weapon and shield',()=>{
-  const f=autoGearFixture(), gp=f.World.gp, home=JSON.stringify(f.BuffGear.setup());
-  assert.equal(f.BuffGear.owns(f.Settings.profile.macro.buffs[0]),true);
-  assert.equal(f.BuffGear.tick(),true);
-  const casts=[]; const cast=f.Combat.cast.bind(f.Combat); f.Combat.cast=(id,...a)=>{casts.push([id,gp.inventory.find(i=>i.slot===6).refObjId,gp.inventory.find(i=>i.slot===7)?.refObjId]);return cast(id,...a);};
-  f.drive();
-  assert.deepEqual(casts.map(c=>c[0]),[20,30]);
-  assert.deepEqual(casts[0].slice(1),[200,101],'one-handed staff keeps the shield on');
-  assert.deepEqual(casts[1].slice(1),[300,undefined],'the harp is worn without the shield');
   assert.ok(f.BuffGear.due(f.Settings.profile.macro.buffs[1]) > 0, 'the skip has expired'); assert.equal(f.BuffGear.skipped.has(group), false);
 });
 // Skill-driven swapping: the game's own weaponKinds say which weapon a buff needs; no saved set is involved.
@@ -4437,6 +4427,16 @@ function autoGearFixture(){
   f.Settings.profile.macro.buffSets=[]; f.Settings.profile.macro.buffAuto=true;
   f.Settings.profile.macro.buffs=[{id:20,group:20,gearSet:0,enabled:true,mode:'hunt'},{id:30,group:30,gearSet:0,enabled:true,mode:'hunt'}];
   return f;
+}
+test('buff gear wears the weapon each buff needs and restores the combat weapon and shield',()=>{
+  const f=autoGearFixture(), gp=f.World.gp, home=JSON.stringify(f.BuffGear.setup());
+  assert.equal(f.BuffGear.owns(f.Settings.profile.macro.buffs[0]),true);
+  assert.equal(f.BuffGear.tick(),true);
+  const casts=[]; const cast=f.Combat.cast.bind(f.Combat); f.Combat.cast=(id,...a)=>{casts.push([id,gp.inventory.find(i=>i.slot===6).refObjId,gp.inventory.find(i=>i.slot===7)?.refObjId]);return cast(id,...a);};
+  f.drive();
+  assert.deepEqual(casts.map(c=>c[0]),[20,30]);
+  assert.deepEqual(casts[0].slice(1),[200,101],'one-handed staff keeps the shield on');
+  assert.deepEqual(casts[1].slice(1),[300,undefined],'the harp is worn without the shield');
   assert.equal(JSON.stringify(f.BuffGear.setup()),home);
   assert.equal(f.BuffGear.recovery,null);
 });
