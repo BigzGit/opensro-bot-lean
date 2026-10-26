@@ -352,6 +352,13 @@ test('every supported town has a trade merchant in the town table, and the trade
   const g = f.botProfile({ trade: { from: 'KT', to: 'EU', trips: 3, potions: false, extra: 1 } });
   assert.equal(g.trade.from, 'KT'); assert.equal(g.trade.trips, 3); assert.equal(g.trade.potions, false); assert.equal('extra' in g.trade, false);
 });
+  f.World.me = () => ({ maxHp: 100, maxMp: 100, hpPct: 20, mpPct: 100, abnormal: 0 });
+  f.Settings.profile.potion.enabled = true; f.Settings.profile.potion.hp.on = true; f.Settings.profile.potion.hp.pct = 50;
+  f.Trade.start(); assert.ok(f.Trade.run, f.Trade.message);
+  f.advance(2000); f.Controller.tick();
+  assert.equal(f.Controller.mode, 'trading');
+  assert.ok(f.commands.some(c => c.kind === 'item-use' || c.kind === 'use-item' || /item/.test(c.kind)), 'an HP potion was used: ' + JSON.stringify(f.commands.map(c => c.kind)));
+});
 test('auto trade buys goods into the transport, delivers them to the other town and sells them all', () => {
   const t = tradeFixture(), f = t.f;
   f.Trade.start(); assert.ok(f.Trade.run, f.Trade.message);
@@ -2394,6 +2401,38 @@ test('after reconnecting in town, far from the hunting spot, the bot does town s
   lose(); back(); f.World.gp.pose = { ...f.World.gp.pose, x: 200000 }; f.World.pose = () => f.World.gp.pose;
   f.advance(4000); f.Controller.tick(); f.advance(4000); f.Controller.tick();
   assert.equal(began, true, 'revival-style town trip'); assert.equal(f.WalkBack.active, null); assert.equal(f.Reconnect.active(), false);
+});
+test('hunting from town far from the spot (dead at login, woke in town) does town services and reverses instead of walking', () => {
+  const f = fixture(); let began = null, arrived = 0;
+  f.Town.cfg().enabled = true; f.Town.detect = () => ({ key: 'KT' });
+  f.Town.begin = revival => { began = revival; f.Town.trip = { phase: 'revive-arrival' }; };
+  f.Town.arrived = () => { arrived++; };
+  f.Settings.profile.hunt.center = { regionId: 1, x: 1500, y: 0, z: 100 };
+  f.Hunt.start(); f.commands.length = 0;
+  f.Hunt.tick();
+  assert.equal(began, true, 'revival-style town trip'); assert.equal(arrived, 1, 'services start from where the character stands');
+  assert.equal(f.commands.some(c => c.kind === 'move' && c.destination?.x === 1500), false, 'no straight walk from town to the spot');
+  assert.equal(f.WalkBack.active, null);
+});
+test('far from the spot outside the town, hunting still returns the old way (town cycle untouched)', () => {
+  const f = fixture(); let began = null;
+  f.Town.cfg().enabled = true; f.Town.detect = () => null;
+  f.Town.begin = revival => { began = revival; };
+  f.Settings.profile.hunt.center = { regionId: 1, x: 1500, y: 0, z: 100 };
+  f.Hunt.start(); f.commands.length = 0;
+  f.Hunt.tick();
+  assert.equal(began, null, 'no town trip outside town');
+  assert.ok(f.commands.some(c => c.kind === 'move' && c.destination?.x === 1500), 'moves back toward the spot as before');
+});
+test('resume hunting in town with the town cycle on reverses instead of walking; elsewhere it still walks', () => {
+  let f = fixture(), began = null;
+  f.Town.cfg().enabled = true; f.Town.detect = () => ({ key: 'KT' });
+  f.Town.begin = revival => { began = revival; f.Town.trip = { phase: 'buy' }; };
+  f.Settings.profile.hunt.center = { regionId: 6, x: 500, y: 0, z: 100 };
+  assert.equal(f.Controller.resumeHunting('Back in the game'), 'town'); assert.equal(began, true); assert.equal(f.WalkBack.active, null);
+  f = fixture(); f.Town.cfg().enabled = false; f.Town.detect = () => ({ key: 'KT' });
+  f.Settings.profile.hunt.center = { regionId: 6, x: 500, y: 0, z: 100 };
+  assert.equal(f.Controller.resumeHunting('Back in the game'), 'walking', 'town cycle off: walks as before');
 });
 test('after reconnecting in town away from the scroll landing spot, the services start from where the character stands', () => {
   const town = { key: 'KT' }, setup = f => {

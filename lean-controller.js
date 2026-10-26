@@ -89,6 +89,8 @@ Hunt.tick = function () {
   if (target) { this.engage(target); return; }
   this.targetGid = 0; this.state = Loot.active?.petGid ? 'loot' : 'search';
   if (H.returnToCenter && H.center && dist2D(World.pose(), H.center) > Math.max(40, H.radius * 0.5) && now() - this.lastMoveAt > 2500) {
+    // Hunting from town (dead at login and woken in town): town services and reverse, not a walk from town.
+    if (!(dist2D(World.pose(), H.center) <= Math.max(H.radius * 1.5, 600)) && Controller.townReturn()) return;
     if (!Number.isFinite(dist2D(World.pose(), H.center))) return this.stop('hunt area is in another region');
     if (Cmd.move(H.center)) this.lastMoveAt = now();
     this.state = 'return';
@@ -157,15 +159,33 @@ const Controller = {
       return false;
     }
   },
-  // Start hunting again after an interruption, but only where that is safe: at the hunting spot it just starts,
-  // otherwise it walks back. WalkBack first tries the navdata corridor and falls back to short legs; its own caps
-  // refuse a spot that is too far. Returns 'started', 'walking' or 'stopped'.
+  // Start hunting again after an interruption, but only where that is safe: at the hunting spot it just starts; in
+  // the town of the saved services it does the town cycle and reverses (townReturn); otherwise it walks back.
+  // WalkBack first tries the navdata corridor and falls back to short legs; its own caps refuse a spot that is too
+  // far. Returns 'started', 'town', 'walking' or 'stopped'.
   resumeHunting(prefix) {
     const H = Hunt.cfg(), pose = World.pose(), distance = H.center && pose ? dist2D(pose, H.center) : Infinity;
     if (Number.isFinite(distance) && distance <= Math.max(H.radius * 1.5, 600)) { UI.toast(prefix + '; resuming hunting.', 'info', 4000); Hunt.start(); return 'started'; }
+    if (this.townReturn()) { UI.toast(prefix + ', in town: doing town services and reversing to the hunting spot.', 'info', 4000); return 'town'; }
     if (Number.isFinite(distance)) { UI.toast(prefix + '; walking back to the hunting spot.', 'info', 4000); WalkBack.start(true); return WalkBack.active ? 'walking' : 'stopped'; }
     UI.toast(prefix + ', but not at the hunting spot. Use Return & hunt when ready.', 'warn', 6000);
     return 'stopped';
+  },
+  // Far from the hunting spot while standing in the town of the saved services: a character that was dead at login
+  // and woke up in town, or a revive the game did by itself. A walk from town to the spot is not reliable, so do the
+  // town services and reverse, as after a death in the field. True when the town cycle took over (or stopped hunting
+  // with a reason, e.g. no reverse scroll); false when not in that town or the town cycle is off.
+  townReturn() {
+    const c = Town.cfg();
+    if (!c.enabled) return false;
+    const here = Town.detect(), home = Town.detect(c.vendor || c.storage || c.arrival || {});
+    if (!here || !home || here.key !== home.key) return false;
+    Log.info('Far from the hunting spot, in town: doing town services and reversing instead of walking.');
+    WalkBack.cancel('', false);
+    Hunt.deathAt = 0; Hunt.revived = false; Hunt.targetGid = 0;
+    Town.begin(true);
+    if (Town.trip?.phase === 'revive-arrival') Town.arrived();
+    return true;
   },
   returnAfterRevive() {
     this.resumeAfterRevive = false;
