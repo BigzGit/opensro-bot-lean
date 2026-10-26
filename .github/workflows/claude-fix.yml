@@ -39,7 +39,10 @@ jobs:
             1. Find the cause in the code and make the smallest fix that solves it.
             2. Run the project's tests or build if there are any.
             3. Open a pull request that references the issue ("Fixes #N").
-            4. If you can't reproduce it or the report is unclear, comment on the issue
-               with what you found instead of guessing.
+            4. The reporter is anonymous and will not answer. Never ask questions or request more
+               information. If the report is vague, work out the most likely cause from the code,
+               the logs or diagnostics it includes, and the recent commits, and make a best-effort
+               fix. If you truly cannot find a cause, open no PR and comment once on the issue with
+               what you checked and your best guess.
 
             Do not merge anything. Do not modify files under .github/.
