@@ -189,7 +189,8 @@ const UI = {
     this.layoutButton.className = 'layout'; this.layoutButton.title = 'Switch between the wide and the compact window';
     this.classicButton = this.button('Classic', () => this.setClassic(true));
     this.classicButton.className = 'layout'; this.classicButton.title = 'Switch to the classic window: tabs and layout after SBot';
-    header.append(name, this.layoutButton, this.classicButton, discord, this.updateButton, fold);
+    header.classList.add('main-header');
+    header.append(name, RenderControl.button(), this.layoutButton, this.classicButton, discord, this.updateButton, fold);
     this.body = el('div', null, 'body'); this.status = el('div', 'Waiting for game…', 'status'); this.status.setAttribute('role', 'status');
     this.updateNote = el('div', '', 'update-note'); this.updateNote.hidden = true;
     Updates.render();

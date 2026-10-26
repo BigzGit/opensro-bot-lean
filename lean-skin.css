@@ -13,6 +13,10 @@
 .frame.rd{right:0;bottom:0;width:40px;height:48px;background-image:var(--s-f_rd)}
 header{position:relative;z-index:1;height:34px;display:flex;align-items:center;justify-content:center;cursor:move;touch-action:none;padding:6px 32px 0;color:#fff}
 header button.update,header button.discord{height:22px;min-width:0;margin-left:8px;font-size:11px}
+.main-header{justify-content:flex-start;flex-wrap:wrap;height:auto;min-height:34px;padding-left:10px;padding-bottom:4px;row-gap:4px}
+.main-header strong{flex-shrink:0}
+header button.render-toggle{flex-shrink:0;width:64px;min-width:64px;height:22px;margin-left:6px;font-size:11px;padding:0 4px}
+header button.render-toggle[aria-pressed=true]{color:#ffc67a}
 header strong{font-weight:normal;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 header button.version{display:inline;height:auto;min-width:0;padding:0;border:0;background:none;color:inherit;font:inherit;line-height:inherit;text-decoration:underline dotted;text-underline-offset:3px}header button.version:hover{color:#f0d98c}
 header button.fold{position:absolute;right:10px;top:10px;width:16px;min-width:16px;height:16px;padding:0;border:0;background:var(--s-close);color:transparent;font-size:0}
@@ -195,6 +199,7 @@ fieldset>input[type=search]{width:100%;margin:2px 0 6px}
 :host(.classic) .frame,:host(.classic) .panel:before,:host(.classic) .logbox,:host(.classic) .status,:host(.classic) .update-note:empty{display:none}
 :host(.classic) .panel{padding-bottom:0;background:var(--c-bg);border:1px solid #6d6d78;box-shadow:0 8px 28px #000a}
 :host(.classic) header{height:30px;padding:0 90px 0 8px;background:#fff;color:#000;justify-content:flex-start}
+:host(.classic) .main-header{height:auto;min-height:30px;padding-top:4px;padding-bottom:4px}
 :host(.classic) header strong{color:#000;font-weight:normal;font-size:12px}
 :host(.classic) header button{height:20px;min-width:0;color:#000;background:#f1f1f1;border:1px solid #9a9aa3;border-image:none;padding:0 7px;font-size:11px}
 :host(.classic) header button.version{background:none;border:0;padding:0;margin:0 0 0 4px;text-decoration:underline dotted}

@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, Trade, WalkBack, Navigation, Route, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, Lure, stopAll, toggleBot, boot, Ticker, Sound, LeanMap};\n})();';
+  'globalThis.bot = {RenderControl, Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, Trade, WalkBack, Navigation, Route, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, Lure, stopAll, toggleBot, boot, Ticker, Sound, LeanMap};\n})();';
 function fixture(document) {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -31,6 +31,76 @@ function fixture(document) {
   return { ...b, commands, notices, storage, drop, win, intervals, timers, advance: ms => { time += ms; } };
 }
 let passed = 0;
+function renderDocument(prototype = {}) {
+  const document = Object.create(prototype), nodes = [];
+  document.documentElement = { append(node) { nodes.push(node); } };
+  document.createElement = () => {
+    const attributes = {}, events = {};
+    return { attributes, style: {}, setAttribute(k, v) { attributes[k] = v; },
+      addEventListener(k, fn) { events[k] = fn; }, click() { events.click(); },
+      remove() { const i = nodes.indexOf(this); if (i >= 0) nodes.splice(i, 1); } };
+  };
+  return { document, nodes };
+}
+test('render button suspends the native drawing path and restores real tab visibility', () => {
+  let visibility = 'visible';
+  const { document, nodes } = renderDocument({ get visibilityState() { return visibility; } });
+  const f = fixture(document), button = f.RenderControl.button();
+  assert.equal(button.textContent, 'No Render');
+  f.Hunt.running = true;
+  button.click();
+  assert.equal(document.visibilityState, 'hidden');
+  assert.equal(button.textContent, 'Render');
+  assert.equal(button.attributes['aria-label'], 'Resume game rendering');
+  assert.equal(nodes.length, 1, 'black mask is outside the NIX panel');
+  assert.match(nodes[0].style.cssText, /background:#000!important/);
+  assert.match(nodes[0].style.cssText, /position:fixed!important;inset:0!important/);
+  assert.match(nodes[0].style.cssText, /z-index:2147483645!important/);
+  assert.equal(button.attributes['aria-pressed'], 'true');
+  assert.equal(f.Hunt.running, true); assert.equal(f.commands.length, 0);
+  petFight(f); f.drop(20, 3436); f.Settings.profile.hunt.pickup.afterKillOnly = false;
+  let fights = 0; f.Combat.fight = () => { fights++; };
+  f.Controller.tick();
+  assert.equal(fights, 1, 'combat still runs with rendering suspended');
+  assert.equal(f.commands.some(c => c.kind === 'cos-pickup'), true, 'pet pickup keeps running');
+  f.RenderControl.set(false); // Repeated suspension must retain the original descriptor.
+  assert.equal(nodes.length, 1, 'duplicate clicks do not add another mask');
+  f.stopAll();
+  assert.equal(document.visibilityState, 'hidden');
+  visibility = 'hidden'; button.click();
+  assert.equal(button.textContent, 'No Render');
+  assert.equal(button.attributes['aria-label'], 'Suspend game rendering');
+  assert.equal(nodes.length, 0, 'resuming removes the black mask');
+  assert.equal(Object.hasOwn(document, 'visibilityState'), false);
+  assert.equal(document.visibilityState, 'hidden', 'an actual hidden tab stays hidden');
+  visibility = 'visible'; assert.equal(document.visibilityState, 'visible');
+  assert.equal(button.attributes['aria-pressed'], 'false');
+});
+test('render toggle restores an existing own descriptor and tolerates unavailable documents', () => {
+  const { document, nodes } = renderDocument();
+  const descriptor = { configurable: true, enumerable: true, get: () => 'visible', set: undefined };
+  Object.defineProperty(document, 'visibilityState', descriptor);
+  const f = fixture(document);
+  assert.equal(f.RenderControl.set(false), true);
+  assert.equal(f.RenderControl.set(true), true);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(document, 'visibilityState'), descriptor);
+  Object.defineProperty(document, 'visibilityState', { configurable: false });
+  assert.equal(f.RenderControl.set(false), false);
+  assert.equal(f.RenderControl.suspended, false);
+  assert.equal(document.visibilityState, 'visible');
+  assert.equal(nodes.length, 0, 'a failed toggle leaves no black mask');
+  assert.match(f.notices.at(-1), /unavailable/);
+  assert.equal(fixture().RenderControl.set(false), false);
+});
+test('render toggle leaves a later visibility hook intact', () => {
+  const { document, nodes } = renderDocument(), f = fixture(document);
+  f.RenderControl.set(false);
+  const getter = () => 'visible';
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: getter });
+  f.RenderControl.set(true);
+  assert.equal(Object.getOwnPropertyDescriptor(document, 'visibilityState').get, getter);
+  assert.equal(nodes.length, 0);
+});
 function pickupPet(f, commandMode = 7) {
   const rec = { gid: 50, refObjId: 500, band: 4, hp: 100, status: 5, inventory: [], commandMode };
   f.World.gp.cosRecords = [rec];
