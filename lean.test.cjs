@@ -4367,6 +4367,18 @@ test('buff gear says why a due buff is not being swapped in, instead of staying 
   f.Settings.profile.macro.buffSets = [];
   assert.match(f.BuffGear.status(), /no buff set is saved yet/);
   const g = buffGearFixture(); g.Settings.profile.macro.buffs.forEach(b => b.gearSet = 0);
+test('dying with a buff weapon on puts the combat weapon back after revival and keeps hunting', () => {
+  const f = buffGearFixture(), home = JSON.stringify(f.BuffGear.setup());
+  assert.equal(f.BuffGear.tick(), true);
+  for (let n = 0; n < 20 && JSON.stringify(f.BuffGear.setup()) === home; n++) { f.BuffGear.tick(); if (f.BuffGear.run?.pending) f.confirmMove(); f.advance(300); }
+  assert.notEqual(JSON.stringify(f.BuffGear.setup()), home, 'a buff weapon is on');
+  f.World.isDead = () => true; f.BuffGear.tick();
+  assert.equal(f.BuffGear.run, null); assert.ok(f.BuffGear.recovery); assert.equal(f.Hunt.running, true, 'dying does not stop hunting');
+  f.World.isDead = () => false; f.BuffGear.resume();
+  assert.ok(f.BuffGear.run?.restoring, 'restoring starts on its own');
+  f.drive();
+  assert.equal(JSON.stringify(f.BuffGear.setup()), home); assert.equal(f.BuffGear.recovery, null);
+});
   assert.match(g.BuffGear.status(), /no buff skill is assigned/);
 });
 test('buff gear status lists each assigned buff, and a cast that was only unconfirmed is tried again', () => {
@@ -4517,7 +4529,7 @@ test('buff gear death and disconnect reset never dispatch gear commands',()=>{
   for(const mode of ['dead','offline']){
     const f=buffGearFixture();f.BuffGear.tick();f.BuffGear.tick();const count=f.commands.length;
     if(mode==='dead')f.World.isDead=()=>true;else f.World.phase='login';
-    f.BuffGear.tick();assert.equal(f.BuffGear.run,null);assert.equal(f.commands.length,count);assert.ok(f.BuffGear.recovery);assert.equal(f.Hunt.running,false);
+    f.BuffGear.tick();assert.equal(f.BuffGear.run,null);assert.equal(f.commands.length,count);assert.ok(f.BuffGear.recovery);assert.equal(f.Hunt.running,true,'hunting carries on; gear is restored after revival');assert.equal(f.BuffGear.autoRestore,true);
   }
 });
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.139
+// @version      1.2.140
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[NIX] Another SRO assistant is active. Disable it and reload to use NIX.');
   return;
 }
-const VERSION = '1.2.139';
+const VERSION = '1.2.140';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -4463,7 +4463,7 @@ const Town = {
 
 // Confirm every native inventory move before casting or restoring combat gear.
 const BuffGear = {
-  run: null, recovery: null, message: 'Buff weapon swapping off.', skipped: new Map(), waiting: '', started: false, bad: new Set(),
+  run: null, recovery: null, autoRestore: false, message: 'Buff weapon swapping off.', skipped: new Map(), waiting: '', started: false, bad: new Set(),
   cfg() { return Settings.profile.macro; },
   items() { return World.gp?.inventory || []; },
   at(slot) { return this.items().find(i => i.slot === slot) || null; },
@@ -4538,10 +4538,15 @@ const BuffGear = {
     this.run = this.recovery = null; this.skipped.clear(); this.bad.clear();
     this.message = 'Buff gear reset. Check equipped weapons after reconnecting.';
   },
-  interrupt(text) {
-    if (this.run) this.fail(text);
+  // Dying or changing world mid-swap is not a failure: remember the combat gear and put it back on once alive again.
+  interrupt(text, soft = false) {
+    if (!this.run) return;
+    if (!soft) return this.fail(text);
+    this.recovery = this.run.home; this.autoRestore = true; this.run = null;
+    this.message = text + ' Combat gear is restored once the character is back.';
   },
   fail(text) {
+    this.autoRestore = false;
     if (this.run) this.recovery = this.run.home;
     this.run = null;
     if (Hunt.running && World.inWorld() && !World.isDead()) Hunt.stop(text);
@@ -4554,10 +4559,14 @@ const BuffGear = {
     this.run.restoring = true; this.run.queue = []; this.run.cancelled = true;
     this.message = 'Stopping buffs; restoring combat gear.';
   },
-  restore() {
+  // Called every tick: a swap cut short by death or a world change puts the combat weapon back by itself.
+  resume() {
+    if (this.autoRestore && this.recovery && !this.run) this.restore(true);
+  },
+  restore(auto = false) {
     if (this.run || !this.recovery || !World.inWorld() || World.isDead() || World.gp?.inventoryPending || World.isCasting()) return;
-    if (Hunt.running || Town.trip || WalkBack.active || Restock.trip || Alchemy.run || Alchemy.pending) return UI.toast('Stop hunting and travel before restoring gear.', 'warn');
-    this.run = this.create(this.recovery, []); this.run.restoring = true; this.recovery = null;
+    if (!auto && Hunt.running || Town.trip || WalkBack.active || Restock.trip || Alchemy.run || Alchemy.pending) return UI.toast('Stop hunting and travel before restoring gear.', 'warn');
+    this.run = this.create(this.recovery, []); this.run.restoring = true; this.recovery = null; this.autoRestore = false;
   },
   create(home, queue) {
     return { home, queue, restoring: false, pending: null, cast: null, effects: [],
@@ -4650,7 +4659,7 @@ const BuffGear = {
     if (!this.run) return this.begin();
     const r = this.run, gp = World.gp;
     if (r.character !== World.charName || r.profile !== Settings.profile) { this.reset(); return false; }
-    if (!World.inWorld() || World.isDead()) { this.interrupt('World change or death interrupted buff swaps.'); return false; }
+    if (!World.inWorld() || World.isDead()) { this.interrupt('World change or death interrupted buff swaps.', true); return false; }
     if (Manual.lastAt !== r.manualAt) { this.fail('Manual control interrupted buff swaps.'); return true; }
     if (now() - r.at > 120000) { this.fail('Buff gear cycle timed out.'); return true; }
     if (!Hunt.running || r.signature !== this.signature()) this.cancel();
@@ -5344,6 +5353,7 @@ const Controller = {
       this.guard('Reconnect', () => Reconnect.tick());
       Restock.sample();
       Alchemy.tick();
+      BuffGear.resume();
       if (BuffGear.run) {
         if (World.inWorld()) { Party.tick(); Potion.tick(); }
         if (BuffGear.tick()) { this.mode = 'buff gear'; return; }
@@ -9297,7 +9307,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.139", "title": "Back to the hunting spot by reverse scroll, not on foot, after logging in dead", "items": ["When a character was dead at login and wakes up in town, the bot no longer tries to walk from town to the hunting spot. With town services set up it does the town trip (potions, repair, warehouse) and then uses the reverse return scroll, the same way it does after dying while hunting.", "The same applies when hunting resumes after a reconnect and the character is standing in that town.", "Outside town nothing changes: small returns inside the hunting area still walk as before."], "note": "Tested in simulation only; not yet confirmed on the live server. Needs town services saved and a reverse return scroll in the bag."}, {"version": "1.2.138", "title": "Walking no longer gets stuck on obstacles", "items": ["When the character stops against something while walking (return to the hunting spot, town trips, potion restocking and trade runs), the bot now notices after a few seconds, marks the spot ahead as blocked and plans a way around it.", "It tries a few times at one place. If it still cannot get past, it stops with a clear message (\"an obstacle blocks the way\") instead of standing there.", "Normal move commands only: no teleporting and no collision bypass."], "note": "Tested in simulation only (an invisible object the collision map does not know about); not yet confirmed on the live server."}, {"version": "1.2.137", "title": "Automatic trading between towns", "items": ["New **Auto trade** page. Pick the town to buy in and the town to sell in, press **Start trading**, and the bot does the whole run: summons your transport, buys the dearest trade goods you can afford at the trade merchant, walks to the other town, and sells everything there. It reports the gold gained.", "**Deliveries** sets how many runs to do (0 = until you stop it). With more than one, the bot buys the second town's goods and carries them back.", "Potions keep being used on the road, and at each town the bot first tops up the potions from your Supplies page targets.", "Needs your trader job suit on and a transport scroll in the bag (or a transport already summoned), plus enough gold. Walking only, no teleports. Bandits are not fought; the run stops with a message if you die, take manual control, or the merchant does not link to your transport.", "Towns: Jangan, Donwhang, Hotan, Samarkand and Constantinople."], "note": "Tested in simulation only; not yet confirmed on the live server. The bot cannot yet buy a transport for you."}, {"version": "1.2.136", "title": "Buff weapon swap carries on when the game refuses a weapon", "items": ["If the game will not equip the bag weapon picked for a buff (for example a level or class limit), the bot now notices within seconds, puts your gear back, remembers not to pick that weapon again, and keeps hunting. Before, it waited fifteen seconds and stopped with \"manual equipment review needed\".", "When a swap does still fail, the message and the overlay now say which item and slots were involved instead of only \"manual equipment review needed\"."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.135", "title": "Classic window: skill icons look right, and the imbue list shows imbues only", "items": ["In the Classic (SBot-style) window, skill icons had white borders, a smaller size and no gold border on selected skills. They now look the same as in the normal window.", "**Weapon imbue** listed every self skill, so it looked just like the buff list. It now shows only weapon imbues and poison coatings. **Show all self skills** brings the full list back, and characters with no imbue skill still see the full list."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.134", "title": "Fix: bot stopped with \"requiredLevel is not a function\"", "items": ["Fixes 1.2.133: when a buff needed a bag weapon, the bot stopped with \"ItemRules.requiredLevel is not a function\" instead of swapping. The weapon's level requirement is now read correctly."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.133", "title": "Buffs now wear the weapon they need", "items": ["With **Swap weapons for buffs** on, a buff your current weapon cannot cast is now cast with a matching weapon from your bag, picked from the skill's own weapon requirement. No saved buff set is needed. Your combat weapon and shield come back afterward.", "The best usable bag weapon is used (highest +, not broken, within your level). Identical copies of a weapon no longer block the swap. A weapon the game refuses to equip is not tried again.", "One-handed buff weapons keep your shield on; two-handed ones take it off and put it back. Keep one bag slot free.", "The Buffs & imbue page shows what each automatic buff is waiting for, or that no usable weapon is in your bag. **Wear the weapon each buff needs** switches this off; saved sets still work for buffs you assign to one.", "Every equipment move is still confirmed before the next step or the cast. Imbues and attack skills are not swapped."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.132", "title": "Berserk has its own Giant party switch", "items": ["**Combat -> Berserk** now has a **Giant party** switch, right under Giants. Berserk on party Giants follows it; other party monsters still follow **Party monsters**, so you can save Berserk for party Giants without spending it on every party mob.", "Saved profiles keep working: until you change it, **Giant party** takes whatever **Party monsters** was set to, so nobody loses Berserk on party Giants after updating. New profiles start with it off.", "Reported by Rebraxin (PR #11)."], "note": "Tested in simulation, and a player confirmed Berserk fired on party Giants on the live server."}];
+const RELEASE_NOTES = [{"version": "1.2.140", "title": "Dying during a buff weapon swap no longer leaves the buff weapon on", "items": ["If your character died (or the world changed) while the bot was wearing a buff weapon, the bot used to stop hunting and leave that weapon on, so after reviving you could not attack until you pressed \"Restore combat gear\". Now hunting carries on, and the bot puts your combat weapon and shield back on by itself as soon as the character is alive again, before the return trip."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.139", "title": "Back to the hunting spot by reverse scroll, not on foot, after logging in dead", "items": ["When a character was dead at login and wakes up in town, the bot no longer tries to walk from town to the hunting spot. With town services set up it does the town trip (potions, repair, warehouse) and then uses the reverse return scroll, the same way it does after dying while hunting.", "The same applies when hunting resumes after a reconnect and the character is standing in that town.", "Outside town nothing changes: small returns inside the hunting area still walk as before."], "note": "Tested in simulation only; not yet confirmed on the live server. Needs town services saved and a reverse return scroll in the bag."}, {"version": "1.2.138", "title": "Walking no longer gets stuck on obstacles", "items": ["When the character stops against something while walking (return to the hunting spot, town trips, potion restocking and trade runs), the bot now notices after a few seconds, marks the spot ahead as blocked and plans a way around it.", "It tries a few times at one place. If it still cannot get past, it stops with a clear message (\"an obstacle blocks the way\") instead of standing there.", "Normal move commands only: no teleporting and no collision bypass."], "note": "Tested in simulation only (an invisible object the collision map does not know about); not yet confirmed on the live server."}, {"version": "1.2.137", "title": "Automatic trading between towns", "items": ["New **Auto trade** page. Pick the town to buy in and the town to sell in, press **Start trading**, and the bot does the whole run: summons your transport, buys the dearest trade goods you can afford at the trade merchant, walks to the other town, and sells everything there. It reports the gold gained.", "**Deliveries** sets how many runs to do (0 = until you stop it). With more than one, the bot buys the second town's goods and carries them back.", "Potions keep being used on the road, and at each town the bot first tops up the potions from your Supplies page targets.", "Needs your trader job suit on and a transport scroll in the bag (or a transport already summoned), plus enough gold. Walking only, no teleports. Bandits are not fought; the run stops with a message if you die, take manual control, or the merchant does not link to your transport.", "Towns: Jangan, Donwhang, Hotan, Samarkand and Constantinople."], "note": "Tested in simulation only; not yet confirmed on the live server. The bot cannot yet buy a transport for you."}, {"version": "1.2.136", "title": "Buff weapon swap carries on when the game refuses a weapon", "items": ["If the game will not equip the bag weapon picked for a buff (for example a level or class limit), the bot now notices within seconds, puts your gear back, remembers not to pick that weapon again, and keeps hunting. Before, it waited fifteen seconds and stopped with \"manual equipment review needed\".", "When a swap does still fail, the message and the overlay now say which item and slots were involved instead of only \"manual equipment review needed\"."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.135", "title": "Classic window: skill icons look right, and the imbue list shows imbues only", "items": ["In the Classic (SBot-style) window, skill icons had white borders, a smaller size and no gold border on selected skills. They now look the same as in the normal window.", "**Weapon imbue** listed every self skill, so it looked just like the buff list. It now shows only weapon imbues and poison coatings. **Show all self skills** brings the full list back, and characters with no imbue skill still see the full list."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.134", "title": "Fix: bot stopped with \"requiredLevel is not a function\"", "items": ["Fixes 1.2.133: when a buff needed a bag weapon, the bot stopped with \"ItemRules.requiredLevel is not a function\" instead of swapping. The weapon's level requirement is now read correctly."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.133", "title": "Buffs now wear the weapon they need", "items": ["With **Swap weapons for buffs** on, a buff your current weapon cannot cast is now cast with a matching weapon from your bag, picked from the skill's own weapon requirement. No saved buff set is needed. Your combat weapon and shield come back afterward.", "The best usable bag weapon is used (highest +, not broken, within your level). Identical copies of a weapon no longer block the swap. A weapon the game refuses to equip is not tried again.", "One-handed buff weapons keep your shield on; two-handed ones take it off and put it back. Keep one bag slot free.", "The Buffs & imbue page shows what each automatic buff is waiting for, or that no usable weapon is in your bag. **Wear the weapon each buff needs** switches this off; saved sets still work for buffs you assign to one.", "Every equipment move is still confirmed before the next step or the cast. Imbues and attack skills are not swapped."], "note": "Tested in simulation only; not yet confirmed on the live server."}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -12273,7 +12283,7 @@ function boot() {
   bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); StatPoints.reset(); Trace.reset(); BuffGear.reset(); Town.lastScrollPoint = null; Town.deathPoint = null; SpeedScroll.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
   bus.on('phase', phase => {
     if (phase !== 'world') {
-      BuffGear.interrupt('World transition interrupted buff swaps.');
+      BuffGear.interrupt('World transition interrupted buff swaps.', true);
       Party.reset();
       SpeedScroll.reset();
       Resurrect.reset();
@@ -12285,7 +12295,7 @@ function boot() {
   });
   bus.on('failure', () => { BuffGear.interrupt('Connection failed during buff swaps.'); stopAll(); Restock.cancelRecording(); UI.toast('Game connection failed; bot stopped.', 'warn'); });
   bus.on('reset', () => {
-    BuffGear.interrupt('World reset interrupted buff swaps.');
+    BuffGear.interrupt('World reset interrupted buff swaps.', true);
     if (Town.trip) {
       if (['recall-wait', 'reverse-wait'].includes(Town.trip.phase)) Town.trip.transition = true;
       else Town.fail('Unexpected world reset during town service.');

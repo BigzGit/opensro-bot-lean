@@ -38,7 +38,7 @@ function boot() {
   bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); StatPoints.reset(); Trace.reset(); BuffGear.reset(); Town.lastScrollPoint = null; Town.deathPoint = null; SpeedScroll.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
   bus.on('phase', phase => {
     if (phase !== 'world') {
-      BuffGear.interrupt('World transition interrupted buff swaps.');
+      BuffGear.interrupt('World transition interrupted buff swaps.', true);
       Party.reset();
       SpeedScroll.reset();
       Resurrect.reset();
@@ -50,7 +50,7 @@ function boot() {
   });
   bus.on('failure', () => { BuffGear.interrupt('Connection failed during buff swaps.'); stopAll(); Restock.cancelRecording(); UI.toast('Game connection failed; bot stopped.', 'warn'); });
   bus.on('reset', () => {
-    BuffGear.interrupt('World reset interrupted buff swaps.');
+    BuffGear.interrupt('World reset interrupted buff swaps.', true);
     if (Town.trip) {
       if (['recall-wait', 'reverse-wait'].includes(Town.trip.phase)) Town.trip.transition = true;
       else Town.fail('Unexpected world reset during town service.');

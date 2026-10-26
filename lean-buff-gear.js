@@ -1,6 +1,6 @@
 // Confirm every native inventory move before casting or restoring combat gear.
 const BuffGear = {
-  run: null, recovery: null, message: 'Buff weapon swapping off.', skipped: new Map(), waiting: '', started: false, bad: new Set(),
+  run: null, recovery: null, autoRestore: false, message: 'Buff weapon swapping off.', skipped: new Map(), waiting: '', started: false, bad: new Set(),
   cfg() { return Settings.profile.macro; },
   items() { return World.gp?.inventory || []; },
   at(slot) { return this.items().find(i => i.slot === slot) || null; },
@@ -75,10 +75,15 @@ const BuffGear = {
     this.run = this.recovery = null; this.skipped.clear(); this.bad.clear();
     this.message = 'Buff gear reset. Check equipped weapons after reconnecting.';
   },
-  interrupt(text) {
-    if (this.run) this.fail(text);
+  // Dying or changing world mid-swap is not a failure: remember the combat gear and put it back on once alive again.
+  interrupt(text, soft = false) {
+    if (!this.run) return;
+    if (!soft) return this.fail(text);
+    this.recovery = this.run.home; this.autoRestore = true; this.run = null;
+    this.message = text + ' Combat gear is restored once the character is back.';
   },
   fail(text) {
+    this.autoRestore = false;
     if (this.run) this.recovery = this.run.home;
     this.run = null;
     if (Hunt.running && World.inWorld() && !World.isDead()) Hunt.stop(text);
@@ -91,10 +96,14 @@ const BuffGear = {
     this.run.restoring = true; this.run.queue = []; this.run.cancelled = true;
     this.message = 'Stopping buffs; restoring combat gear.';
   },
-  restore() {
+  // Called every tick: a swap cut short by death or a world change puts the combat weapon back by itself.
+  resume() {
+    if (this.autoRestore && this.recovery && !this.run) this.restore(true);
+  },
+  restore(auto = false) {
     if (this.run || !this.recovery || !World.inWorld() || World.isDead() || World.gp?.inventoryPending || World.isCasting()) return;
-    if (Hunt.running || Town.trip || WalkBack.active || Restock.trip || Alchemy.run || Alchemy.pending) return UI.toast('Stop hunting and travel before restoring gear.', 'warn');
-    this.run = this.create(this.recovery, []); this.run.restoring = true; this.recovery = null;
+    if (!auto && Hunt.running || Town.trip || WalkBack.active || Restock.trip || Alchemy.run || Alchemy.pending) return UI.toast('Stop hunting and travel before restoring gear.', 'warn');
+    this.run = this.create(this.recovery, []); this.run.restoring = true; this.recovery = null; this.autoRestore = false;
   },
   create(home, queue) {
     return { home, queue, restoring: false, pending: null, cast: null, effects: [],
@@ -187,7 +196,7 @@ const BuffGear = {
     if (!this.run) return this.begin();
     const r = this.run, gp = World.gp;
     if (r.character !== World.charName || r.profile !== Settings.profile) { this.reset(); return false; }
-    if (!World.inWorld() || World.isDead()) { this.interrupt('World change or death interrupted buff swaps.'); return false; }
+    if (!World.inWorld() || World.isDead()) { this.interrupt('World change or death interrupted buff swaps.', true); return false; }
     if (Manual.lastAt !== r.manualAt) { this.fail('Manual control interrupted buff swaps.'); return true; }
     if (now() - r.at > 120000) { this.fail('Buff gear cycle timed out.'); return true; }
     if (!Hunt.running || r.signature !== this.signature()) this.cancel();

@@ -199,6 +199,7 @@ const Controller = {
       this.guard('Reconnect', () => Reconnect.tick());
       Restock.sample();
       Alchemy.tick();
+      BuffGear.resume();
       if (BuffGear.run) {
         if (World.inWorld()) { Party.tick(); Potion.tick(); }
         if (BuffGear.tick()) { this.mode = 'buff gear'; return; }
