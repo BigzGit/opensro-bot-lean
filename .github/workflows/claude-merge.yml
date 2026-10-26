@@ -70,7 +70,7 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           set -e
-          verdict=$(gh pr view "$PR" --json comments --jq '[.comments[]|select(.author.login=="github-actions")|.body|capture("VERDICT: (?<v>MERGE|HOLD)\s*$";"m").v]|last // "HOLD"')
+          verdict=$(gh pr view "$PR" --json comments --jq '[.comments[]|select(.author.login=="github-actions")|.body|capture("VERDICT: (?<v>MERGE|HOLD)").v]|last // "HOLD"')
           [ "$verdict" = "MERGE" ] || { echo "Verdict: $verdict. Not merging."; exit 0; }
           git fetch -q origin "pull/$PR/head" 2>/dev/null || true
           if gh pr diff "$PR" --name-only | grep -q '^\.github/'; then echo "Touches .github/. Not merging."; exit 0; fi
