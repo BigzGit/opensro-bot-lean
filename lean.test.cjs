@@ -352,6 +352,16 @@ test('every supported town has a trade merchant in the town table, and the trade
   const g = f.botProfile({ trade: { from: 'KT', to: 'EU', trips: 3, potions: false, extra: 1 } });
   assert.equal(g.trade.from, 'KT'); assert.equal(g.trade.trips, 3); assert.equal(g.trade.potions, false); assert.equal('extra' in g.trade, false);
 });
+test('auto pot keeps drinking while an auto trade runs, from the Controller loop', () => {
+  const t = tradeFixture(), f = t.f;
+  t.gp.inventory.push({ slot: 13, refObjId: 101, typeFlags: 2284, quantity: 10, name: 'HP potion' });
+  f.World.me = () => ({ maxHp: 100, maxMp: 100, hpPct: 20, mpPct: 100, abnormal: 0 });
+  f.Settings.profile.potion.enabled = true; f.Settings.profile.potion.hp.on = true; f.Settings.profile.potion.hp.pct = 50;
+  f.Trade.start(); assert.ok(f.Trade.run, f.Trade.message);
+  f.advance(2000); f.Controller.tick();
+  assert.equal(f.Controller.mode, 'trading');
+  assert.ok(f.commands.some(c => c.kind === 'item-use' || c.kind === 'use-item' || /item/.test(c.kind)), 'an HP potion was used: ' + JSON.stringify(f.commands.map(c => c.kind)));
+});
 test('auto trade buys goods into the transport, delivers them to the other town and sells them all', () => {
   const t = tradeFixture(), f = t.f;
   f.Trade.start(); assert.ok(f.Trade.run, f.Trade.message);
@@ -3683,12 +3693,15 @@ test('full character bag recalls before requiring space in town', () => {
   assert.equal(f.Hunt.running, false); assert.match(f.Town.message, /Returned to town; free/);
 });
 
-test('protected full pet recalls before asking for manual emptying', () => {
+test('a pet full of protected items never sends the bot to town, and never strands it there', () => {
   const f = townFixture(); f.pet.inventory = [f.pet.inventory[2]]; f.pet.status = 1;
+  assert.equal(f.Town.petClearable(f.Loot.pet()), false);
+  assert.notEqual(f.Town.reason(), 'pickup pet nearly full');
+  // A trip for another reason arrives without stopping the hunt because the pet cannot be emptied.
   f.Controller.tick(); assert.equal(f.Town.trip.phase, 'recall-wait');
   f.Town.phase('entering-world'); f.World.gp.pose.x = 100;
   f.advance(1000); f.Controller.tick();
-  assert.equal(f.Hunt.running, false); assert.match(f.Town.message, /Returned to town; pet is full/);
+  assert.equal(f.Hunt.running, true); assert.doesNotMatch(f.Town.message, /pet is full/);
 });
 
 test('town revival overrides stop default and preserves reverse intent through bootstrap', () => {

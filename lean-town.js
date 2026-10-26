@@ -273,11 +273,14 @@ const Town = {
     return Number.isInteger(tf) && ItemType.isEquipment(tf) && [1, 2, 3, 4, 5, 6, 9, 10, 11, 12].includes((tf >>> 7) & 15) &&
       /^ITEM_(CH|EU)_/.test(code);
   },
+  // Whether a trip could empty any of the pet's slots (sell or store something). A pet full of protected items would
+  // otherwise send the bot to town again and again for nothing.
+  petClearable(pet) { return pet.rec.inventory.some(i => this.sellable(i) || this.eligible(i)); },
   autoRevive() { return this.cfg().enabled && this.cfg().revive; },
   reason() {
     const c = this.cfg(), pet = Loot.pet();
     if (World.freeBagSlots() <= 1) return 'character bag nearly full';
-    if (c.petFull && pet && pet.rec.status - pet.rec.inventory.length <= c.petFree) return 'pickup pet nearly full';
+    if (c.petFull && pet && pet.rec.status - pet.rec.inventory.length <= c.petFree && this.petClearable(pet)) return 'pickup pet nearly full';
     if (this.supplies().some(s => Restock.count(s.refObjId) <= s.low)) return 'potions running low';
     if (this.ammoSupplies().some(s => this.ammoCount(s.refObjId) <= s.low)) return 'ammunition running low';
     if (c.broken && this.weaponBroken()) return 'weapon broken';
@@ -376,7 +379,6 @@ const Town = {
     t.scrollAttempts = 0; t.scrollRequest = null;
     // With bag selling on, the trip sells first, so a full bag can still make room for refills.
     if (full && !t.sellFirst) return this.fail('Returned to town; free a character bag slot for storage and refills.');
-    if (this.cfg().petFull && this.reason() === 'pickup pet nearly full' && !Loot.pet()?.rec.inventory.some(i => this.disposable(i) || this.eligible(i))) return this.fail('Returned to town; pet is full of protected items. Empty it manually.');
     t.order = this.order(full);
     this.enter('walk-' + t.order[0]);
   },
@@ -532,7 +534,7 @@ const Town = {
     const bagItem = !petItem && t.sellFirst ? World.items().find(i => this.sellableBag(i) && !unsold('bag:', i)) : null;
     const item = petItem || bagItem;
     if (!item) {
-      if (this.cfg().petFull && pet && pet.rec.status - pet.rec.inventory.length <= this.cfg().petFree) return this.fail('Protected pet items still fill the bag.');
+      // Protected items may still fill the pet; the trip carries on and goes back to hunting rather than stopping in town.
       this.enter(this.ammoSupplies().length ? 'ammo' : 'repair'); return;
     }
     const quantity = item.quantity ?? 1;
