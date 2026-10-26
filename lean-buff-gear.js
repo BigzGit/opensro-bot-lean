@@ -114,7 +114,7 @@ const BuffGear = {
   due(b, auto) {
     if (!b.enabled || !b.gearSet && !auto) return 0;
     const id = Combat.resolve(b), info = World.skill(id);
-    if (!id || !info || info.targetRequired || Combat.blocked(id) || !Cmd.canCast(id) || !Combat.mpOk(id, World.me())) return 0;
+    if (!id || !info || info.targetRequired && !(info.targets & 1) || Combat.blocked(id) || !Cmd.canCast(id) || !Combat.mpOk(id, World.me())) return 0;
     const skip = this.skipped.get(b.group);
     if (skip) { if (skip.signature === this.signature() && now() < skip.until) return 0; this.skipped.delete(b.group); }
     const remaining = World.buffRemaining(id);
@@ -250,7 +250,7 @@ const BuffGear = {
     const entry = q.buffs[0];
     if (!entry) { r.queue.shift(); return true; }
     if (!this.due(entry.b, q.set.auto)) { q.buffs.shift(); return true; }
-    if (Combat.cast(entry.id, 0)) {
+    if (Combat.cast(entry.id, World.skill(entry.id)?.targetRequired ? World.localGid() : 0)) {
       Combat.buffCastAt.set(entry.b.group, now()); q.buffs.shift();
       r.cast = { id: entry.id, group: entry.b.group, at: now(), until: now() + Math.max(1000, World.skill(entry.id)?.actionMs || 6000) + 500, accepted: false, visible: false };
       this.message = 'Casting buff; waiting before changing weapons.';

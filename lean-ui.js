@@ -451,7 +451,7 @@ const UI = {
   learnedSkills(buff) {
     const best = new Map();
     for (const s of Learned.rows()) {
-      if (s.missing || s.active === false || s.groundTarget || (buff ? s.targetRequired : !s.targetRequired || (s.targets !== undefined && !(s.targets & 4)))) continue;
+      if (s.missing || s.active === false || s.groundTarget || (buff ? s.targetRequired && !(s.targets & 1) : !s.targetRequired || (s.targets !== undefined && !(s.targets & 4)))) continue;
       const group = s.group ?? s.id, previous = best.get(group);
       if (!previous || (s.level ?? 0) > (previous.level ?? 0)) best.set(group, s);
     }

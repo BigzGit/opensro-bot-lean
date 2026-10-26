@@ -4760,6 +4760,17 @@ test('assigned buffs never cast on combat gear when swapping is off; ordinary bu
   assert.equal(f.Combat.buffs(true),true);assert.equal(f.commands.at(-1).skillId,20);
 });
 
+test('self-castable target buffs (Holy Spell, Body Blessing) are listed and cast on yourself',()=>{
+  const f=buffGearFixture();f.Settings.profile.macro.buffs=[];
+  f.World.gp.skills=[40,41];
+  f.World.catalog.set(40,{id:40,group:40,name:'Holy Spell',targetRequired:true,targets:1|16|32,actionMs:1000,durationMs:60000});
+  f.World.catalog.set(41,{id:41,group:41,name:'Heal',targetRequired:true,targets:16|32,actionMs:1000});
+  assert.equal(f.UI.learnedSkills(true).map(s=>s.id).join(),'40');
+  f.Settings.profile.macro.buffs=[{id:40,group:40,enabled:true,mode:'hunt'}];
+  assert.equal(f.Combat.buffs(true),true);
+  assert.equal(f.commands.at(-1).skillId,40);assert.equal(f.commands.at(-1).targetGid ?? f.commands.at(-1).gid ?? f.World.localGid(),f.World.localGid());
+});
+
 test('buff gear unconfirmed cast returns home and suppresses repeated failed swaps',()=>{
   const f=buffGearFixture(),home=JSON.stringify(f.BuffGear.setup());f.BuffGear.tick();
   for(let n=0;n<20&&!f.BuffGear.run.cast;n++){f.BuffGear.tick();if(f.BuffGear.run.pending)f.confirmMove();f.advance(300);}

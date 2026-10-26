@@ -51,6 +51,13 @@ potion = section('const Potion =', '// Same rule as the client').replace("Stats.
 combat = section('const Combat =', '// ---- Assist:')
 combat = combat.replace('return Assets.skillMeta.get(id) || null;', 'return World.skill(id) || null;')
 combat = combat.replace('return !m || !m.mp || m.mp <= me.mp;', 'return !m || (m.mp ?? 0) + Math.trunc(me.maxMp * (m.mpPercent ?? 0) / 100) <= me.mp;')
+# Cleric blessings (Holy Spell, Body Blessing...) need a target but accept the caster: keep them up on yourself.
+buff_old = "      if (info && info.targetRequired) continue;\n"
+assert combat.count(buff_old) == 1
+combat = combat.replace(buff_old, "      if (info && info.targetRequired && !(info.targets & 1)) continue;\n")
+buff_cast_old = "      if (this.cast(id, 0)) {\n        this.buffCastAt.set(b.group, now());"
+assert combat.count(buff_cast_old) == 1
+combat = combat.replace(buff_cast_old, "      if (this.cast(id, info?.targetRequired ? World.localGid() : 0)) {\n        this.buffCastAt.set(b.group, now());")
 # A normal attack replaces skills silently in the original loop. Record why each rotation skill was
 # skipped so the panel and bug reports can say so, and stop false "silent rejection" blocks: a skill is only
 # judged rejected after a newer game snapshot arrived and the cooldown still did not start.
@@ -200,7 +207,7 @@ skin += '\nconst LEAN_CSS = ' + __import__('json').dumps((base / 'lean-skin.css'
 header = '''// ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.147
+// @version      1.2.148
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -221,7 +228,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[NIX] Another SRO assistant is active. Disable it and reload to use NIX.');
   return;
 }
-const VERSION = '1.2.147';
+const VERSION = '1.2.148';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
