@@ -352,13 +352,6 @@ test('every supported town has a trade merchant in the town table, and the trade
   const g = f.botProfile({ trade: { from: 'KT', to: 'EU', trips: 3, potions: false, extra: 1 } });
   assert.equal(g.trade.from, 'KT'); assert.equal(g.trade.trips, 3); assert.equal(g.trade.potions, false); assert.equal('extra' in g.trade, false);
 });
-  f.World.me = () => ({ maxHp: 100, maxMp: 100, hpPct: 20, mpPct: 100, abnormal: 0 });
-  f.Settings.profile.potion.enabled = true; f.Settings.profile.potion.hp.on = true; f.Settings.profile.potion.hp.pct = 50;
-  f.Trade.start(); assert.ok(f.Trade.run, f.Trade.message);
-  f.advance(2000); f.Controller.tick();
-  assert.equal(f.Controller.mode, 'trading');
-  assert.ok(f.commands.some(c => c.kind === 'item-use' || c.kind === 'use-item' || /item/.test(c.kind)), 'an HP potion was used: ' + JSON.stringify(f.commands.map(c => c.kind)));
-});
 test('auto trade buys goods into the transport, delivers them to the other town and sells them all', () => {
   const t = tradeFixture(), f = t.f;
   f.Trade.start(); assert.ok(f.Trade.run, f.Trade.message);
