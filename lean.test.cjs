@@ -3574,6 +3574,16 @@ test('town purchase requires exact quantity gain and enough gold, without duplic
   const g = townFixture(); g.Town.begin(); g.Town.enter('buy'); g.World.gp.target = 61; g.World.gp.shop = gp.shop; g.World.gp.progression.gold = '1';
   g.Town.buy(); assert.equal(g.commands.some(c => c.kind === 'shop-buy'), false); assert.match(g.Town.message, /gold/);
 });
+test('town buys what the gold covers and moves on instead of failing in the potion shop', () => {
+  const f = townFixture(), gp = f.World.gp;
+  f.Town.begin(); f.Town.enter('buy'); gp.target = 61; gp.progression.gold = '200';
+  gp.shop = { npc: 61, offers: [{ refObjId: 15, tab: 0, slot: 0, maxStack: 100, price: '10', previews: [{ refObjId: 15, typeFlags: 4332 }] }] };
+  f.Town.buy(); assert.equal(f.commands.at(-1).quantity, 20);
+  gp.inventory.find(i => i.refObjId === 15).quantity += 20; gp.progression.gold = '5'; f.advance(1000); f.Town.buy();
+  gp.progression.gold = '5'; f.advance(1000); f.Town.buy();
+  assert.ok(f.Town.trip, 'trip continues'); assert.equal(f.commands.filter(c => c.kind === 'shop-buy').length, 1);
+  assert.ok(f.Town.trip.buySkipped.includes(15));
+});
 test('town repairs require restored durability and reverse return requires all final checks', () => {
   const f = townFixture(), gp = f.World.gp;
   f.Town.begin(); f.Town.enter('repair'); gp.target = 62; gp.shop = { npc: 62 };

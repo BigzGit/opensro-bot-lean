@@ -161,7 +161,8 @@ const Restock = {
         t.pending = null;
       }
       if (gp.inventoryPending) return true;
-      const s = t.supplies.find(i => this.count(i.refObjId) < i.target);
+      t.skipped ||= [];
+      const s = t.supplies.find(i => !t.skipped.includes(i.refObjId) && this.count(i.refObjId) < i.target);
       if (!s) {
         if (Cmd.raw({ kind: 'npc-close' }, 'Auto buy: close merchant')) {
           t.phase = 'return'; t.index = 1; t.best = Infinity; t.progressAt = now(); t.movedAt = 0;
@@ -173,10 +174,17 @@ const Restock = {
       if (!offer) { this.fail(s.kind === 'cure' ? 'Special Universal Pill (small) is unavailable at this merchant.' : 'Selected potion is unavailable at this merchant.'); return true; }
       const before = this.count(s.refObjId);
       const stackRoom = World.items().filter(i => i.refObjId === s.refObjId).reduce((n, i) => n + Math.max(0, offer.maxStack - (i.quantity ?? 1)), 0);
-      const quantity = Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, stackRoom + World.freeBagSlots() * offer.maxStack);
+      let quantity = Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, stackRoom + World.freeBagSlots() * offer.maxStack);
       if (quantity < 1) { this.fail('Inventory full; make room for potions.'); return true; }
       const gold = gp.progression?.gold;
-      if (gold === undefined || toBigInt(offer.price) * BigInt(quantity) > toBigInt(gold)) { this.fail('Not enough gold for the potion refill.'); return true; }
+      if (gold === undefined) { this.fail('Not enough gold for the potion refill.'); return true; }
+      // Short on gold: buy what the gold covers and go back, instead of stopping in the shop.
+      const price = toBigInt(offer.price), have = toBigInt(gold);
+      if (price > 0n && price * BigInt(quantity) > have) quantity = Number(have / price);
+      if (quantity < 1) {
+        if (before > 0) { t.skipped.push(s.refObjId); return true; }
+        this.fail('Not enough gold for the potion refill.'); return true;
+      }
       if (Cmd.raw({ kind: 'shop-buy', tab: offer.tab, slot: offer.slot, quantity }, `Auto buy: ${offer.name} x${quantity}`)) t.pending = { ref: s.refObjId, before, quantity, at: now() };
       return true;
     }

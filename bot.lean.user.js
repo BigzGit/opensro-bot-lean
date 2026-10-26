@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.148
+// @version      1.2.149
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[NIX] Another SRO assistant is active. Disable it and reload to use NIX.');
   return;
 }
-const VERSION = '1.2.148';
+const VERSION = '1.2.149';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -1579,7 +1579,8 @@ const Restock = {
         t.pending = null;
       }
       if (gp.inventoryPending) return true;
-      const s = t.supplies.find(i => this.count(i.refObjId) < i.target);
+      t.skipped ||= [];
+      const s = t.supplies.find(i => !t.skipped.includes(i.refObjId) && this.count(i.refObjId) < i.target);
       if (!s) {
         if (Cmd.raw({ kind: 'npc-close' }, 'Auto buy: close merchant')) {
           t.phase = 'return'; t.index = 1; t.best = Infinity; t.progressAt = now(); t.movedAt = 0;
@@ -1591,10 +1592,17 @@ const Restock = {
       if (!offer) { this.fail(s.kind === 'cure' ? 'Special Universal Pill (small) is unavailable at this merchant.' : 'Selected potion is unavailable at this merchant.'); return true; }
       const before = this.count(s.refObjId);
       const stackRoom = World.items().filter(i => i.refObjId === s.refObjId).reduce((n, i) => n + Math.max(0, offer.maxStack - (i.quantity ?? 1)), 0);
-      const quantity = Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, stackRoom + World.freeBagSlots() * offer.maxStack);
+      let quantity = Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, stackRoom + World.freeBagSlots() * offer.maxStack);
       if (quantity < 1) { this.fail('Inventory full; make room for potions.'); return true; }
       const gold = gp.progression?.gold;
-      if (gold === undefined || toBigInt(offer.price) * BigInt(quantity) > toBigInt(gold)) { this.fail('Not enough gold for the potion refill.'); return true; }
+      if (gold === undefined) { this.fail('Not enough gold for the potion refill.'); return true; }
+      // Short on gold: buy what the gold covers and go back, instead of stopping in the shop.
+      const price = toBigInt(offer.price), have = toBigInt(gold);
+      if (price > 0n && price * BigInt(quantity) > have) quantity = Number(have / price);
+      if (quantity < 1) {
+        if (before > 0) { t.skipped.push(s.refObjId); return true; }
+        this.fail('Not enough gold for the potion refill.'); return true;
+      }
       if (Cmd.raw({ kind: 'shop-buy', tab: offer.tab, slot: offer.slot, quantity }, `Auto buy: ${offer.name} x${quantity}`)) t.pending = { ref: s.refObjId, before, quantity, at: now() };
       return true;
     }
@@ -4321,7 +4329,8 @@ const Town = {
     const t = this.trip, gp = World.gp, shop = Restock.activeShop();
     if (!shop || shop.npc !== this.npc('vendor')?.gid || shop.error) return this.fail(shop?.error || 'Potion merchant selection changed.');
     if (!this.pendingDone(p => Restock.count(p.ref) >= p.before + p.quantity) || !this.trip || gp.inventoryPending) return;
-    let s = t.supplies.find(s => Restock.count(s.refObjId) < s.target);
+    t.buySkipped ||= [];
+    let s = t.supplies.find(s => !t.buySkipped.includes(s.refObjId) && Restock.count(s.refObjId) < s.target);
     if (!s) {
       // Refill held travel scrolls from gold offers only. Never buy from Item Mall.
       for (const type of [0x09ec, 0x19ec]) {
@@ -4338,9 +4347,16 @@ const Town = {
     const offer = shop.offers.find(o => o.refObjId === s.refObjId && (s.kind === 'scroll' || Restock.offerKind(o) === s.kind));
     if (!offer || !(offer.maxStack > 0)) return this.fail(s.kind === 'scroll' ? 'Selected scroll is unavailable here.' : s.kind === 'cure' ? 'Special Universal Pill (small) is unavailable here.' : s.kind === 'vigor' ? 'The selected vigor potion size is unavailable here; choose another size in Supplies.' : 'X-Large ' + s.kind.toUpperCase() + ' potion is unavailable here.');
     const before = Restock.count(s.refObjId), room = World.items().filter(i => i.refObjId === s.refObjId).reduce((n, i) => n + Math.max(0, offer.maxStack - (i.quantity ?? 1)), 0);
-    const quantity = Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, room + Math.max(0, World.freeBagSlots() - 1) * offer.maxStack);
+    let quantity = Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, room + Math.max(0, World.freeBagSlots() - 1) * offer.maxStack);
     if (quantity < 1) return this.fail('Not enough bag space for refill and a spare transfer slot.');
-    if (gp.progression?.gold === undefined || toBigInt(offer.price) * BigInt(quantity) > toBigInt(gp.progression.gold)) return this.fail('Not enough gold for potion refill.');
+    if (gp.progression?.gold === undefined) return this.fail('Not enough gold for potion refill.');
+    // Short on gold: buy what the gold covers and carry on, instead of ending the trip in the shop.
+    const price = toBigInt(offer.price), gold = toBigInt(gp.progression.gold);
+    if (price > 0n && price * BigInt(quantity) > gold) quantity = Number(gold / price);
+    if (quantity < 1) {
+      if (before > 0) { t.buySkipped.push(s.refObjId); this.message = 'Not enough gold to top up ' + s.kind + '; buying what is left.'; UI.toast(this.message, 'warn', 6000); return; }
+      return this.fail('Not enough gold for potion refill.');
+    }
     if (Cmd.raw({ kind: 'shop-buy', tab: offer.tab, slot: offer.slot, quantity }, 'Town: refill ' + s.kind)) t.pending = { ref: s.refObjId, before, quantity, at: now() };
   },
   maximum(item) {
@@ -9502,7 +9518,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.148", "title": "Holy Spell and Body Blessing can now be kept up", "items": ["Cleric blessings such as Holy Spell and Body Blessing now show in the Buffs list and are cast on yourself. Before, the list hid every skill that asks for a target, so they never appeared.", "Works with buff gear swaps too. Healing skills that only target other players still stay in the Party tab."], "note": "Tested in simulation only; not tried on the live server."}, {"version": "1.2.147", "title": "Pick Pet balancing and protected primary/secondary gear", "items": ["New \"Pet and gear\" box on the Items page. Pick a primary and secondary weapon and shield from what you wear or carry. Chosen gear is never sold, stored, dropped or moved to the pet.", "Buff swaps now wear the secondary weapon first when it fits the skill.", "New switch \"Balance free slots with the pickup pet\" (off by default). While hunting, items with a Sell or Store rule move one at a time to the bag or the pet, whichever has more free slots. Needs two free slots on the side that receives."], "note": "Tested in simulation only. The pet transfer command is the one town trips already use; balancing on the live server has not been tried."}, {"version": "1.2.146", "title": "A blocked walk to the warehouse no longer ends the town trip", "items": ["If the bot cannot walk around an obstacle on the way to the warehouse, it now skips the deposit and carries on with potions, repairs and the way back, instead of stopping in town with \"Blocked on the way to the warehouse\".", "A blocked walk to the other town services still stops the trip, as before."], "note": "Tested in simulation only. The cause of the block itself (why the character stopped moving) is not known; the bot's route from the town arrival point to the Hotan warehouse checks out against the game's collision data."}, {"version": "1.2.145", "title": "A full pet of protected items no longer strands you in town", "items": ["If the pickup pet is nearly full but everything in it is protected (nothing the trip can sell or store), the bot no longer goes to town for it, and a trip that is already under way carries on and goes back to hunting instead of stopping in town with \"pet is full of protected items\".", "A pet that holds sellable or storable items still triggers the trip as before."], "note": "Tested in simulation only; reproduced from a player's diagnostics report, not on the live server."}, {"version": "1.2.144", "title": "Lure mode for tanks, thanks to Rebraxin", "items": ["New **Lure** section (Combat → Hunt area, and the classic Training place page). A tank walks to saved pull points in turn, taunts the nearest monster, brings it back to the hunting spot, pauses on the way so it keeps up, then holds while the party takes over. It never attacks. Off by default. Setup is in the manual under \"Luring monsters to the party\".", "New setting **Stop pulling at this many monsters in the training area**: while that many monsters are already at the hunting spot, the tank waits instead of pulling more. 0 turns it off."], "note": "Lure mode was run on the live server by a player with a Warrior tank in a four-character party, who reported it works. The stop-pulling setting is tested in simulation only."}, {"version": "1.2.143", "title": "Party: accept list, party leader name and leave-if-wrong-leader", "items": ["New **Accept only these players** box on the Party page. Auto-accept then answers only applicants whose character name is on the list (comma separated, any letter case). Empty means everyone, as before. The list is saved per character.", "**Main account character name** is now **Party leader name**, and the option reads **Join the party leader's party**. Your saved name carries over.", "New option **Leave the party if its leader is someone else**: for your other accounts, the bot leaves a party whose leader is not the named character, then looks for the named leader's party as usual.", "Not included: inviting players from a list. Auto-recruit still works through the party-matching listing."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.142", "title": "Buff weapon swaps work with a full bag when no shield has to come off", "items": ["Swapping to a buff weapon exchanges places with the weapon in your bag, so it needs no free bag slot. The bot used to refuse to start with a completely full bag. It now starts whenever no shield (or arrows) has to be taken off, and only asks for one free slot when one does. The message says so (\"free bag slot to take off your shield\").", "Town trips and the rest of the nearly-full-bag handling are unchanged. If the character still gets stuck with one slot left, send the exact message the bot shows."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.141", "title": "The pet status no longer makes the panel jump", "items": ["The pet status lines (on the Loot page and in Supplies) now sit in a box of fixed height. When the text is longer than the box it scrolls inside it (hover shows the full text), so the rest of the panel stays where it is as the status changes."], "note": "Layout fix only; checked in code and tests, not yet confirmed on the live game."}];
+const RELEASE_NOTES = [{"version": "1.2.149", "title": "Running low on gold no longer stops the bot in the potion shop", "items": ["If your gold does not cover the full potion refill, the bot now buys as many as the gold pays for and carries on, instead of stopping in the shop. This applies to town trips and to the walking restock.", "A potion you have none of and cannot afford still stops the trip with a \"Not enough gold\" message."], "note": "Tested in simulation only. Found from a report where the bot stopped at the potion shop after \"insufficient gold\" errors; other causes were not ruled out."}, {"version": "1.2.148", "title": "Holy Spell and Body Blessing can now be kept up", "items": ["Cleric blessings such as Holy Spell and Body Blessing now show in the Buffs list and are cast on yourself. Before, the list hid every skill that asks for a target, so they never appeared.", "Works with buff gear swaps too. Healing skills that only target other players still stay in the Party tab."], "note": "Tested in simulation only; not tried on the live server."}, {"version": "1.2.147", "title": "Pick Pet balancing and protected primary/secondary gear", "items": ["New \"Pet and gear\" box on the Items page. Pick a primary and secondary weapon and shield from what you wear or carry. Chosen gear is never sold, stored, dropped or moved to the pet.", "Buff swaps now wear the secondary weapon first when it fits the skill.", "New switch \"Balance free slots with the pickup pet\" (off by default). While hunting, items with a Sell or Store rule move one at a time to the bag or the pet, whichever has more free slots. Needs two free slots on the side that receives."], "note": "Tested in simulation only. The pet transfer command is the one town trips already use; balancing on the live server has not been tried."}, {"version": "1.2.146", "title": "A blocked walk to the warehouse no longer ends the town trip", "items": ["If the bot cannot walk around an obstacle on the way to the warehouse, it now skips the deposit and carries on with potions, repairs and the way back, instead of stopping in town with \"Blocked on the way to the warehouse\".", "A blocked walk to the other town services still stops the trip, as before."], "note": "Tested in simulation only. The cause of the block itself (why the character stopped moving) is not known; the bot's route from the town arrival point to the Hotan warehouse checks out against the game's collision data."}, {"version": "1.2.145", "title": "A full pet of protected items no longer strands you in town", "items": ["If the pickup pet is nearly full but everything in it is protected (nothing the trip can sell or store), the bot no longer goes to town for it, and a trip that is already under way carries on and goes back to hunting instead of stopping in town with \"pet is full of protected items\".", "A pet that holds sellable or storable items still triggers the trip as before."], "note": "Tested in simulation only; reproduced from a player's diagnostics report, not on the live server."}, {"version": "1.2.144", "title": "Lure mode for tanks, thanks to Rebraxin", "items": ["New **Lure** section (Combat → Hunt area, and the classic Training place page). A tank walks to saved pull points in turn, taunts the nearest monster, brings it back to the hunting spot, pauses on the way so it keeps up, then holds while the party takes over. It never attacks. Off by default. Setup is in the manual under \"Luring monsters to the party\".", "New setting **Stop pulling at this many monsters in the training area**: while that many monsters are already at the hunting spot, the tank waits instead of pulling more. 0 turns it off."], "note": "Lure mode was run on the live server by a player with a Warrior tank in a four-character party, who reported it works. The stop-pulling setting is tested in simulation only."}, {"version": "1.2.143", "title": "Party: accept list, party leader name and leave-if-wrong-leader", "items": ["New **Accept only these players** box on the Party page. Auto-accept then answers only applicants whose character name is on the list (comma separated, any letter case). Empty means everyone, as before. The list is saved per character.", "**Main account character name** is now **Party leader name**, and the option reads **Join the party leader's party**. Your saved name carries over.", "New option **Leave the party if its leader is someone else**: for your other accounts, the bot leaves a party whose leader is not the named character, then looks for the named leader's party as usual.", "Not included: inviting players from a list. Auto-recruit still works through the party-matching listing."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.142", "title": "Buff weapon swaps work with a full bag when no shield has to come off", "items": ["Swapping to a buff weapon exchanges places with the weapon in your bag, so it needs no free bag slot. The bot used to refuse to start with a completely full bag. It now starts whenever no shield (or arrows) has to be taken off, and only asks for one free slot when one does. The message says so (\"free bag slot to take off your shield\").", "Town trips and the rest of the nearly-full-bag handling are unchanged. If the character still gets stuck with one slot left, send the exact message the bot shows."], "note": "Tested in simulation only; not yet confirmed on the live server."}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
