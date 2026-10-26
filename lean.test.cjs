@@ -1178,6 +1178,28 @@ test('alt account applies again when the main never answered its application', (
 
 test('alt account pages the board until it finds the main, then rests', () => {
   const f = joinMainFixture({ pages: 2, rows: [{ id: 3, name: 'Other', members: 1, type: 0, min: 1, max: 90 }] });
+test('auto-accept answers only applicants on the name list, and everyone when the list is empty', () => {
+  let f = fixture(); partyApplication(f);
+  f.Settings.profile.party.acceptNames = 'Friend, other'; f.Party.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'party-match-answer').length, 0, 'Applicant is not listed');
+  f.Settings.profile.party.acceptNames = 'friend,  APPLICANT'; f.Party.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'party-match-answer').length, 1, 'listed, case-insensitively');
+  f = fixture(); partyApplication(f); f.Settings.profile.party.acceptNames = ''; f.Party.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'party-match-answer').length, 1, 'empty list accepts everyone');
+});
+
+test('the alt leaves a party led by someone else only when asked to, and keeps the named leader party', () => {
+  const f = joinMainFixture(); const party = f.Settings.profile.party;
+  const inParty = leaderName => { f.World.gp.social = { localName: 'AltChar', self: 2, leader: 1, options: 1, members: [{ id: 1, name: leaderName }, { id: 2, name: 'AltChar' }], invitation: null }; };
+  inParty('Stranger'); f.Party.tick(); assert.equal(f.commands.filter(c => c.kind === 'party-leave').length, 0, 'off by default');
+  party.leaveIfNotLeader = true; f.Party.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'party-leave').length, 1, 'leader is someone else');
+  f.advance(1000); f.Party.tick(); assert.equal(f.commands.filter(c => c.kind === 'party-leave').length, 1, 'not repeated at once');
+  const g = joinMainFixture(); g.Settings.profile.party.leaveIfNotLeader = true;
+  g.World.gp.social = { localName: 'AltChar', self: 2, leader: 1, options: 1, members: [{ id: 1, name: 'mainchar' }, { id: 2, name: 'AltChar' }], invitation: null };
+  g.Party.tick(); assert.equal(g.commands.filter(c => c.kind === 'party-leave').length, 0, 'the named leader, any letter case');
+});
+
   f.Controller.tick(); assert.deepEqual(jm(f.commands[0]), { kind: 'party-match-page', page: 1 });
   f.advance(3000); f.World.gp.partyMatching = { ...f.World.gp.partyMatching, page: 2 };
   f.Controller.tick(); assert.deepEqual(jm(f.commands[1]), { kind: 'party-match-page', page: 2 });
@@ -4385,16 +4407,6 @@ test('buff gear says why a due buff is not being swapped in, instead of staying 
   f.Settings.profile.macro.buffSets = [];
   assert.match(f.BuffGear.status(), /no buff set is saved yet/);
   const g = buffGearFixture(); g.Settings.profile.macro.buffs.forEach(b => b.gearSet = 0);
-  assert.ok(f.BuffGear.due(f.Settings.profile.macro.buffs[1]) > 0, 'the skip has expired'); assert.equal(f.BuffGear.skipped.has(group), false);
-});
-// Skill-driven swapping: the game's own weaponKinds say which weapon a buff needs; no saved set is involved.
-function autoGearFixture(){
-  const f=buffGearFixture(), gp=f.World.gp;
-  f.World.catalog.set(20,{...f.World.catalog.get(20),admit:{weaponKinds:[15,255]}});
-  f.World.catalog.set(30,{...f.World.catalog.get(30),admit:{weaponKinds:[14,255]}});
-  f.Settings.profile.macro.buffSets=[]; f.Settings.profile.macro.buffAuto=true;
-  f.Settings.profile.macro.buffs=[{id:20,group:20,gearSet:0,enabled:true,mode:'hunt'},{id:30,group:30,gearSet:0,enabled:true,mode:'hunt'}];
-  return f;
   assert.match(g.BuffGear.status(), /no buff skill is assigned/);
 });
 test('buff gear status lists each assigned buff, and a cast that was only unconfirmed is tried again', () => {
@@ -4415,6 +4427,16 @@ test('buff gear wears the weapon each buff needs and restores the combat weapon 
   assert.deepEqual(casts.map(c=>c[0]),[20,30]);
   assert.deepEqual(casts[0].slice(1),[200,101],'one-handed staff keeps the shield on');
   assert.deepEqual(casts[1].slice(1),[300,undefined],'the harp is worn without the shield');
+  assert.ok(f.BuffGear.due(f.Settings.profile.macro.buffs[1]) > 0, 'the skip has expired'); assert.equal(f.BuffGear.skipped.has(group), false);
+});
+// Skill-driven swapping: the game's own weaponKinds say which weapon a buff needs; no saved set is involved.
+function autoGearFixture(){
+  const f=buffGearFixture(), gp=f.World.gp;
+  f.World.catalog.set(20,{...f.World.catalog.get(20),admit:{weaponKinds:[15,255]}});
+  f.World.catalog.set(30,{...f.World.catalog.get(30),admit:{weaponKinds:[14,255]}});
+  f.Settings.profile.macro.buffSets=[]; f.Settings.profile.macro.buffAuto=true;
+  f.Settings.profile.macro.buffs=[{id:20,group:20,gearSet:0,enabled:true,mode:'hunt'},{id:30,group:30,gearSet:0,enabled:true,mode:'hunt'}];
+  return f;
   assert.equal(JSON.stringify(f.BuffGear.setup()),home);
   assert.equal(f.BuffGear.recovery,null);
 });

@@ -9,6 +9,23 @@ const Party = {
     this.answered = ''; this.registration = null; this.lastRegisterAt = -Infinity; this.message = 'Waiting for party state.';
     this.joinMessage = ''; this.joinedKey = ''; this.lastPageAt = this.lastJoinAt = this.scanDoneAt = -Infinity; this.wantPage = 1;
   },
+  // Comma or line separated character names; empty means everyone.
+  names(text) { return String(text || '').split(/[,;\n]/).map(n => n.trim().toLowerCase()).filter(Boolean); },
+  listed(name) { const list = this.names(Settings.profile.party.acceptNames); return !list.length || list.includes(String(name || '').trim().toLowerCase()); },
+  leaderName(social) { return social.members.find(m => m && m.id === social.leader)?.name || ''; },
+  // Alt accounts, optional: leave a party whose leader is not the named party leader (the join below then looks for theirs).
+  leaveWrongParty() {
+    const c = Settings.profile.party, leader = String(c.mainName || '').trim().toLowerCase(), social = World.gp?.social;
+    if (!c.joinMain || !c.leaveIfNotLeader || !leader || !social || !Array.isArray(social.members) || social.members.length < 2 || !social.leader) return;
+    const name = this.leaderName(social).toLowerCase();
+    if (!name || name === leader || String(social.localName || '').toLowerCase() === leader) return;
+    if (now() - this.lastLeaveAt < 10000 || !Cmd.spaced('party-leave')) return;
+    if (Cmd.raw({ kind: 'party-leave' }, 'Leave the party of ' + this.leaderName(social) + ' (leader is not ' + c.mainName.trim() + ')')) {
+      this.lastLeaveAt = now(); this.joinedKey = '';
+      UI.toast('Left the party: its leader is not ' + c.mainName.trim(), 'info', 3000);
+    }
+  },
+  lastLeaveAt: -Infinity,
   // Alt accounts: find the main account's party and join it. A party invitation from the main is accepted; otherwise the
   // party-matching board is paged for the main's listing and the bot applies to it (the main's Auto-recruit and
   // Auto-accept answer). Runs only while solo, so it never pulls the character out of another party.
@@ -154,7 +171,7 @@ const Party = {
     this.acceptResurrection();
     if (World.inWorld() && Settings.profile.party.acceptRes) this.helping();
     const c = Settings.profile.party;
-    if (World.inWorld()) this.joinMain(); else this.joinMessage = '';
+    if (World.inWorld()) { this.leaveWrongParty(); this.joinMain(); } else this.joinMessage = '';
     if (!World.inWorld() || (!c.autoAcceptMatching && !c.autoRecruit)) return;
     const gp = World.gp, matching = gp?.partyMatching, request = matching?.request, social = gp?.social;
     if (!matching || !social || !Array.isArray(social.members)) return;
@@ -173,6 +190,8 @@ const Party = {
     if (!Number.isFinite(sim) || !Number.isFinite(request.expires) || sim >= request.expires) return;
     if (![request.a, request.b].every(id => Number.isInteger(id) && id > 0 && id <= 0xffffffff)) return;
     const key = `${request.a}:${request.b}:${request.expires}`;
+    // A name list narrows who is accepted; an applicant outside it is left unanswered for the player.
+    if (!this.listed(request.member?.name)) { this.message = 'Applicant ' + (request.member?.name || '?') + ' is not on the accept list.'; return; }
     if (key === this.answered || !Cmd.spaced('party-match-answer')) return;
     // Same correlation and accept value as the game's matching approval button.
     if (Cmd.raw({ kind: 'party-match-answer', a: request.a, b: request.b, answer: 1 }, 'Auto-accept party-matching application')) {
