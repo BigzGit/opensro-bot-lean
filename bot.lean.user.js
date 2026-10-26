@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.136
+// @version      1.2.137
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[NIX] Another SRO assistant is active. Disable it and reload to use NIX.');
   return;
 }
-const VERSION = '1.2.136';
+const VERSION = '1.2.137';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -194,6 +194,7 @@ const DEFAULT_PROFILE = {
     // Attribute percentages: the lowest variance value (0 to 31) wanted per NATTR_ name, 0 or missing = leave it alone.
     attr: { targets: {}, limit: 100 } },
   statPoints: { enabled: false, str: 1, int: 0, reserve: 0 },
+  trade: { from: 'CH', to: 'WC', trips: 1, potions: true, goods: 0 },
   trace: { enabled: false, name: '', distance: 12, fight: true },
   mastery: { enabled: false, ids: [], gap: 0, skills: false, scope: 'rotation', reserve: 0, order: 'masteries' },
   party: { autoAcceptMatching: false, autoRecruit: false, joinMain: false, mainName: '', autoRes: false, acceptRes: false, resRadius: 300, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true,
@@ -241,7 +242,7 @@ const DEFAULT_PROFILE = {
 function botProfile(input) {
   const result = deepMerge(DEFAULT_PROFILE, {});
   if (!input || typeof input !== 'object') return result;
-  for (const key of ['macro', 'potion', 'hunt', 'wardrobe', 'party', 'alchemy', 'mastery', 'statPoints', 'trace', 'items']) {
+  for (const key of ['macro', 'potion', 'hunt', 'wardrobe', 'party', 'alchemy', 'mastery', 'statPoints', 'trace', 'items', 'trade']) {
     if (!input[key] || typeof input[key] !== 'object') continue;
     for (const field of Object.keys(DEFAULT_PROFILE[key])) {
       if (field in input[key]) result[key][field] = deepMerge(DEFAULT_PROFILE[key][field], input[key][field]);
@@ -2605,16 +2606,30 @@ const WalkBack = {
       if (nearest >= 0) route = recorded.slice(nearest).map(p => ({ ...p }));
     }
     route.push({ ...dest });
+    this.launch(dest, route, pose, shouldResume);
+  },
+  // Walk anywhere, not just to the hunting spot (Trade uses this between towns). The caller owns the safety checks
+  // that start() does for hunting; onDone runs on arrival and onFail(reason) when the walk gives up.
+  startTo(dest, { label = 'the destination', stop = 12, onDone, onFail } = {}) {
+    const pose = World.pose();
+    if (!dest || !pose || !World.inWorld() || World.isDead()) return false;
+    if (!Number.isFinite(dist2D(pose, dest))) { onFail?.('The destination is in another world or dungeon.'); return false; }
+    this.cancel();
+    this.launch(dest, [{ ...dest }], pose, false, { label, stop, onDone, onFail });
+    return !!this.active;
+  },
+  launch(dest, route, pose, shouldResume, opts = {}) {
     // The direct distance is a lower bound; a recorded route can be longer.
     let distance = 0, previous = pose;
     for (const point of route) { const leg = dist2D(previous, point); distance += Number.isFinite(leg) ? leg : 0; previous = point; }
     distance = Math.max(distance, dist2D(pose, dest) || 0);
     this.active = { destination: { ...dest }, legRoute: route, legRecorded: route.length > 1, distance,
+      label: opts.label || 'the hunting spot', stop: opts.stop || 12, onDone: opts.onDone || null, onFail: opts.onFail || null,
       route: null, recorded: false, source: '', index: 0, resume: shouldResume, totalLegs: Math.max(1, Math.ceil(distance / WALK_LEG)),
       legs: 0, leg: null, legTries: 0, navReplans: 0, routeArea: '', routeLength: 0,
       manualAt: Manual.lastAt, at: now(), progressAt: now(), lastPose: { ...pose }, sentAt: -Infinity, replans: 0, retryAt: 0,
       best: distance, bestAt: now(), maxMs: WALK_MAX_MS, plan: null };
-    UI.toast('Walking back to the hunting spot.', 'info', 2500);
+    if (!opts.label) UI.toast('Walking back to the hunting spot.', 'info', 2500);
     // The route graph is only worth a loading wait where the leg fallback would
     // have to chain (more than one leg), and only outdoors in one route area.
     const routeArea = typeof Route !== 'undefined' ? Route.commonArea(pose, dest) : null;
@@ -2640,9 +2655,11 @@ const WalkBack = {
   },
   cancel(reason = '', halt = true) {
     if (!this.active) return;
+    const failed = this.active.onFail;
     this.active = null;
     if (halt && World.inWorld() && !World.isDead()) Cmd.move(World.pose());
-    if (reason) UI.toast(reason, 'warn', 4000);
+    // A caller-owned walk reports its own failures; only a reasoned cancel is a failure, a plain cancel is the caller's.
+    if (failed && reason) failed(reason); else if (reason) UI.toast(reason, 'warn', 4000);
   },
   // Navdata corridor: its waypoints are short steps for the local collision A*.
   useNav(route, pose) {
@@ -2696,15 +2713,15 @@ const WalkBack = {
   status() {
     const a = this.active;
     if (!a) return '';
-    if (a.source === 'planning') return 'Walking to the hunting spot: loading route data.';
+    if (a.source === 'planning') return 'Walking to ' + a.label + ': loading route data.';
     const left = dist2D(World.pose(), a.destination);
     const progress = Number.isFinite(left) && a.distance ? ' · ' + Math.round(left / 10) + ' m left' : '';
     if (a.source === 'navdata') {
       const at = Math.min(a.route.length, a.index + 1);
-      return 'Walking to the hunting spot: waypoint ' + at + '/' + a.route.length + progress + '.';
+      return 'Walking to ' + a.label + ': waypoint ' + at + '/' + a.route.length + progress + '.';
     }
     const leg = Number.isFinite(left) ? Math.max(1, Math.min(a.totalLegs, a.totalLegs - Math.ceil(left / WALK_LEG) + 1)) : 1;
-    return (a.totalLegs > 1 ? 'Walking to the hunting spot: leg ' + leg + '/' + a.totalLegs : 'Walking to the hunting spot') + progress + '.';
+    return (a.totalLegs > 1 ? 'Walking to ' + a.label + ': leg ' + leg + '/' + a.totalLegs : 'Walking to ' + a.label) + progress + '.';
   },
   // The straight leg end is unreachable. Try a snapped or slightly turned end of
   // the same rough length, rate-limited so a missing collision window can arrive.
@@ -2732,10 +2749,12 @@ const WalkBack = {
     if (!a.route?.length) return;
     const pose = World.pose(), dest = a.route[a.index], distance = dist2D(pose, dest);
     if (!Number.isFinite(distance)) return this.cancel('Cannot walk to the saved hunting spot.');
-    if (distance <= 12) {
+    // Only the last point may use the caller's wider arrival radius; waypoints on the way stay tight.
+    if (distance <= (a.index >= a.route.length - 1 ? a.stop : 12)) {
       a.index++; a.leg = null; a.legTries = 0; a.progressAt = now(); a.lastPose = { ...pose }; a.travel = null;
       if (a.index < a.route.length) return;
       this.active = null;
+      if (a.onDone) return a.onDone();
       UI.toast('Back at the hunting spot.', 'info', 2500);
       if (a.resume) Hunt.start();
       return;
@@ -3638,7 +3657,7 @@ const SpeedScroll = {
 
 
 // Generated by gen-towns.py from the server data. Do not edit by hand.
-const TOWN_TABLE = [{"key":"EU","name":"Constantinople","arrival":{"regionId":26959,"x":950.0,"y":84.0,"z":1070.0},"services":{"storage":{"refObjId":7503,"regionId":26959,"x":1348.9,"y":80.0,"z":845.88},"vendor":{"refObjId":7497,"regionId":26959,"x":1338.79,"y":84.09,"z":1400.89},"smith":{"refObjId":7495,"regionId":26959,"x":784.69,"y":83.46,"z":1532.71},"gate":{"refObjId":19074,"regionId":26959,"x":700.0,"y":80.0,"z":886.0}}},{"key":"WC","name":"Donwhang","arrival":{"regionId":26265,"x":957.0,"y":-80.0,"z":1508.0},"services":{"storage":{"refObjId":2058,"regionId":26265,"x":1260.35,"y":-105.81,"z":696.9},"vendor":{"refObjId":2053,"regionId":26265,"x":597.25,"y":-106.46,"z":1134.97},"smith":{"refObjId":2051,"regionId":26265,"x":1197.69,"y":-106.67,"z":1217.7},"gate":{"refObjId":2095,"regionId":26521,"x":962.0,"y":-105.81,"z":8.0}}},{"key":"KT","name":"Hotan","arrival":{"regionId":23687,"x":1138.0,"y":250.0,"z":153.0},"services":{"storage":{"refObjId":2083,"regionId":23687,"x":1134.28,"y":243.75,"z":610.79},"vendor":{"refObjId":2074,"regionId":23687,"x":832.16,"y":243.86,"z":1093.64},"smith":{"refObjId":2072,"regionId":23687,"x":501.58,"y":243.58,"z":766.27},"gate":{"refObjId":2096,"regionId":23687,"x":1131.0,"y":243.75,"z":488.0}}},{"key":"CH","name":"Jangan","arrival":{"regionId":25000,"x":969.0,"y":0.0,"z":1369.0},"services":{"storage":{"refObjId":2014,"regionId":25000,"x":980.35,"y":-32.52,"z":989.19},"vendor":{"refObjId":2005,"regionId":25000,"x":1584.08,"y":0.0,"z":1407.29},"smith":{"refObjId":2003,"regionId":25000,"x":332.73,"y":0.0,"z":1406.7},"gate":{"refObjId":2094,"regionId":25000,"x":1254.0,"y":-32.52,"z":1374.0}}},{"key":"CA","name":"Samarkand","arrival":{"regionId":27244,"x":270.0,"y":180.0,"z":1421.0},"services":{"storage":{"refObjId":7537,"regionId":27244,"x":563.43,"y":180.0,"z":1131.66},"vendor":{"refObjId":7532,"regionId":27243,"x":1426.07,"y":180.0,"z":1851.0},"smith":{"refObjId":7530,"regionId":27499,"x":1762.61,"y":180.0,"z":809.78},"gate":{"refObjId":19075,"regionId":27499,"x":1917.0,"y":180.0,"z":108.0}}}];
+const TOWN_TABLE = [{"key":"EU","name":"Constantinople","arrival":{"regionId":26959,"x":950.0,"y":84.0,"z":1070.0},"services":{"storage":{"refObjId":7503,"regionId":26959,"x":1348.9,"y":80.0,"z":845.88},"vendor":{"refObjId":7497,"regionId":26959,"x":1338.79,"y":84.09,"z":1400.89},"smith":{"refObjId":7495,"regionId":26959,"x":784.69,"y":83.46,"z":1532.71},"trade":{"refObjId":7500,"regionId":26959,"x":351.01,"y":80.4,"z":228.24},"gate":{"refObjId":19074,"regionId":26959,"x":700.0,"y":80.0,"z":886.0}}},{"key":"WC","name":"Donwhang","arrival":{"regionId":26265,"x":957.0,"y":-80.0,"z":1508.0},"services":{"storage":{"refObjId":2058,"regionId":26265,"x":1260.35,"y":-105.81,"z":696.9},"vendor":{"refObjId":2053,"regionId":26265,"x":597.25,"y":-106.46,"z":1134.97},"smith":{"refObjId":2051,"regionId":26265,"x":1197.69,"y":-106.67,"z":1217.7},"trade":{"refObjId":2059,"regionId":26265,"x":393.06,"y":-106.62,"z":1560.31},"gate":{"refObjId":2095,"regionId":26521,"x":962.0,"y":-105.81,"z":8.0}}},{"key":"KT","name":"Hotan","arrival":{"regionId":23687,"x":1138.0,"y":250.0,"z":153.0},"services":{"storage":{"refObjId":2083,"regionId":23687,"x":1134.28,"y":243.75,"z":610.79},"vendor":{"refObjId":2074,"regionId":23687,"x":832.16,"y":243.86,"z":1093.64},"smith":{"refObjId":2072,"regionId":23687,"x":501.58,"y":243.58,"z":766.27},"trade":{"refObjId":2077,"regionId":23687,"x":1515.55,"y":243.99,"z":904.55},"gate":{"refObjId":2096,"regionId":23687,"x":1131.0,"y":243.75,"z":488.0}}},{"key":"CH","name":"Jangan","arrival":{"regionId":25000,"x":969.0,"y":0.0,"z":1369.0},"services":{"storage":{"refObjId":2014,"regionId":25000,"x":980.35,"y":-32.52,"z":989.19},"vendor":{"refObjId":2005,"regionId":25000,"x":1584.08,"y":0.0,"z":1407.29},"smith":{"refObjId":2003,"regionId":25000,"x":332.73,"y":0.0,"z":1406.7},"trade":{"refObjId":2010,"regionId":25000,"x":1760.32,"y":11.0,"z":480.22},"gate":{"refObjId":2094,"regionId":25000,"x":1254.0,"y":-32.52,"z":1374.0}}},{"key":"CA","name":"Samarkand","arrival":{"regionId":27244,"x":270.0,"y":180.0,"z":1421.0},"services":{"storage":{"refObjId":7537,"regionId":27244,"x":563.43,"y":180.0,"z":1131.66},"vendor":{"refObjId":7532,"regionId":27243,"x":1426.07,"y":180.0,"z":1851.0},"smith":{"refObjId":7530,"regionId":27499,"x":1762.61,"y":180.0,"z":809.78},"trade":{"refObjId":7535,"regionId":27244,"x":837.14,"y":180.0,"z":1823.25},"gate":{"refObjId":19075,"regionId":27499,"x":1917.0,"y":180.0,"z":108.0}}}];
 
 
 // Town service owns the whole recall -> warehouse -> shop -> smith -> reverse trip.
@@ -4812,11 +4831,260 @@ const Support = {
 };
 
 
+// Automatic trading. Buys specialty goods into the summoned transport at one town's trade merchant, walks to another
+// town (the long-range route graph of WalkBack) and sells them there. The rules are the server's: a trader job suit,
+// a summoned transport within 100 m of the merchant and goods bought by this character. This module only drives them
+// and stops with a plain message when one is not met. Potions keep working on the road because Potion.tick runs in
+// every Controller mode; at each town the potion merchant tops up the Supplies page targets first.
+const TRADE_NEAR = 200;           // merchant service range, game units
+const TRADE_STOP = 120;           // walk until this close, well inside the service range
+const TRADE_STEP_MS = 12000;      // an unconfirmed purchase or sale ends the run, nothing is repeated
+const TRADE_OPEN_MS = 15000;
+const TRADE_SUMMON_MS = 15000;
+const TRADE_VEHICLE_BAND = 2;     // cos record band of a transport (type word TID4 2)
+const TRADE_JOB_SLOT = 8;         // inventory slot of the job suit
+const TRADE_GOODS_MASK = 0x7fe, TRADE_GOODS_TYPE = 0x46c; // TID 3/3/8, as the server's inventory.IsTradeGoods
+const TRADE_VEHICLE_NAME = /horse|donkey|mule|camel|ostrich|pegasus|unicorn|transport|wagon|cart/i;
+const isTradeGoods = tf => ((tf >>> 0) & TRADE_GOODS_MASK) === TRADE_GOODS_TYPE;
+
+const Trade = {
+  run: null, message: 'Auto trade off.', note: null,
+  cfg() { return Settings.profile.trade; },
+  towns() { return TOWN_TABLE.filter(t => t.services.trade); },
+  town(key) { return TOWN_TABLE.find(t => t.key === key && t.services.trade) || null; },
+  vehicle() { return (World.gp?.cosRecords || []).find(r => r && r.band === TRADE_VEHICLE_BAND && !r.dead && r.hp > 0) || null; },
+  goods(rec) { return (rec?.inventory || []).filter(i => isTradeGoods(i.typeFlags)); },
+  held(ref) { return (this.vehicle()?.inventory || []).filter(i => i.refObjId === ref).reduce((n, i) => n + (i.quantity ?? 1), 0); },
+  jobSuit() {
+    const item = World.gp?.inventory?.find(i => i.slot === TRADE_JOB_SLOT);
+    return !!item && wdJobMode(item.typeFlags) && wdTid4(item.typeFlags) === 1;
+  },
+  // The transport's summon item: a ITEM_COS_C_ codename, or by name until the item catalogue has loaded.
+  scroll() {
+    return World.gp?.inventory?.find(i => {
+      const code = i.codename || Items.data?.get(i.refObjId)?.code || '';
+      return code ? /^ITEM_COS_C_/.test(code) : /summon/i.test(i.name || '') && TRADE_VEHICLE_NAME.test(i.name || '');
+    }) || null;
+  },
+  supplies() { return Restock.supplies().filter(s => s.refObjId && s.target > 0); },
+  gold() { try { return toBigInt(World.gp?.progression?.gold ?? 0); } catch { return 0n; } },
+  tell(text) { this.message = text; UI.toast(text, 'info', 5000); this.refresh(); },
+
+  start() {
+    if (this.run) return;
+    const c = this.cfg(), from = this.town(c.from), to = this.town(c.to);
+    if (!from || !to || from.key === to.key) return this.tell('Choose two different towns that have a trade merchant.');
+    if (Hunt.running || Town.trip || WalkBack.active || Restock.trip || Restock.recording || Alchemy.run || Alchemy.pending || BuffGear.run) {
+      return this.tell('Stop hunting and any other trip first.');
+    }
+    if (!World.inWorld() || World.isDead() || !World.local()) return this.tell('Enter the world with a living character first.');
+    Items.ready?.()?.catch?.(() => {});
+    this.run = { stage: 'prep', src: from.key, dst: to.key, here: from.key, trips: 0, deliveries: 0, at: now(), manualAt: Manual.lastAt,
+      pend: null, open: null, summonAt: 0, followed: false, startGold: 0n, booked: false, skip: new Set() };
+    Log.info('Auto trade: ' + from.name + ' to ' + to.name + '.');
+    this.message = 'Auto trade: checking the transport.';
+    this.refresh();
+  },
+  cancel(reason = '') {
+    if (!this.run) return;
+    this.run = null;
+    if (WalkBack.active?.onDone) WalkBack.cancel('', true);
+    if (Restock.activeShop() || World.gp?.storage) Cmd.raw({ kind: 'npc-close' }, 'Auto trade: close merchant');
+    if (World.inWorld() && !World.isDead()) Cmd.move(World.pose());
+    this.message = reason || 'Auto trade stopped.';
+    this.refresh();
+  },
+  fail(reason) {
+    const run = this.run;
+    if (!run) return;
+    Log.warn('Auto trade: ' + reason);
+    this.cancel('Auto trade stopped: ' + reason);
+    UI.toast('Auto trade stopped: ' + reason, 'warn', 6000);
+  },
+  finish() {
+    const r = this.run;
+    this.cancel('Auto trade finished: ' + r.deliveries + (r.deliveries === 1 ? ' delivery' : ' deliveries') + '.');
+    UI.toast(this.message, 'info', 6000);
+  },
+
+  // Walk to a merchant and open its shop. Returns the open shop once the merchant has answered, otherwise null:
+  // the run is still walking or waiting. A failure ends the run.
+  visit(spec, label) {
+    const r = this.run, d = dist2D(World.pose(), spec);
+    if (!Number.isFinite(d)) { this.fail('The ' + label + ' is in another world.'); return null; }
+    if (d > TRADE_NEAR) {
+      r.open = null;
+      this.message = 'Auto trade: walking to the ' + label + '.';
+      if (!WalkBack.startTo(spec, { label: 'the ' + label, stop: TRADE_STOP, onDone: () => {}, onFail: reason => this.fail(reason) }) && this.run) this.fail('Cannot walk to the ' + label + '.');
+      return null;
+    }
+    const gp = World.gp;
+    if (!r.open || r.open.ref !== spec.refObjId) r.open = { ref: spec.refObjId, at: now(), sent: false, revision: 0, ready: false };
+    const o = r.open;
+    if (!o.ready && now() - o.at > TRADE_OPEN_MS) { this.fail('The ' + label + ' did not open the shop.'); return null; }
+    const npc = [...World.ents.values()].filter(e => e.kind === 'npc' && e.refObjId === spec.refObjId && dist2D(e, spec) < TRADE_NEAR)
+      .sort((a, b) => dist2D(World.pose(), a) - dist2D(World.pose(), b))[0];
+    if (!npc || gp.targetPending) return null;
+    if (gp.target !== npc.gid) { Cmd.select(npc.gid); return null; }
+    if (!o.sent && !gp.inventoryPending && Cmd.raw({ kind: 'shop-open', gid: npc.gid }, 'Auto trade: open merchant')) { o.sent = true; o.revision = gp.shopCompletionRevision; }
+    // A cached catalogue must not count as a fresh shop-open acknowledgement.
+    if (!o.sent || gp.inventoryPending || gp.shop?.npc !== npc.gid || (!o.ready && gp.shopCompletionRevision === o.revision)) return null;
+    const shop = Restock.activeShop();
+    if (!shop) return null;
+    if (shop.error || gp.error && !o.ready) { this.fail(shop.error || gp.error); return null; }
+    o.ready = true;
+    this.message = 'Auto trade: at the ' + label + '.';
+    return shop;
+  },
+  closeShop(next) {
+    const r = this.run;
+    if (Restock.activeShop() && !Cmd.raw({ kind: 'npc-close' }, 'Auto trade: close merchant')) return;
+    r.open = null; r.stage = next;
+  },
+  // A sent purchase or sale is only settled by the inventory change it should cause. Never resend before that.
+  settle() {
+    const p = this.run.pend, gp = World.gp;
+    if (!p) return false;
+    if (now() - p.at > TRADE_STEP_MS) { this.fail(p.what + ' was not confirmed' + (gp.error ? ' (' + gp.error + ')' : '') + '; nothing was repeated.'); return true; }
+    if (gp.inventoryPending || now() - p.at < 500 || !p.done()) return true;
+    this.run.pend = null;
+    return false;
+  },
+  offerGoods(o) {
+    const rows = o.items || o.previews || [];
+    const item = rows.find(i => i.refObjId === o.refObjId);
+    return isTradeGoods(item?.typeFlags ?? 0) && (o.currency === undefined || o.currency === 1);
+  },
+  // The goods that earn the most per transport slot: the dearest offer the purse can pay for at least once.
+  pickOffer(shop) {
+    const gold = this.gold(), c = this.cfg();
+    const offers = shop.offers.filter(o => this.offerGoods(o) && toBigInt(o.price) <= gold);
+    return offers.find(o => o.refObjId === c.goods) || offers.sort((a, b) => Number(toBigInt(b.price) - toBigInt(a.price)))[0] || null;
+  },
+
+  tick() {
+    const r = this.run;
+    if (!r) return false;
+    if (!World.inWorld() || !World.gp || !World.local()) return true;
+    if (World.isDead()) { this.fail('the character died.'); return true; }
+    if (Manual.lastAt !== r.manualAt) { this.fail('manual control interrupted the run.'); return true; }
+    if (WalkBack.active) { WalkBack.tick(); return true; }
+    if (World.gp.inventoryPending && r.stage === 'prep') return true;
+    if (this[r.stage + 'Stage']) this[r.stage + 'Stage']();
+    return true;
+  },
+
+  // Job suit and transport. A missing transport is summoned from its scroll and told to follow.
+  prepStage() {
+    const r = this.run, gp = World.gp;
+    if (!this.jobSuit()) return this.fail('wear your trader job suit first.');
+    const v = this.vehicle();
+    if (!v) {
+      if (!r.summonAt) {
+        const s = this.scroll();
+        if (!s) return this.fail('no transport is summoned and no transport scroll was found in the bag.');
+        if (Cmd.itemUse(s.slot)) { r.summonAt = now(); this.message = 'Auto trade: summoning the transport.'; }
+      } else if (now() - r.summonAt > TRADE_SUMMON_MS) this.fail('the transport did not appear.');
+      return;
+    }
+    if (!r.followed && !gp.inventoryPending) { if (Cmd.raw({ kind: 'cos-follow', gid: v.gid }, 'Auto trade: transport follows')) r.followed = true; return; }
+    r.stage = 'potions';
+  },
+  // The potion merchant of the town the run stands in, only while something on the Supplies page is short.
+  potionsStage() {
+    const r = this.run, town = this.town(r.here);
+    const short = this.cfg().potions ? this.supplies().filter(s => !r.skip.has(s.kind) && Restock.count(s.refObjId) < s.target) : [];
+    if (!town || !short.length) return this.closeShop('buy');
+    const shop = this.visit(town.services.vendor, 'potion merchant');
+    if (!shop || this.settle() || !this.run) return;
+    const gp = World.gp;
+    if (gp.inventoryPending) return;
+    const s = short[0], offer = shop.offers.find(o => o.refObjId === s.refObjId && Restock.offerKind(o) === s.kind);
+    const before = Restock.count(s.refObjId);
+    const room = World.items().filter(i => i.refObjId === s.refObjId).reduce((n, i) => n + Math.max(0, (offer?.maxStack ?? 0) - (i.quantity ?? 1)), 0);
+    const quantity = offer ? Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, room + World.freeBagSlots() * offer.maxStack,
+      Number(this.gold() / (toBigInt(offer.price) || 1n))) : 0;
+    if (quantity < 1) { r.skip.add(s.kind); Log.warn('Auto trade: cannot buy ' + s.kind + ' potions here (not sold, no room or no gold).'); return; }
+    if (Cmd.raw({ kind: 'shop-buy', tab: offer.tab, slot: offer.slot, quantity }, `Auto trade: ${offer.name} x${quantity}`)) {
+      r.pend = { what: 'Potion purchase', at: now(), done: () => Restock.count(s.refObjId) > before };
+    }
+  },
+  // Fill the transport with the dearest goods, one stack per purchase.
+  buyStage() {
+    const r = this.run, town = this.town(r.src);
+    r.here = r.src;
+    const shop = this.visit(town.services.trade, town.name + ' trade merchant');
+    if (!shop || this.settle() || !this.run) return;
+    const gp = World.gp, v = this.vehicle();
+    if (!v) return this.fail('the transport is gone.');
+    if (shop.cosGid !== v.gid) return this.fail('the merchant is not linked to your transport. Summon it next to you.');
+    if (gp.inventoryPending) return;
+    const offer = this.pickOffer(shop), used = v.inventory.length, free = v.status - used;
+    const room = offer ? v.inventory.filter(i => i.refObjId === offer.refObjId).reduce((n, i) => n + Math.max(0, offer.maxStack - (i.quantity ?? 1)), 0) : 0;
+    const quantity = offer ? Math.min(offer.purchaseLimit ?? offer.maxStack, 65535, room + free * offer.maxStack, Number(this.gold() / (toBigInt(offer.price) || 1n))) : 0;
+    if (quantity < 1) {
+      if (!this.goods(v).length) return this.fail(offer ? 'the transport has no room.' : 'not enough gold for any goods.');
+      return this.closeShop('carry');
+    }
+    const before = this.held(offer.refObjId);
+    if (!r.booked) { r.startGold = this.gold(); r.booked = true; }
+    if (Cmd.raw({ kind: 'cos-shop-buy', gid: v.gid, tab: offer.tab, slot: offer.slot, quantity }, `Auto trade: ${offer.name} x${quantity}`)) {
+      r.pend = { what: 'Goods purchase', at: now(), done: () => this.held(offer.refObjId) > before };
+    }
+  },
+  // Deliver: walk to the other town and sell every trade item in the transport.
+  carryStage() {
+    const r = this.run, town = this.town(r.dst);
+    const shop = this.visit(town.services.trade, town.name + ' trade merchant');
+    if (!shop || this.settle() || !this.run) return;
+    const gp = World.gp, v = this.vehicle();
+    if (!v) return this.fail('the transport is gone.');
+    if (shop.cosGid !== v.gid) return this.fail('the merchant is not linked to your transport. Summon it next to you.');
+    if (gp.inventoryPending) return;
+    r.here = r.dst;
+    const item = this.goods(v)[0];
+    if (!item) {
+      r.deliveries++;
+      const gain = this.gold() - r.startGold;
+      Log.info('Auto trade: delivery ' + r.deliveries + ' sold, gold change ' + gain + '.');
+      this.message = 'Auto trade: delivery ' + r.deliveries + ' done (' + (gain >= 0n ? '+' : '') + gain + ' gold).';
+      const trips = this.cfg().trips;
+      if (trips > 0 && r.deliveries >= trips) return this.finish();
+      // Round trip: buy the local goods here and carry them back.
+      [r.src, r.dst] = [r.dst, r.src];
+      r.booked = false; r.skip.clear();
+      return this.closeShop('potions');
+    }
+    const slot = item.slot, quantity = item.quantity ?? 1;
+    if (Cmd.raw({ kind: 'cos-shop-sell', gid: v.gid, slot, quantity }, `Auto trade: sell ${item.name || item.refObjId} x${quantity}`)) {
+      r.pend = { what: 'Sale', at: now(), done: () => { const row = this.vehicle()?.inventory.find(i => i.slot === slot && i.refObjId === item.refObjId); return !row || (row.quantity ?? 1) < quantity; } };
+    }
+  },
+
+  refresh() {
+    if (this.note) this.note.textContent = this.message;
+  },
+  draw() {
+    const c = () => this.cfg(), towns = () => this.towns().map(t => [t.key, t.name]);
+    const group = UI.group('Auto trade',
+      UI.select('Buy goods in', towns, () => c().from, v => c().from = v),
+      UI.select('Sell goods in', towns, () => c().to, v => c().to = v),
+      UI.number('Deliveries (0 = until stopped)', () => c().trips, n => c().trips = n, 0, 999),
+      UI.check('Refill potions at each town first', () => c().potions, v => c().potions = v),
+      UI.row(UI.button('Start trading', () => this.start()), UI.button('Stop trading', () => this.cancel())));
+    this.note = el('p', this.message, 'muted');
+    group.append(this.note, el('p', 'Fully automatic: wear your trader job suit, keep a transport scroll in the bag (or summon the transport yourself) and carry enough gold. The bot summons the transport, buys the dearest goods it can afford at the first town\'s trade merchant, walks to the second town, sells them, and with more than one delivery buys the second town\'s goods and carries them back. Potions are used on the road as usual and refilled at each town from the Supplies page targets. Walking only, no teleports. Bandits are not fought; the run stops if the character dies.', 'muted'));
+    UI.pane.append(group);
+  },
+};
+
+
 // Single owner for movement/combat/pickup. Potion use remains a separate emergency lane.
 const startHunting = Hunt.start;
 Hunt.start = function (...args) {
   if (BuffGear.run || BuffGear.recovery) return UI.toast('Restore or review combat gear before hunting.', 'warn');
   if (Alchemy.run || Alchemy.pending) return UI.toast('Stop alchemy and wait for its result before hunting.', 'warn');
+  if (Trade.run) return UI.toast('Stop auto trade before hunting.', 'warn');
   return startHunting.apply(this, args);
 };
 Hunt.lootAllowed = e => Loot.allowed(e);
@@ -4911,6 +5179,7 @@ Hunt.tick = function () {
 function stopAll() {
   Town.record('stop');
   Alchemy.stop();
+  Trade.cancel();
   BuffGear.cancel();
   const townActive = !!Town.trip;
   Town.cancel();
@@ -5028,6 +5297,7 @@ const Controller = {
       if (Chase.tick()) { this.mode = 'obstacle pursuit'; return; }
       if (BuffGear.tick()) { this.mode = 'buff gear'; return; }
       if (SpeedScroll.tick()) { this.mode = 'speed scroll'; return; }
+      if (Trade.tick()) { this.mode = 'trading'; return; }
       if (!WalkBack.active && !Restock.trip && !Restock.recording && !Controller.resumeAfterRevive &&
           !Restock.activeShop() && !World.gp.storage && Resurrect.tick()) {
         this.mode = 'resurrect'; return;
@@ -8943,7 +9213,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.136", "title": "Buff weapon swap carries on when the game refuses a weapon", "items": ["If the game will not equip the bag weapon picked for a buff (for example a level or class limit), the bot now notices within seconds, puts your gear back, remembers not to pick that weapon again, and keeps hunting. Before, it waited fifteen seconds and stopped with \"manual equipment review needed\".", "When a swap does still fail, the message and the overlay now say which item and slots were involved instead of only \"manual equipment review needed\"."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.135", "title": "Classic window: skill icons look right, and the imbue list shows imbues only", "items": ["In the Classic (SBot-style) window, skill icons had white borders, a smaller size and no gold border on selected skills. They now look the same as in the normal window.", "**Weapon imbue** listed every self skill, so it looked just like the buff list. It now shows only weapon imbues and poison coatings. **Show all self skills** brings the full list back, and characters with no imbue skill still see the full list."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.134", "title": "Fix: bot stopped with \"requiredLevel is not a function\"", "items": ["Fixes 1.2.133: when a buff needed a bag weapon, the bot stopped with \"ItemRules.requiredLevel is not a function\" instead of swapping. The weapon's level requirement is now read correctly."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.133", "title": "Buffs now wear the weapon they need", "items": ["With **Swap weapons for buffs** on, a buff your current weapon cannot cast is now cast with a matching weapon from your bag, picked from the skill's own weapon requirement. No saved buff set is needed. Your combat weapon and shield come back afterward.", "The best usable bag weapon is used (highest +, not broken, within your level). Identical copies of a weapon no longer block the swap. A weapon the game refuses to equip is not tried again.", "One-handed buff weapons keep your shield on; two-handed ones take it off and put it back. Keep one bag slot free.", "The Buffs & imbue page shows what each automatic buff is waiting for, or that no usable weapon is in your bag. **Wear the weapon each buff needs** switches this off; saved sets still work for buffs you assign to one.", "Every equipment move is still confirmed before the next step or the cast. Imbues and attack skills are not swapped."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.132", "title": "Berserk has its own Giant party switch", "items": ["**Combat -> Berserk** now has a **Giant party** switch, right under Giants. Berserk on party Giants follows it; other party monsters still follow **Party monsters**, so you can save Berserk for party Giants without spending it on every party mob.", "Saved profiles keep working: until you change it, **Giant party** takes whatever **Party monsters** was set to, so nobody loses Berserk on party Giants after updating. New profiles start with it off.", "Reported by Rebraxin (PR #11)."], "note": "Tested in simulation, and a player confirmed Berserk fired on party Giants on the live server."}, {"version": "1.2.131", "title": "Type in or copy hunting spot coordinates on the Map", "items": ["The **Map** page's **Hunting area** now has **X** and **Y** fields: type the outdoor coordinates (whole metres, as shown on the map) and press **Set spot** to save that place as the hunting spot. Wrong values, dungeons and not being in the world are refused with a message.", "**Set actual position** saves where you stand, as **Set hunting spot here** did. **Get position** fills in your current coordinates and **Copy** copies them, without changing the saved spot.", "Clicking the map and pressing **Make this the hunting spot** works as before. A typed spot uses your current height, the same as a map click.", "Contributed by BigzGit (PR #3)."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.130", "title": "Pet summon scrolls are never sold", "items": ["Town trips sold pet summon scrolls and flutes kept in the pickup pet's bag at the weapon merchant, because the pet-loot rules treated them as ordinary items. Selling one loses that pet. From 1.2.126 to 1.2.128, **Sell items from the character bag too** could also sell them from your own bag.", "Pet summon scrolls and flutes are now never sold, from the pet or the bag, not even with a Sell rule.", "If you lost one, the merchant's buyback list keeps your last 5 sold items; it may still be there if little was sold after it."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.129", "title": "Bag selling only sells ordinary gear", "items": ["**Sell items from the character bag** used the pet-loot rules, which are meant for drops. In your own bag that could sell pet summon scrolls and flutes, avatars, devil spirits, job suits and item mall items such as Premium or stat-reset scrolls. It now sells only ordinary Chinese and European weapons, armour, shields and accessories (renamed **Sell ordinary gear from the character bag too**). Other bag items are sold only if you give them a Sell rule.", "With bag selling on and a full bag, the trip no longer stops at the warehouse with \"No temporary character bag slot\": it sells at the repair merchant first, then visits the warehouse.", "After reconnecting in town, the town cycle starts from where the character stands instead of waiting at the return-scroll landing spot (which timed out after 90 s and stopped hunting). In a different town from your saved services the bot walks back instead."], "note": "Tested in simulation only; not yet confirmed on the live server."}];
+const RELEASE_NOTES = [{"version": "1.2.137", "title": "Automatic trading between towns", "items": ["New **Auto trade** page. Pick the town to buy in and the town to sell in, press **Start trading**, and the bot does the whole run: summons your transport, buys the dearest trade goods you can afford at the trade merchant, walks to the other town, and sells everything there. It reports the gold gained.", "**Deliveries** sets how many runs to do (0 = until you stop it). With more than one, the bot buys the second town's goods and carries them back.", "Potions keep being used on the road, and at each town the bot first tops up the potions from your Supplies page targets.", "Needs your trader job suit on and a transport scroll in the bag (or a transport already summoned), plus enough gold. Walking only, no teleports. Bandits are not fought; the run stops with a message if you die, take manual control, or the merchant does not link to your transport.", "Towns: Jangan, Donwhang, Hotan, Samarkand and Constantinople."], "note": "Tested in simulation only; not yet confirmed on the live server. The bot cannot yet buy a transport for you."}, {"version": "1.2.136", "title": "Buff weapon swap carries on when the game refuses a weapon", "items": ["If the game will not equip the bag weapon picked for a buff (for example a level or class limit), the bot now notices within seconds, puts your gear back, remembers not to pick that weapon again, and keeps hunting. Before, it waited fifteen seconds and stopped with \"manual equipment review needed\".", "When a swap does still fail, the message and the overlay now say which item and slots were involved instead of only \"manual equipment review needed\"."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.135", "title": "Classic window: skill icons look right, and the imbue list shows imbues only", "items": ["In the Classic (SBot-style) window, skill icons had white borders, a smaller size and no gold border on selected skills. They now look the same as in the normal window.", "**Weapon imbue** listed every self skill, so it looked just like the buff list. It now shows only weapon imbues and poison coatings. **Show all self skills** brings the full list back, and characters with no imbue skill still see the full list."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.134", "title": "Fix: bot stopped with \"requiredLevel is not a function\"", "items": ["Fixes 1.2.133: when a buff needed a bag weapon, the bot stopped with \"ItemRules.requiredLevel is not a function\" instead of swapping. The weapon's level requirement is now read correctly."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.133", "title": "Buffs now wear the weapon they need", "items": ["With **Swap weapons for buffs** on, a buff your current weapon cannot cast is now cast with a matching weapon from your bag, picked from the skill's own weapon requirement. No saved buff set is needed. Your combat weapon and shield come back afterward.", "The best usable bag weapon is used (highest +, not broken, within your level). Identical copies of a weapon no longer block the swap. A weapon the game refuses to equip is not tried again.", "One-handed buff weapons keep your shield on; two-handed ones take it off and put it back. Keep one bag slot free.", "The Buffs & imbue page shows what each automatic buff is waiting for, or that no usable weapon is in your bag. **Wear the weapon each buff needs** switches this off; saved sets still work for buffs you assign to one.", "Every equipment move is still confirmed before the next step or the cast. Imbues and attack skills are not swapped."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.132", "title": "Berserk has its own Giant party switch", "items": ["**Combat -> Berserk** now has a **Giant party** switch, right under Giants. Berserk on party Giants follows it; other party monsters still follow **Party monsters**, so you can save Berserk for party Giants without spending it on every party mob.", "Saved profiles keep working: until you change it, **Giant party** takes whatever **Party monsters** was set to, so nobody loses Berserk on party Giants after updating. New profiles start with it off.", "Reported by Rebraxin (PR #11)."], "note": "Tested in simulation, and a player confirmed Berserk fired on party Giants on the live server."}, {"version": "1.2.131", "title": "Type in or copy hunting spot coordinates on the Map", "items": ["The **Map** page's **Hunting area** now has **X** and **Y** fields: type the outdoor coordinates (whole metres, as shown on the map) and press **Set spot** to save that place as the hunting spot. Wrong values, dungeons and not being in the world are refused with a message.", "**Set actual position** saves where you stand, as **Set hunting spot here** did. **Get position** fills in your current coordinates and **Copy** copies them, without changing the saved spot.", "Clicking the map and pressing **Make this the hunting spot** works as before. A typed spot uses your current height, the same as a map click.", "Contributed by BigzGit (PR #3)."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.130", "title": "Pet summon scrolls are never sold", "items": ["Town trips sold pet summon scrolls and flutes kept in the pickup pet's bag at the weapon merchant, because the pet-loot rules treated them as ordinary items. Selling one loses that pet. From 1.2.126 to 1.2.128, **Sell items from the character bag too** could also sell them from your own bag.", "Pet summon scrolls and flutes are now never sold, from the pet or the bag, not even with a Sell rule.", "If you lost one, the merchant's buyback list keeps your last 5 sold items; it may still be there if little was sold after it."], "note": "Tested in simulation only; not yet confirmed on the live server."}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -10077,7 +10347,7 @@ const UI = {
     // Busy comes from the live trips, not from Controller.mode: that label lags a tick behind (it still says
     // "returning" for up to 100 ms after Stop all ended a walk-back).
     const busy = Town.trip ? 'Town trip' : WalkBack.active ? 'Returning' : Reconnect.active() ? 'Reconnecting' : Restock.trip ? 'Shopping'
-      : Resurrect.trip ? 'Resurrecting' : BuffGear.run ? 'Buff gear' : Alchemy.run || Alchemy.pending ? 'Alchemy' : '';
+      : Resurrect.trip ? 'Resurrecting' : BuffGear.run ? 'Buff gear' : Trade.run ? 'Trading' : Alchemy.run || Alchemy.pending ? 'Alchemy' : '';
     const label = dead ? 'Dead' : error ? 'Error' : busy || (Hunt.running ? 'Hunting' : 'Stopped');
     // `note` is what only the state can say; the icon falls back to the first wait reason, which the wide window shows below the strip.
     const note = Town.trip ? Town.status() : WalkBack.active ? WalkBack.status() : Reconnect.active() && Reconnect.message ? Reconnect.message
@@ -10392,6 +10662,8 @@ const UI = {
       LeanMap.draw(this.pane);
     } else if (this.current === 'Alchemy') {
       Alchemy.draw();
+    } else if (this.current === 'Trade') {
+      Trade.draw();
     } else if (this.current === 'Wardrobe') {
       LeanWardrobe.draw(this.pane);
     } else {
@@ -10422,6 +10694,7 @@ const UI = {
       { name: 'Extra', icon: 'action\\icon_cha_helper', pages: ['Settings'], sections: [
         ['settingsStats'], ['settingsMastery'], ['settingsStatPoints'], ['settingsProfiles'], ['settingsShare'], ['settingsReports'], ['settingsActivity']] },
       { name: 'Map', pages: ['Map'], draw() { LeanMap.draw(this.pane); } },
+      { name: 'Auto trade', icon: 'action\\icon_cha_shop', pages: ['Trade'], draw() { Trade.draw(); } },
       { name: 'Wardrobe', icon: 'action\\icon_cha_shop', pages: ['Wardrobe'], draw() { LeanWardrobe.draw(this.pane); } },
       { name: 'Setup', icon: 'action\\icon_cha_camp', pages: ['Setup'], draw() { Setup.draw(this.pane); } },
     ];
@@ -10429,7 +10702,7 @@ const UI = {
   // The classic tab that holds a compact page (so Setup and the checklist can open the right place).
   tabFor(page, combatTab) {
     if (page === 'Combat') return combatTab === 'Hunt area' ? 'Training place' : 'Skills';
-    return { Loot: 'Settings', Supplies: 'Settings', Town: 'Items/Storage', Party: 'Party/Autores', Items: 'Items/Storage', Alchemy: 'Auto alchemy', Settings: 'Extra' }[page] || page;
+    return { Loot: 'Settings', Supplies: 'Settings', Town: 'Items/Storage', Party: 'Party/Autores', Items: 'Items/Storage', Alchemy: 'Auto alchemy', Trade: 'Auto trade', Settings: 'Extra' }[page] || page;
   },
   // Is this compact page (and optional Combat sub-tab) what the window shows right now, in either layout?
   is(page, tab) {
@@ -10462,9 +10735,9 @@ const UI = {
   buildNav() {
     this.nav.replaceChildren();
     const icons = { Items: 'action\\cos_cmd_inventory', Party: 'action\\icon_cha_party', Combat: 'action\\icon_cha_auto_attack', Loot: 'action\\icon_cha_autoget', Supplies: 'action\\icon_cha_recovery', Town: 'item\\etc\\mall_return_scroll',
-      Alchemy: 'action\\icon_cha_alchemy', Wardrobe: 'action\\icon_cha_shop', Settings: 'action\\icon_cha_helper', Setup: 'action\\icon_cha_camp' };
+      Alchemy: 'action\\icon_cha_alchemy', Trade: 'action\\icon_cha_shop', Wardrobe: 'action\\icon_cha_shop', Settings: 'action\\icon_cha_helper', Setup: 'action\\icon_cha_camp' };
     const entries = this.classic ? this.classicTabs().map(t => ({ name: t.name, icon: t.icon, open: () => { this.ctab = t.name; this.draw(); } }))
-      : ['Setup', 'Map', 'Combat', 'Party', 'Loot', 'Items', 'Supplies', 'Town', 'Alchemy', 'Wardrobe', 'Settings'].map(name => ({ name, icon: icons[name], open: () => { this.current = name; this.draw(); } }));
+      : ['Setup', 'Map', 'Combat', 'Party', 'Loot', 'Items', 'Supplies', 'Town', 'Alchemy', 'Trade', 'Wardrobe', 'Settings'].map(name => ({ name, icon: icons[name], open: () => { this.current = name; this.draw(); } }));
     // Page icons are the game's own action-bar icons; they show only in the wide and classic windows' page lists.
     for (const entry of entries) {
       const tab = this.button(entry.name, entry.open);

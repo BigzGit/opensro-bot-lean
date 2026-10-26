@@ -35,16 +35,30 @@ const WalkBack = {
       if (nearest >= 0) route = recorded.slice(nearest).map(p => ({ ...p }));
     }
     route.push({ ...dest });
+    this.launch(dest, route, pose, shouldResume);
+  },
+  // Walk anywhere, not just to the hunting spot (Trade uses this between towns). The caller owns the safety checks
+  // that start() does for hunting; onDone runs on arrival and onFail(reason) when the walk gives up.
+  startTo(dest, { label = 'the destination', stop = 12, onDone, onFail } = {}) {
+    const pose = World.pose();
+    if (!dest || !pose || !World.inWorld() || World.isDead()) return false;
+    if (!Number.isFinite(dist2D(pose, dest))) { onFail?.('The destination is in another world or dungeon.'); return false; }
+    this.cancel();
+    this.launch(dest, [{ ...dest }], pose, false, { label, stop, onDone, onFail });
+    return !!this.active;
+  },
+  launch(dest, route, pose, shouldResume, opts = {}) {
     // The direct distance is a lower bound; a recorded route can be longer.
     let distance = 0, previous = pose;
     for (const point of route) { const leg = dist2D(previous, point); distance += Number.isFinite(leg) ? leg : 0; previous = point; }
     distance = Math.max(distance, dist2D(pose, dest) || 0);
     this.active = { destination: { ...dest }, legRoute: route, legRecorded: route.length > 1, distance,
+      label: opts.label || 'the hunting spot', stop: opts.stop || 12, onDone: opts.onDone || null, onFail: opts.onFail || null,
       route: null, recorded: false, source: '', index: 0, resume: shouldResume, totalLegs: Math.max(1, Math.ceil(distance / WALK_LEG)),
       legs: 0, leg: null, legTries: 0, navReplans: 0, routeArea: '', routeLength: 0,
       manualAt: Manual.lastAt, at: now(), progressAt: now(), lastPose: { ...pose }, sentAt: -Infinity, replans: 0, retryAt: 0,
       best: distance, bestAt: now(), maxMs: WALK_MAX_MS, plan: null };
-    UI.toast('Walking back to the hunting spot.', 'info', 2500);
+    if (!opts.label) UI.toast('Walking back to the hunting spot.', 'info', 2500);
     // The route graph is only worth a loading wait where the leg fallback would
     // have to chain (more than one leg), and only outdoors in one route area.
     const routeArea = typeof Route !== 'undefined' ? Route.commonArea(pose, dest) : null;
@@ -70,9 +84,11 @@ const WalkBack = {
   },
   cancel(reason = '', halt = true) {
     if (!this.active) return;
+    const failed = this.active.onFail;
     this.active = null;
     if (halt && World.inWorld() && !World.isDead()) Cmd.move(World.pose());
-    if (reason) UI.toast(reason, 'warn', 4000);
+    // A caller-owned walk reports its own failures; only a reasoned cancel is a failure, a plain cancel is the caller's.
+    if (failed && reason) failed(reason); else if (reason) UI.toast(reason, 'warn', 4000);
   },
   // Navdata corridor: its waypoints are short steps for the local collision A*.
   useNav(route, pose) {
@@ -126,15 +142,15 @@ const WalkBack = {
   status() {
     const a = this.active;
     if (!a) return '';
-    if (a.source === 'planning') return 'Walking to the hunting spot: loading route data.';
+    if (a.source === 'planning') return 'Walking to ' + a.label + ': loading route data.';
     const left = dist2D(World.pose(), a.destination);
     const progress = Number.isFinite(left) && a.distance ? ' · ' + Math.round(left / 10) + ' m left' : '';
     if (a.source === 'navdata') {
       const at = Math.min(a.route.length, a.index + 1);
-      return 'Walking to the hunting spot: waypoint ' + at + '/' + a.route.length + progress + '.';
+      return 'Walking to ' + a.label + ': waypoint ' + at + '/' + a.route.length + progress + '.';
     }
     const leg = Number.isFinite(left) ? Math.max(1, Math.min(a.totalLegs, a.totalLegs - Math.ceil(left / WALK_LEG) + 1)) : 1;
-    return (a.totalLegs > 1 ? 'Walking to the hunting spot: leg ' + leg + '/' + a.totalLegs : 'Walking to the hunting spot') + progress + '.';
+    return (a.totalLegs > 1 ? 'Walking to ' + a.label + ': leg ' + leg + '/' + a.totalLegs : 'Walking to ' + a.label) + progress + '.';
   },
   // The straight leg end is unreachable. Try a snapped or slightly turned end of
   // the same rough length, rate-limited so a missing collision window can arrive.
@@ -162,10 +178,12 @@ const WalkBack = {
     if (!a.route?.length) return;
     const pose = World.pose(), dest = a.route[a.index], distance = dist2D(pose, dest);
     if (!Number.isFinite(distance)) return this.cancel('Cannot walk to the saved hunting spot.');
-    if (distance <= 12) {
+    // Only the last point may use the caller's wider arrival radius; waypoints on the way stay tight.
+    if (distance <= (a.index >= a.route.length - 1 ? a.stop : 12)) {
       a.index++; a.leg = null; a.legTries = 0; a.progressAt = now(); a.lastPose = { ...pose }; a.travel = null;
       if (a.index < a.route.length) return;
       this.active = null;
+      if (a.onDone) return a.onDone();
       UI.toast('Back at the hunting spot.', 'info', 2500);
       if (a.resume) Hunt.start();
       return;

@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Route, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound, LeanMap};\n})();';
+  'globalThis.bot = {Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, Trade, WalkBack, Navigation, Route, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound, LeanMap};\n})();';
 function fixture(document) {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -287,6 +287,147 @@ function test(name, fn) {
   if (result && typeof result.then === 'function') { asyncTests.push(result.then(() => { passed++; console.log('PASS ' + name); }, error => { console.error('FAIL ' + name); throw error; })); return; }
   passed++; console.log('PASS ' + name);
 }
+// ---- Auto trade ----
+// A simulated game: the merchants answer shop-open, purchases and sales change the transport's bag and the purse.
+const TRADE_GOODS_OFFER = { refObjId: 5000, name: 'Silk', tab: 0, slot: 4, price: '100', maxStack: 50, purchaseLimit: 50, previews: [{ refObjId: 5000, typeFlags: 0x46c }] };
+const TRADE_POTION_OFFER = { refObjId: 15, name: 'HP potion', tab: 0, slot: 1, price: '10', maxStack: 100, purchaseLimit: 100, previews: [{ refObjId: 15, typeFlags: 2284 }] };
+function tradeFixture({ suit = true, vehicle = true, link = true, answer = true } = {}) {
+  const f = fixture(), gp = f.World.gp, c = f.Trade.cfg();
+  const from = f.Trade.town('CH'), to = f.Trade.town('WC');
+  c.from = 'CH'; c.to = 'WC'; c.trips = 1;
+  const merchants = [from, to].map((t, i) => {
+    const s = t.services.trade, e = { gid: 300 + i, kind: 'npc', name: 'Trade merchant', refObjId: s.refObjId, regionId: s.regionId, x: s.x, y: s.y, z: s.z };
+    f.World.ents.set(e.gid, e); return e;
+  });
+  const s0 = from.services.trade;
+  gp.pose = { regionId: s0.regionId, x: s0.x + 30, y: s0.y, z: s0.z };
+  f.World.pose = () => gp.pose;
+  gp.inventory = suit ? [{ slot: 8, refObjId: 4000, typeFlags: 940 | (1 << 11), name: 'Trader suit' }] : [];
+  const rec = { gid: 70, refObjId: 700, band: 2, hp: 100, status: 3, dead: false, inventory: [] };
+  if (vehicle) gp.cosRecords = [rec];
+  gp.progression.gold = '100000';
+  const stats = { buys: [], sells: [], potions: [], follows: 0, bought: 0 };
+  const sim = {
+    f, gp, rec, stats, merchants,
+    // One game step: let the bot act, then answer what it sent.
+    step(ms = 600) {
+      f.advance(ms);
+      f.Trade.tick();
+      const sent = f.commands.splice(0);
+      for (const cmd of sent) {
+        if (cmd.kind === 'select') gp.target = cmd.gid;
+        else if (cmd.kind === 'shop-open') {
+          gp.shopCompletionRevision++;
+          const potion = f.World.ents.get(cmd.gid)?.refObjId !== merchants[0].refObjId && f.World.ents.get(cmd.gid)?.refObjId !== merchants[1].refObjId;
+          gp.shop = potion ? { npc: cmd.gid, offers: [TRADE_POTION_OFFER] } : { npc: cmd.gid, cosGid: link ? 70 : 0, offers: [TRADE_GOODS_OFFER] };
+        } else if (cmd.kind === 'npc-close') gp.shop = null;
+        else if (cmd.kind === 'cos-follow') stats.follows++;
+        else if (cmd.kind === 'shop-buy') {
+          stats.potions.push(cmd.quantity);
+          gp.progression.gold = String(BigInt(gp.progression.gold) - BigInt(cmd.quantity) * 10n);
+          const row = gp.inventory.find(i => i.refObjId === 15); if (row) row.quantity += cmd.quantity;
+        } else if (cmd.kind === 'cos-shop-buy') {
+          stats.bought++;
+          if (!answer) continue;
+          stats.buys.push(cmd.quantity); gp.progression.gold = String(BigInt(gp.progression.gold) - BigInt(cmd.quantity) * 100n);
+          rec.inventory.push({ slot: rec.inventory.length, refObjId: 5000, typeFlags: 0x46c, quantity: cmd.quantity, name: 'Silk' });
+        } else if (cmd.kind === 'cos-shop-sell') {
+          stats.sells.push(cmd.quantity); gp.progression.gold = String(BigInt(gp.progression.gold) + BigInt(cmd.quantity) * 150n);
+          rec.inventory = rec.inventory.filter(i => i.slot !== cmd.slot);
+        }
+      }
+      return sent;
+    },
+    run(max = 300) { for (let i = 0; i < max && f.Trade.run; i++) sim.step(); },
+  };
+  // Walking is the route graph's job and has its own tests: arrive at once.
+  f.WalkBack.startTo = (dest, opts) => { gp.pose = { regionId: dest.regionId, x: dest.x + 30, y: dest.y, z: dest.z }; opts.onDone?.(); return true; };
+  return sim;
+}
+test('every supported town has a trade merchant in the town table, and the trade settings load with defaults', () => {
+  const f = fixture();
+  assert.deepEqual([...f.Trade.towns().map(t => t.key)].sort(), ['CA', 'CH', 'EU', 'KT', 'WC']);
+  for (const t of f.Trade.towns()) assert.ok(t.services.trade.refObjId > 0 && Number.isFinite(t.services.trade.x), t.key);
+  assert.equal(f.Settings.profile.trade.from, 'CH'); assert.equal(f.Settings.profile.trade.trips, 1);
+  const g = f.botProfile({ trade: { from: 'KT', to: 'EU', trips: 3, potions: false, extra: 1 } });
+  assert.equal(g.trade.from, 'KT'); assert.equal(g.trade.trips, 3); assert.equal(g.trade.potions, false); assert.equal('extra' in g.trade, false);
+});
+test('auto trade buys goods into the transport, delivers them to the other town and sells them all', () => {
+  const t = tradeFixture(), f = t.f;
+  f.Trade.start(); assert.ok(f.Trade.run, f.Trade.message);
+  t.run();
+  assert.equal(f.Trade.run, null, f.Trade.message);
+  assert.deepEqual([...t.stats.buys], [50, 50, 50], 'one full stack per transport slot');
+  assert.deepEqual([...t.stats.sells], [50, 50, 50]);
+  assert.equal(t.rec.inventory.length, 0);
+  assert.equal(t.stats.follows, 1, 'the transport is told to follow once');
+  assert.equal(t.gp.progression.gold, String(100000 + 3 * 50 * 50), 'bought at 100, sold at 150');
+  assert.match(f.Trade.message, /finished: 1 delivery/);
+  assert.equal(f.Trade.tick(), false, 'idle once finished');
+});
+test('auto trade with more deliveries buys the second town\'s goods and carries them back', () => {
+  const t = tradeFixture(), f = t.f; f.Trade.cfg().trips = 2;
+  f.Trade.start(); t.run();
+  assert.equal(f.Trade.run, null, f.Trade.message);
+  assert.equal(t.stats.buys.length, 6, 'a load in each direction'); assert.equal(t.stats.sells.length, 6);
+  assert.match(f.Trade.message, /finished: 2 deliveries/);
+});
+test('auto trade never starts without the job suit, the towns or a free hand, and summons a missing transport', () => {
+  let t = tradeFixture({ suit: false }); t.f.Trade.start(); t.run(5);
+  assert.equal(t.f.Trade.run, null); assert.match(t.f.Trade.message, /trader job suit/); assert.equal(t.stats.bought, 0);
+  t = tradeFixture({ vehicle: false }); t.f.Trade.start(); t.run(5);
+  assert.equal(t.f.Trade.run, null); assert.match(t.f.Trade.message, /no transport/);
+  t = tradeFixture({ vehicle: false }); t.gp.inventory.push({ slot: 14, refObjId: 4100, typeFlags: 4588, codename: 'ITEM_COS_C_HORSE1', name: 'Horse summon' });
+  t.f.Trade.start(); const sent = t.step(); assert.ok(t.f.Trade.run, t.f.Trade.message);
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [{ kind: 'item-use', slot: 14 }], 'the scroll is used');
+  t.gp.cosRecords = [t.rec]; t.run(); assert.equal(t.f.Trade.run, null, t.f.Trade.message); assert.equal(t.stats.sells.length, 3);
+  t = tradeFixture(); t.f.Trade.cfg().to = 'CH'; t.f.Trade.start(); assert.equal(t.f.Trade.run, null); assert.match(t.f.Trade.message, /two different towns/);
+  t = tradeFixture(); t.f.Hunt.running = true; t.f.Trade.start(); assert.equal(t.f.Trade.run, null); assert.match(t.f.Trade.message, /Stop hunting/);
+  t = tradeFixture(); t.f.Trade.start(); t.f.Hunt.start(); assert.equal(t.f.Hunt.running, false, 'hunting is refused while trading');
+});
+test('auto trade stops when the merchant is not linked to the transport, and never repeats an unconfirmed purchase', () => {
+  let t = tradeFixture({ link: false }); t.f.Trade.start(); t.run(40);
+  assert.equal(t.f.Trade.run, null); assert.match(t.f.Trade.message, /not linked to your transport/); assert.equal(t.stats.bought, 0);
+  t = tradeFixture({ answer: false }); t.f.Trade.start(); t.run(60);
+  assert.equal(t.stats.bought, 1, 'one purchase, never resent'); assert.equal(t.f.Trade.run, null); assert.match(t.f.Trade.message, /Goods purchase was not confirmed/);
+});
+test('auto trade stops on death, manual control and the Stop button, and closes an open merchant', () => {
+  let t = tradeFixture(); t.f.Trade.start(); t.step(); t.f.World.isDead = () => true; t.step();
+  assert.equal(t.f.Trade.run, null); assert.match(t.f.Trade.message, /died/);
+  t = tradeFixture(); t.f.Trade.start(); t.step(); t.f.Manual.lastAt = 999999; t.step();
+  assert.equal(t.f.Trade.run, null); assert.match(t.f.Trade.message, /manual control/);
+  t = tradeFixture(); t.f.Trade.start(); for (let i = 0; i < 6; i++) t.step(); assert.ok(t.gp.shop, 'the merchant is open');
+  t.f.Trade.cancel(); assert.equal(t.f.Trade.run, null); assert.ok(t.f.commands.some(c => c.kind === 'npc-close'));
+});
+test('auto trade takes the Controller turn and reports Trading', () => {
+  const t = tradeFixture(), f = t.f; f.Trade.start();
+  f.advance(600); f.Controller.tick(); assert.equal(f.Controller.mode, 'trading');
+  f.Trade.cancel(); f.advance(600); f.Controller.tick(); assert.notEqual(f.Controller.mode, 'trading');
+});
+test('auto trade refills potions at the town potion merchant before buying goods', () => {
+  const t = tradeFixture(), f = t.f, v = f.Trade.town('CH').services.vendor;
+  f.World.ents.set(400, { gid: 400, kind: 'npc', name: 'Potion merchant', refObjId: v.refObjId, regionId: v.regionId, x: v.x, y: v.y, z: v.z });
+  const r = f.Restock.cfg(); r.hp.on = true; r.hp.refObjId = 15; r.hp.low = 5; r.hp.target = 100; r.mp.on = false;
+  t.gp.inventory.push({ slot: 13, refObjId: 15, typeFlags: 2284, quantity: 10 });
+  f.Trade.start(); t.run();
+  assert.equal(f.Trade.run, null, f.Trade.message);
+  assert.deepEqual([...t.stats.potions], [90], 'topped up from 10 to the 100 target, once, before the goods');
+  assert.equal(t.stats.buys.length, 3);
+});
+test('WalkBack.startTo walks to any point, reports arrival inside the wider radius and failures to the caller', () => {
+  const f = fixture(); let done = 0, failed = '';
+  const dest = { regionId: 1, x: 1000, y: 0, z: 100 };
+  assert.equal(f.WalkBack.startTo(dest, { label: 'the trade merchant', stop: 120, onDone: () => done++, onFail: r => { failed = r; } }), true);
+  assert.match(f.WalkBack.status(), /Walking to the trade merchant/);
+  f.Controller.tick(); assert.equal(f.commands.at(-1).kind, 'move');
+  f.World.gp.pose.x = 850; f.advance(1000); f.WalkBack.tick();
+  assert.equal(done, 0, 'still outside the 120 radius');
+  f.World.gp.pose.x = 890; f.advance(1000); f.WalkBack.tick();
+  assert.equal(done, 1); assert.equal(f.WalkBack.active, null); assert.equal(f.Hunt.running, false, 'arrival never starts hunting');
+  f.WalkBack.startTo(dest, { label: 'x', onFail: r => { failed = r; } }); f.Manual.lastAt = 123456; f.WalkBack.tick();
+  assert.match(failed, /Manual control/); assert.equal(f.WalkBack.active, null);
+  assert.equal(f.WalkBack.startTo({ regionId: 1, x: 1, y: 0, z: 1 }, { onFail: r => { failed = r; } }) !== undefined, true);
+});
 function mapFixture() {
   const f = fixture(), map = f.LeanMap;
   const input = () => ({ _value: '', get value() { return this._value; }, set value(v) { this._value = String(v); },

@@ -27,15 +27,17 @@ def world(region, x, z):
 
 # NPC_<town>_<SERVICE>[_n]: KT Hotan, CH Jangan, WC Donwhang, EU Constantinople, CA Samarkand.
 SERVICES = {'WAREHOUSE': 'storage', 'POTION': 'vendor', 'SMITH': 'smith'}
+# The specialty (trade goods) merchant is optional: SPECIAL2 stands in a different area and is left out.
+TRADE = 'SPECIAL'
 found = {}
 for c in rows('npcpos.txt'):
     if len(c) < 5:
         continue
     npc, region = int(c[0]), int(c[1])
     parts = names.get(npc, '').split('_')
-    if len(parts) < 3 or parts[0] != 'NPC' or parts[2] not in SERVICES:
+    if len(parts) < 3 or parts[0] != 'NPC' or (parts[2] not in SERVICES and parts[2] != TRADE):
         continue
-    found.setdefault(parts[1], {}).setdefault(SERVICES[parts[2]], []).append(
+    found.setdefault(parts[1], {}).setdefault(SERVICES.get(parts[2], 'trade'), []).append(
         {'refObjId': npc, 'regionId': region, 'x': round(float(c[2]), 2), 'y': round(float(c[3]), 2), 'z': round(float(c[4]), 2)})
 
 gates = {}
@@ -64,6 +66,8 @@ for key, gate in sorted(gates.items(), key=lambda kv: kv[1]['name']):
         return math.dist(a, b)
     services = {role: min(svc[role], key=near) for role in ('storage', 'vendor')}
     services['smith'] = smith
+    if svc.get('trade'):
+        services['trade'] = svc['trade'][0]
     # The statue's recorded height is not the ground height; use the warehouse's.
     services['gate'] = {**gate, 'y': services['storage']['y']}
     del services['gate']['name']

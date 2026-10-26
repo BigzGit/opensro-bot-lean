@@ -3,6 +3,7 @@ const startHunting = Hunt.start;
 Hunt.start = function (...args) {
   if (BuffGear.run || BuffGear.recovery) return UI.toast('Restore or review combat gear before hunting.', 'warn');
   if (Alchemy.run || Alchemy.pending) return UI.toast('Stop alchemy and wait for its result before hunting.', 'warn');
+  if (Trade.run) return UI.toast('Stop auto trade before hunting.', 'warn');
   return startHunting.apply(this, args);
 };
 Hunt.lootAllowed = e => Loot.allowed(e);
@@ -97,6 +98,7 @@ Hunt.tick = function () {
 function stopAll() {
   Town.record('stop');
   Alchemy.stop();
+  Trade.cancel();
   BuffGear.cancel();
   const townActive = !!Town.trip;
   Town.cancel();
@@ -214,6 +216,7 @@ const Controller = {
       if (Chase.tick()) { this.mode = 'obstacle pursuit'; return; }
       if (BuffGear.tick()) { this.mode = 'buff gear'; return; }
       if (SpeedScroll.tick()) { this.mode = 'speed scroll'; return; }
+      if (Trade.tick()) { this.mode = 'trading'; return; }
       if (!WalkBack.active && !Restock.trip && !Restock.recording && !Controller.resumeAfterRevive &&
           !Restock.activeShop() && !World.gp.storage && Resurrect.tick()) {
         this.mode = 'resurrect'; return;

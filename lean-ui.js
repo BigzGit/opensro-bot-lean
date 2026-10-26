@@ -235,7 +235,7 @@ const UI = {
     // Busy comes from the live trips, not from Controller.mode: that label lags a tick behind (it still says
     // "returning" for up to 100 ms after Stop all ended a walk-back).
     const busy = Town.trip ? 'Town trip' : WalkBack.active ? 'Returning' : Reconnect.active() ? 'Reconnecting' : Restock.trip ? 'Shopping'
-      : Resurrect.trip ? 'Resurrecting' : BuffGear.run ? 'Buff gear' : Alchemy.run || Alchemy.pending ? 'Alchemy' : '';
+      : Resurrect.trip ? 'Resurrecting' : BuffGear.run ? 'Buff gear' : Trade.run ? 'Trading' : Alchemy.run || Alchemy.pending ? 'Alchemy' : '';
     const label = dead ? 'Dead' : error ? 'Error' : busy || (Hunt.running ? 'Hunting' : 'Stopped');
     // `note` is what only the state can say; the icon falls back to the first wait reason, which the wide window shows below the strip.
     const note = Town.trip ? Town.status() : WalkBack.active ? WalkBack.status() : Reconnect.active() && Reconnect.message ? Reconnect.message
@@ -550,6 +550,8 @@ const UI = {
       LeanMap.draw(this.pane);
     } else if (this.current === 'Alchemy') {
       Alchemy.draw();
+    } else if (this.current === 'Trade') {
+      Trade.draw();
     } else if (this.current === 'Wardrobe') {
       LeanWardrobe.draw(this.pane);
     } else {
@@ -580,6 +582,7 @@ const UI = {
       { name: 'Extra', icon: 'action\\icon_cha_helper', pages: ['Settings'], sections: [
         ['settingsStats'], ['settingsMastery'], ['settingsStatPoints'], ['settingsProfiles'], ['settingsShare'], ['settingsReports'], ['settingsActivity']] },
       { name: 'Map', pages: ['Map'], draw() { LeanMap.draw(this.pane); } },
+      { name: 'Auto trade', icon: 'action\\icon_cha_shop', pages: ['Trade'], draw() { Trade.draw(); } },
       { name: 'Wardrobe', icon: 'action\\icon_cha_shop', pages: ['Wardrobe'], draw() { LeanWardrobe.draw(this.pane); } },
       { name: 'Setup', icon: 'action\\icon_cha_camp', pages: ['Setup'], draw() { Setup.draw(this.pane); } },
     ];
@@ -587,7 +590,7 @@ const UI = {
   // The classic tab that holds a compact page (so Setup and the checklist can open the right place).
   tabFor(page, combatTab) {
     if (page === 'Combat') return combatTab === 'Hunt area' ? 'Training place' : 'Skills';
-    return { Loot: 'Settings', Supplies: 'Settings', Town: 'Items/Storage', Party: 'Party/Autores', Items: 'Items/Storage', Alchemy: 'Auto alchemy', Settings: 'Extra' }[page] || page;
+    return { Loot: 'Settings', Supplies: 'Settings', Town: 'Items/Storage', Party: 'Party/Autores', Items: 'Items/Storage', Alchemy: 'Auto alchemy', Trade: 'Auto trade', Settings: 'Extra' }[page] || page;
   },
   // Is this compact page (and optional Combat sub-tab) what the window shows right now, in either layout?
   is(page, tab) {
@@ -620,9 +623,9 @@ const UI = {
   buildNav() {
     this.nav.replaceChildren();
     const icons = { Items: 'action\\cos_cmd_inventory', Party: 'action\\icon_cha_party', Combat: 'action\\icon_cha_auto_attack', Loot: 'action\\icon_cha_autoget', Supplies: 'action\\icon_cha_recovery', Town: 'item\\etc\\mall_return_scroll',
-      Alchemy: 'action\\icon_cha_alchemy', Wardrobe: 'action\\icon_cha_shop', Settings: 'action\\icon_cha_helper', Setup: 'action\\icon_cha_camp' };
+      Alchemy: 'action\\icon_cha_alchemy', Trade: 'action\\icon_cha_shop', Wardrobe: 'action\\icon_cha_shop', Settings: 'action\\icon_cha_helper', Setup: 'action\\icon_cha_camp' };
     const entries = this.classic ? this.classicTabs().map(t => ({ name: t.name, icon: t.icon, open: () => { this.ctab = t.name; this.draw(); } }))
-      : ['Setup', 'Map', 'Combat', 'Party', 'Loot', 'Items', 'Supplies', 'Town', 'Alchemy', 'Wardrobe', 'Settings'].map(name => ({ name, icon: icons[name], open: () => { this.current = name; this.draw(); } }));
+      : ['Setup', 'Map', 'Combat', 'Party', 'Loot', 'Items', 'Supplies', 'Town', 'Alchemy', 'Trade', 'Wardrobe', 'Settings'].map(name => ({ name, icon: icons[name], open: () => { this.current = name; this.draw(); } }));
     // Page icons are the game's own action-bar icons; they show only in the wide and classic windows' page lists.
     for (const entry of entries) {
       const tab = this.button(entry.name, entry.open);
