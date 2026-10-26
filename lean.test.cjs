@@ -4357,16 +4357,6 @@ test('buff gear runs cleric and bard sets and restores arbitrary combat weapon a
   const count=f.commands.length; f.BuffGear.tick(); assert.equal(f.commands.length,count);
 });
 
-test('buff gear says why a due buff is not being swapped in, instead of staying silent', () => {
-  const f = buffGearFixture(), gp = f.World.gp;
-  gp.inventory = gp.inventory.filter(i => i.slot !== 15);
-  assert.equal(f.BuffGear.tick(), false); assert.match(f.BuffGear.status(), /Cannot find the saved set "Bard"/);
-  gp.inventory.push({ slot: 15, refObjId: 300, typeFlags: (14 << 11) | (6 << 7) | 44, plus: 0, variance: '1', durability: 100 }, { slot: 16, refObjId: 300, typeFlags: (14 << 11) | (6 << 7) | 44, plus: 0, variance: '1', durability: 100 });
-  f.BuffGear.tick(); assert.match(f.BuffGear.status(), /Cannot find the saved set "Bard".*identical/s, 'two identical copies cannot be told apart');
-  gp.inventory = gp.inventory.filter(i => i.slot !== 16); f.BuffGear.tick(); assert.equal(f.BuffGear.waiting, '', 'the reason clears once it can start'); f.BuffGear.run = null;
-  f.Settings.profile.macro.buffSets = [];
-  assert.match(f.BuffGear.status(), /no buff set is saved yet/);
-  const g = buffGearFixture(); g.Settings.profile.macro.buffs.forEach(b => b.gearSet = 0);
 test('dying with a buff weapon on puts the combat weapon back after revival and keeps hunting', () => {
   const f = buffGearFixture(), home = JSON.stringify(f.BuffGear.setup());
   assert.equal(f.BuffGear.tick(), true);
@@ -4389,6 +4379,22 @@ test('buff gear status lists each assigned buff, and a cast that was only unconf
   assert.match(f.BuffGear.status(), /Bard buff: skipped because the cast was not confirmed/);
   assert.equal(f.BuffGear.due(f.Settings.profile.macro.buffs[1]), 0);
   f.BuffGear.skipped.set(group, { signature: f.BuffGear.signature(), until: 0, why: 'x' });
+test('the pet status notes have a fixed height and are never hidden, so the panel below does not shift', () => {
+  const fs = require('fs'), css = fs.readFileSync(__dirname + '/lean-skin.css', 'utf8'), ui = fs.readFileSync(__dirname + '/lean-ui.js', 'utf8');
+  assert.match(css, /\.pet-note\{height:[\d.]+em;[^}]*overflow-y:auto/);
+  assert.match(ui, /petNote = el\('p', '', 'muted pet-note'\)/); assert.match(ui, /petPotionNote = el\('p', PetPotion\.message, 'muted pet-note'\)/);
+  assert.doesNotMatch(ui, /petNote\.hidden/);
+});
+test('buff gear says why a due buff is not being swapped in, instead of staying silent', () => {
+  const f = buffGearFixture(), gp = f.World.gp;
+  gp.inventory = gp.inventory.filter(i => i.slot !== 15);
+  assert.equal(f.BuffGear.tick(), false); assert.match(f.BuffGear.status(), /Cannot find the saved set "Bard"/);
+  gp.inventory.push({ slot: 15, refObjId: 300, typeFlags: (14 << 11) | (6 << 7) | 44, plus: 0, variance: '1', durability: 100 }, { slot: 16, refObjId: 300, typeFlags: (14 << 11) | (6 << 7) | 44, plus: 0, variance: '1', durability: 100 });
+  f.BuffGear.tick(); assert.match(f.BuffGear.status(), /Cannot find the saved set "Bard".*identical/s, 'two identical copies cannot be told apart');
+  gp.inventory = gp.inventory.filter(i => i.slot !== 16); f.BuffGear.tick(); assert.equal(f.BuffGear.waiting, '', 'the reason clears once it can start'); f.BuffGear.run = null;
+  f.Settings.profile.macro.buffSets = [];
+  assert.match(f.BuffGear.status(), /no buff set is saved yet/);
+  const g = buffGearFixture(); g.Settings.profile.macro.buffs.forEach(b => b.gearSet = 0);
   assert.ok(f.BuffGear.due(f.Settings.profile.macro.buffs[1]) > 0, 'the skip has expired'); assert.equal(f.BuffGear.skipped.has(group), false);
 });
 // Skill-driven swapping: the game's own weaponKinds say which weapon a buff needs; no saved set is involved.
