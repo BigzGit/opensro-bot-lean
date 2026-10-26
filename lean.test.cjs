@@ -3221,6 +3221,15 @@ test('a stalled walk to a town service says why, in plain words and without NPC 
   assert.equal(snap.townDetail, f.Town.message); assert.equal(snap.navigationReady, false); assert.equal(snap.navigationError, 'Unsupported collision data');
   f.Town.cancel(); assert.equal(f.Diagnostics.snapshot().townDetail, '');
 });
+test('a warehouse walk that cannot get around an obstacle is skipped, other services still stop the trip', () => {
+  const f = townFixture(); f.Town.begin(); f.Town.enter('walk-storage');
+  f.Navigation.watch = () => 'giveup';
+  f.Town.tick();
+  assert.ok(f.Town.trip, 'the trip carries on'); assert.equal(f.Town.trip.phase, 'walk-vendor');
+  const g = townFixture(); g.Town.begin(); g.Town.enter('walk-vendor');
+  g.Navigation.watch = () => 'giveup';
+  g.Town.tick(); assert.equal(g.Town.trip, null); assert.match(g.Town.message, /Blocked on the way to the potion merchant/);
+});
 test('town movement retries blocked routes at intervals and remains cancellable', () => {
   const f = townFixture(); f.Town.begin(); f.Town.enter('walk-storage');
   let plans = 0;

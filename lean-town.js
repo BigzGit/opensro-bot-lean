@@ -417,6 +417,13 @@ const Town = {
       return false;
     }
     if (!World.isSitting() && Navigation.watch(t, pose, t.movedAt, t.travel?.route[t.travel.index] || dest) === 'giveup') {
+      // The warehouse is optional: a blocked walk to it skips the deposit so the potions, repairs and the way back still happen.
+      if (t.phase === 'walk-storage') {
+        this.enter(this.closeNext('close-storage'));
+        this.message = 'Warehouse skipped: blocked on the way, I could not walk around the obstacle.';
+        UI.toast(this.message, 'warn', 6000);
+        return false;
+      }
       this.fail('Blocked on the way to the ' + this.role(t.phase) + '; I could not walk around the obstacle.');
       return false;
     }
