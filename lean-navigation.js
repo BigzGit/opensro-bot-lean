@@ -1,8 +1,13 @@
 // Outdoor routing over the collision product already admitted by the game.
 // A 20-unit A* grid respects blocked terrain, object walls and linked portals.
 // Native movement remains the final authority for height and collision response.
+const STALL_MS = 2500;      // standing still this long while moves are sent counts as a stall
+const STALL_TRIES = 4;      // sidesteps tried at one spot before the walk gives up
+const AVOID_AHEAD = 36;     // the suspected obstacle sits this far ahead of the stalled character
+const AVOID_RADIUS = 28;    // and is kept out of the next route by this much
+const AVOID_MS = 45000;
 const Navigation = {
-  scene: null, revision: 0, error: '',
+  scene: null, revision: 0, error: '', avoidNow: null,
   bytes(value, size) {
     const raw = atob(value), out = Uint8Array.from(raw, c => c.charCodeAt(0));
     if (out.length !== size) throw Error('Invalid navigation grid');
@@ -77,6 +82,7 @@ const Navigation = {
   open(x, z) {
     const sx = Math.floor(x / SECTOR), sz = Math.floor(z / SECTOR), grid = this.scene.grids.get(sx + ',' + sz);
     if (!grid) return false;
+    if (this.avoidNow) for (const a of this.avoidNow) if (Math.hypot(x - a.x, z - a.z) < a.r) return false;
     const tx = Math.floor((x - sx * SECTOR) / 20), tz = Math.floor((z - sz * SECTOR) / 20), i = tz * 96 + tx;
     return !grid.blocked[i] && grid.cells.getUint32(i * 4, true) < grid.count;
   },
@@ -114,6 +120,12 @@ const Navigation = {
   plan(from, to, arrivalRadius = 0, options = {}) {
     if (!this.scene || (from.regionId | to.regionId) & DUNGEON) return null;
     const start = this.local(from), goal = this.local(to);
+    // Spots a stalled walk bumped into are kept out of the route, but never the start itself.
+    const avoid = (options.avoid || []).map(a => ({ ...this.local(a), r: a.r })).filter(a => Number.isFinite(a.x) && start && Math.hypot(a.x - start.x, a.z - start.z) >= a.r);
+    this.avoidNow = avoid.length ? avoid : null;
+    try { return this.planLocal(from, to, start, goal, arrivalRadius, options); } finally { this.avoidNow = null; }
+  },
+  planLocal(from, to, start, goal, arrivalRadius, options) {
     if (!start || !goal || !this.open(start.x, start.z)) return null;
     if (Math.hypot(goal.x - start.x, goal.z - start.z) < 1800 && this.clear(start, goal)) return [to];
     const key = p => p.x + ',' + p.z, center = p => ({ x: p.x * 20 + 10, z: p.z * 20 + 10 });
@@ -215,14 +227,48 @@ const Navigation = {
     }
     return null;
   },
+  // Stall watchdog shared by every walker that sends plain moves (WalkBack, Town, Restock). When the character has
+  // not moved for a few seconds although moves were sent, the spot just ahead is remembered on the owner as
+  // blocked, so next() routes around it; after a few tries at one place it reports 'giveup'. Returns '', 'recover'
+  // or 'giveup'. Only normal moves are ever sent; nothing here moves the character.
+  watch(owner, pose, sentAt, toward) {
+    const t = now();
+    let w = owner.stall;
+    if (!w || t - w.seen > 1500) w = owner.stall = { pose: { ...pose }, at: t, seen: t, tries: 0, origin: null };
+    w.seen = t;
+    const moved = dist2D(w.pose, pose);
+    if (!Number.isFinite(moved) || moved > 3) {
+      if (w.origin && !(dist2D(w.origin, pose) < 100)) { w.tries = 0; w.origin = null; owner.avoid = []; }
+      w.pose = { ...pose }; w.at = t;
+      return '';
+    }
+    if (t - w.at < STALL_MS || sentAt < w.at) return '';
+    w.at = t;
+    if (w.tries >= STALL_TRIES) { w.tries = 0; w.origin = null; owner.avoid = []; return 'giveup'; }
+    w.tries++; w.origin = w.origin || { ...pose };
+    const delta = toward && regionDelta(pose, toward), length = delta ? Math.hypot(delta[0], delta[1]) : 0;
+    if (length > 0) {
+      const spot = { regionId: pose.regionId, x: pose.x + delta[0] / length * AVOID_AHEAD, z: pose.z + delta[1] / length * AVOID_AHEAD, r: AVOID_RADIUS, until: t + AVOID_MS };
+      owner.avoid = [...(owner.avoid || []).filter(a => a.until > t), spot];
+    }
+    owner.travel = null;
+    return 'recover';
+  },
   next(owner, destination, recorded = false, arrivalRadius = 0) {
     const pose = World.pose(), previous = owner.travel;
     if (!this.scene || (pose.regionId & DUNGEON)) {
       return recorded ? { point: destination } : { waiting: true, error: this.error || 'Waiting for game collision data. Reload the game if attached late, or record a walking route.' };
     }
     if (!previous || previous.revision !== this.revision || dist2D(previous.destination, destination) > 1 || previous.index >= previous.route.length) {
-      let route = this.plan(pose, destination);
-      if (route && !route.length && arrivalRadius > 0) route = this.plan(pose, destination, arrivalRadius);
+      const avoid = (owner.avoid || []).filter(a => a.until > now());
+      const attempt = options => {
+        let route = this.plan(pose, destination, 0, options);
+        if (route && !route.length && arrivalRadius > 0) route = this.plan(pose, destination, arrivalRadius, options);
+        return route;
+      };
+      let route = attempt({ avoid });
+      // Avoided spots are only a hint: if they leave no route, walk the plain one rather than nothing.
+      if (avoid.length && !route?.length) route = attempt({});
       if (!route) return { waiting: true, error: 'Waiting for collision coverage at the current position.' };
       if (!route.length) return { error: 'No walkable route found through the loaded collision map.' };
       owner.travel = { destination: { ...destination }, route, index: 0, revision: this.revision };

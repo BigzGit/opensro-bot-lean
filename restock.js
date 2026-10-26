@@ -107,7 +107,12 @@ const Restock = {
     if (now() - t.progressAt > 20000) return this.fail('Movement blocked for 20 seconds. Check the recorded path.');
     if (World.isSitting()) {
       if (now() - t.movedAt > 2500 && Cmd.action(1000)) t.movedAt = now();
-    } else if (now() - t.movedAt > 900 && Cmd.move(dest)) t.movedAt = now();
+      return false;
+    }
+    // A recorded step is walked straight unless the character is stuck; then collision routing goes round the spot.
+    if (Navigation.watch(t, World.pose(), t.movedAt, dest) === 'giveup') return this.fail('Blocked on the way to the merchant; I could not walk around the obstacle.');
+    const step = Navigation.next(t, dest, true);
+    if (now() - t.movedAt > 900 && Cmd.move(step.point || dest)) t.movedAt = now();
     return false;
   },
   tick() {

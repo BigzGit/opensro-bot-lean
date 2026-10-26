@@ -396,7 +396,7 @@ const Town = {
   enter(phase) {
     const t = this.trip;
     t.phase = phase; t.at = now(); t.sent = false; t.pending = null; t.transition = false;
-    t.travel = null; t.lastPose = null; t.progressAt = now(); t.movedAt = -Infinity; t.retryAt = 0;
+    t.travel = null; t.lastPose = null; t.progressAt = now(); t.movedAt = -Infinity; t.retryAt = 0; t.stall = null; t.avoid = [];
     this.message = 'Town cycle: ' + phase;
   },
   // Plain wording for the service being approached (never an NPC name), for messages and bug reports.
@@ -412,6 +412,10 @@ const Town = {
     if (now() - t.progressAt > 20000) {
       t.travel = null; t.retryAt = now() + 5000; t.progressAt = now();
       this.message = 'Town movement to the ' + this.role(t.phase) + ': blocked route (no progress for 20 s); retrying.';
+      return false;
+    }
+    if (!World.isSitting() && Navigation.watch(t, pose, t.movedAt, t.travel?.route[t.travel.index] || dest) === 'giveup') {
+      this.fail('Blocked on the way to the ' + this.role(t.phase) + '; I could not walk around the obstacle.');
       return false;
     }
     const step = Navigation.next(t, dest, false, radius);

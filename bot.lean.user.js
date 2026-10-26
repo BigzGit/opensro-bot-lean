@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.137
+// @version      1.2.138
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[NIX] Another SRO assistant is active. Disable it and reload to use NIX.');
   return;
 }
-const VERSION = '1.2.137';
+const VERSION = '1.2.138';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -1524,7 +1524,12 @@ const Restock = {
     if (move.waiting) return false;
     if (World.isSitting()) {
       if (now() - t.movedAt > 2500 && Cmd.action(1000)) t.movedAt = now();
-    } else if (now() - t.movedAt > 900 && Cmd.move(move.point)) t.movedAt = now();
+      return false;
+    }
+    // A recorded step is walked straight unless the character is stuck; then collision routing goes round the spot.
+    if (Navigation.watch(t, World.pose(), t.movedAt, dest) === 'giveup') return this.fail('Blocked on the way to the merchant; I could not walk around the obstacle.');
+    const step = Navigation.next(t, dest, true);
+    if (now() - t.movedAt > 900 && Cmd.move(step.point || dest)) t.movedAt = now();
     return false;
   },
   tick() {
@@ -1832,8 +1837,13 @@ const Hunt = {
 // Outdoor routing over the collision product already admitted by the game.
 // A 20-unit A* grid respects blocked terrain, object walls and linked portals.
 // Native movement remains the final authority for height and collision response.
+const STALL_MS = 2500;      // standing still this long while moves are sent counts as a stall
+const STALL_TRIES = 4;      // sidesteps tried at one spot before the walk gives up
+const AVOID_AHEAD = 36;     // the suspected obstacle sits this far ahead of the stalled character
+const AVOID_RADIUS = 28;    // and is kept out of the next route by this much
+const AVOID_MS = 45000;
 const Navigation = {
-  scene: null, revision: 0, error: '',
+  scene: null, revision: 0, error: '', avoidNow: null,
   bytes(value, size) {
     const raw = atob(value), out = Uint8Array.from(raw, c => c.charCodeAt(0));
     if (out.length !== size) throw Error('Invalid navigation grid');
@@ -1908,6 +1918,7 @@ const Navigation = {
   open(x, z) {
     const sx = Math.floor(x / SECTOR), sz = Math.floor(z / SECTOR), grid = this.scene.grids.get(sx + ',' + sz);
     if (!grid) return false;
+    if (this.avoidNow) for (const a of this.avoidNow) if (Math.hypot(x - a.x, z - a.z) < a.r) return false;
     const tx = Math.floor((x - sx * SECTOR) / 20), tz = Math.floor((z - sz * SECTOR) / 20), i = tz * 96 + tx;
     return !grid.blocked[i] && grid.cells.getUint32(i * 4, true) < grid.count;
   },
@@ -1945,6 +1956,12 @@ const Navigation = {
   plan(from, to, arrivalRadius = 0, options = {}) {
     if (!this.scene || (from.regionId | to.regionId) & DUNGEON) return null;
     const start = this.local(from), goal = this.local(to);
+    // Spots a stalled walk bumped into are kept out of the route, but never the start itself.
+    const avoid = (options.avoid || []).map(a => ({ ...this.local(a), r: a.r })).filter(a => Number.isFinite(a.x) && start && Math.hypot(a.x - start.x, a.z - start.z) >= a.r);
+    this.avoidNow = avoid.length ? avoid : null;
+    try { return this.planLocal(from, to, start, goal, arrivalRadius, options); } finally { this.avoidNow = null; }
+  },
+  planLocal(from, to, start, goal, arrivalRadius, options) {
     if (!start || !goal || !this.open(start.x, start.z)) return null;
     if (Math.hypot(goal.x - start.x, goal.z - start.z) < 1800 && this.clear(start, goal)) return [to];
     const key = p => p.x + ',' + p.z, center = p => ({ x: p.x * 20 + 10, z: p.z * 20 + 10 });
@@ -2046,14 +2063,48 @@ const Navigation = {
     }
     return null;
   },
+  // Stall watchdog shared by every walker that sends plain moves (WalkBack, Town, Restock). When the character has
+  // not moved for a few seconds although moves were sent, the spot just ahead is remembered on the owner as
+  // blocked, so next() routes around it; after a few tries at one place it reports 'giveup'. Returns '', 'recover'
+  // or 'giveup'. Only normal moves are ever sent; nothing here moves the character.
+  watch(owner, pose, sentAt, toward) {
+    const t = now();
+    let w = owner.stall;
+    if (!w || t - w.seen > 1500) w = owner.stall = { pose: { ...pose }, at: t, seen: t, tries: 0, origin: null };
+    w.seen = t;
+    const moved = dist2D(w.pose, pose);
+    if (!Number.isFinite(moved) || moved > 3) {
+      if (w.origin && !(dist2D(w.origin, pose) < 100)) { w.tries = 0; w.origin = null; owner.avoid = []; }
+      w.pose = { ...pose }; w.at = t;
+      return '';
+    }
+    if (t - w.at < STALL_MS || sentAt < w.at) return '';
+    w.at = t;
+    if (w.tries >= STALL_TRIES) { w.tries = 0; w.origin = null; owner.avoid = []; return 'giveup'; }
+    w.tries++; w.origin = w.origin || { ...pose };
+    const delta = toward && regionDelta(pose, toward), length = delta ? Math.hypot(delta[0], delta[1]) : 0;
+    if (length > 0) {
+      const spot = { regionId: pose.regionId, x: pose.x + delta[0] / length * AVOID_AHEAD, z: pose.z + delta[1] / length * AVOID_AHEAD, r: AVOID_RADIUS, until: t + AVOID_MS };
+      owner.avoid = [...(owner.avoid || []).filter(a => a.until > t), spot];
+    }
+    owner.travel = null;
+    return 'recover';
+  },
   next(owner, destination, recorded = false, arrivalRadius = 0) {
     const pose = World.pose(), previous = owner.travel;
     if (!this.scene || (pose.regionId & DUNGEON)) {
       return recorded ? { point: destination } : { waiting: true, error: this.error || 'Waiting for game collision data. Reload the game if attached late, or record a walking route.' };
     }
     if (!previous || previous.revision !== this.revision || dist2D(previous.destination, destination) > 1 || previous.index >= previous.route.length) {
-      let route = this.plan(pose, destination);
-      if (route && !route.length && arrivalRadius > 0) route = this.plan(pose, destination, arrivalRadius);
+      const avoid = (owner.avoid || []).filter(a => a.until > now());
+      const attempt = options => {
+        let route = this.plan(pose, destination, 0, options);
+        if (route && !route.length && arrivalRadius > 0) route = this.plan(pose, destination, arrivalRadius, options);
+        return route;
+      };
+      let route = attempt({ avoid });
+      // Avoided spots are only a hint: if they leave no route, walk the plain one rather than nothing.
+      if (avoid.length && !route?.length) route = attempt({});
       if (!route) return { waiting: true, error: 'Waiting for collision coverage at the current position.' };
       if (!route.length) return { error: 'No walkable route found through the loaded collision map.' };
       owner.travel = { destination: { ...destination }, route, index: 0, revision: this.revision };
@@ -2784,6 +2835,15 @@ const WalkBack = {
         a.legs++; a.legTries = 0;
         Log.info('Walk back: leg ' + a.legs + ' of about ' + a.totalLegs + '.');
         Activity.emit({ category: 'movement', code: 'walk-leg', text: 'Walk back leg ' + a.legs + ' of about ' + a.totalLegs + '.', details: { leg: a.legs, legs: a.totalLegs } });
+      }
+    }
+    // Standing against something the collision map does not know: route around the spot, then give up.
+    if (!World.isSitting()) {
+      const stall = Navigation.watch(a, pose, a.sentAt, a.travel?.route[a.travel.index] || a.leg?.target || dest);
+      if (stall === 'recover') Log.info('Walk back: stuck against an obstacle; trying another way round.');
+      else if (stall === 'giveup') {
+        if (a.source === 'navdata' && (this.replan(pose) || this.useLegs())) return;
+        return this.cancel('Walk back stopped: an obstacle blocks the way and I could not walk around it.');
       }
     }
     const move = Navigation.next(a, a.leg ? a.leg.target : dest, a.recorded);
@@ -4058,7 +4118,7 @@ const Town = {
   enter(phase) {
     const t = this.trip;
     t.phase = phase; t.at = now(); t.sent = false; t.pending = null; t.transition = false;
-    t.travel = null; t.lastPose = null; t.progressAt = now(); t.movedAt = -Infinity; t.retryAt = 0;
+    t.travel = null; t.lastPose = null; t.progressAt = now(); t.movedAt = -Infinity; t.retryAt = 0; t.stall = null; t.avoid = [];
     this.message = 'Town cycle: ' + phase;
   },
   // Plain wording for the service being approached (never an NPC name), for messages and bug reports.
@@ -4074,6 +4134,10 @@ const Town = {
     if (now() - t.progressAt > 20000) {
       t.travel = null; t.retryAt = now() + 5000; t.progressAt = now();
       this.message = 'Town movement to the ' + this.role(t.phase) + ': blocked route (no progress for 20 s); retrying.';
+      return false;
+    }
+    if (!World.isSitting() && Navigation.watch(t, pose, t.movedAt, t.travel?.route[t.travel.index] || dest) === 'giveup') {
+      this.fail('Blocked on the way to the ' + this.role(t.phase) + '; I could not walk around the obstacle.');
       return false;
     }
     const step = Navigation.next(t, dest, false, radius);
@@ -9213,7 +9277,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.137", "title": "Automatic trading between towns", "items": ["New **Auto trade** page. Pick the town to buy in and the town to sell in, press **Start trading**, and the bot does the whole run: summons your transport, buys the dearest trade goods you can afford at the trade merchant, walks to the other town, and sells everything there. It reports the gold gained.", "**Deliveries** sets how many runs to do (0 = until you stop it). With more than one, the bot buys the second town's goods and carries them back.", "Potions keep being used on the road, and at each town the bot first tops up the potions from your Supplies page targets.", "Needs your trader job suit on and a transport scroll in the bag (or a transport already summoned), plus enough gold. Walking only, no teleports. Bandits are not fought; the run stops with a message if you die, take manual control, or the merchant does not link to your transport.", "Towns: Jangan, Donwhang, Hotan, Samarkand and Constantinople."], "note": "Tested in simulation only; not yet confirmed on the live server. The bot cannot yet buy a transport for you."}, {"version": "1.2.136", "title": "Buff weapon swap carries on when the game refuses a weapon", "items": ["If the game will not equip the bag weapon picked for a buff (for example a level or class limit), the bot now notices within seconds, puts your gear back, remembers not to pick that weapon again, and keeps hunting. Before, it waited fifteen seconds and stopped with \"manual equipment review needed\".", "When a swap does still fail, the message and the overlay now say which item and slots were involved instead of only \"manual equipment review needed\"."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.135", "title": "Classic window: skill icons look right, and the imbue list shows imbues only", "items": ["In the Classic (SBot-style) window, skill icons had white borders, a smaller size and no gold border on selected skills. They now look the same as in the normal window.", "**Weapon imbue** listed every self skill, so it looked just like the buff list. It now shows only weapon imbues and poison coatings. **Show all self skills** brings the full list back, and characters with no imbue skill still see the full list."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.134", "title": "Fix: bot stopped with \"requiredLevel is not a function\"", "items": ["Fixes 1.2.133: when a buff needed a bag weapon, the bot stopped with \"ItemRules.requiredLevel is not a function\" instead of swapping. The weapon's level requirement is now read correctly."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.133", "title": "Buffs now wear the weapon they need", "items": ["With **Swap weapons for buffs** on, a buff your current weapon cannot cast is now cast with a matching weapon from your bag, picked from the skill's own weapon requirement. No saved buff set is needed. Your combat weapon and shield come back afterward.", "The best usable bag weapon is used (highest +, not broken, within your level). Identical copies of a weapon no longer block the swap. A weapon the game refuses to equip is not tried again.", "One-handed buff weapons keep your shield on; two-handed ones take it off and put it back. Keep one bag slot free.", "The Buffs & imbue page shows what each automatic buff is waiting for, or that no usable weapon is in your bag. **Wear the weapon each buff needs** switches this off; saved sets still work for buffs you assign to one.", "Every equipment move is still confirmed before the next step or the cast. Imbues and attack skills are not swapped."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.132", "title": "Berserk has its own Giant party switch", "items": ["**Combat -> Berserk** now has a **Giant party** switch, right under Giants. Berserk on party Giants follows it; other party monsters still follow **Party monsters**, so you can save Berserk for party Giants without spending it on every party mob.", "Saved profiles keep working: until you change it, **Giant party** takes whatever **Party monsters** was set to, so nobody loses Berserk on party Giants after updating. New profiles start with it off.", "Reported by Rebraxin (PR #11)."], "note": "Tested in simulation, and a player confirmed Berserk fired on party Giants on the live server."}, {"version": "1.2.131", "title": "Type in or copy hunting spot coordinates on the Map", "items": ["The **Map** page's **Hunting area** now has **X** and **Y** fields: type the outdoor coordinates (whole metres, as shown on the map) and press **Set spot** to save that place as the hunting spot. Wrong values, dungeons and not being in the world are refused with a message.", "**Set actual position** saves where you stand, as **Set hunting spot here** did. **Get position** fills in your current coordinates and **Copy** copies them, without changing the saved spot.", "Clicking the map and pressing **Make this the hunting spot** works as before. A typed spot uses your current height, the same as a map click.", "Contributed by BigzGit (PR #3)."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.130", "title": "Pet summon scrolls are never sold", "items": ["Town trips sold pet summon scrolls and flutes kept in the pickup pet's bag at the weapon merchant, because the pet-loot rules treated them as ordinary items. Selling one loses that pet. From 1.2.126 to 1.2.128, **Sell items from the character bag too** could also sell them from your own bag.", "Pet summon scrolls and flutes are now never sold, from the pet or the bag, not even with a Sell rule.", "If you lost one, the merchant's buyback list keeps your last 5 sold items; it may still be there if little was sold after it."], "note": "Tested in simulation only; not yet confirmed on the live server."}];
+const RELEASE_NOTES = [{"version": "1.2.138", "title": "Walking no longer gets stuck on obstacles", "items": ["When the character stops against something while walking (return to the hunting spot, town trips, potion restocking and trade runs), the bot now notices after a few seconds, marks the spot ahead as blocked and plans a way around it.", "It tries a few times at one place. If it still cannot get past, it stops with a clear message (\"an obstacle blocks the way\") instead of standing there.", "Normal move commands only: no teleporting and no collision bypass."], "note": "Tested in simulation only (an invisible object the collision map does not know about); not yet confirmed on the live server."}, {"version": "1.2.137", "title": "Automatic trading between towns", "items": ["New **Auto trade** page. Pick the town to buy in and the town to sell in, press **Start trading**, and the bot does the whole run: summons your transport, buys the dearest trade goods you can afford at the trade merchant, walks to the other town, and sells everything there. It reports the gold gained.", "**Deliveries** sets how many runs to do (0 = until you stop it). With more than one, the bot buys the second town's goods and carries them back.", "Potions keep being used on the road, and at each town the bot first tops up the potions from your Supplies page targets.", "Needs your trader job suit on and a transport scroll in the bag (or a transport already summoned), plus enough gold. Walking only, no teleports. Bandits are not fought; the run stops with a message if you die, take manual control, or the merchant does not link to your transport.", "Towns: Jangan, Donwhang, Hotan, Samarkand and Constantinople."], "note": "Tested in simulation only; not yet confirmed on the live server. The bot cannot yet buy a transport for you."}, {"version": "1.2.136", "title": "Buff weapon swap carries on when the game refuses a weapon", "items": ["If the game will not equip the bag weapon picked for a buff (for example a level or class limit), the bot now notices within seconds, puts your gear back, remembers not to pick that weapon again, and keeps hunting. Before, it waited fifteen seconds and stopped with \"manual equipment review needed\".", "When a swap does still fail, the message and the overlay now say which item and slots were involved instead of only \"manual equipment review needed\"."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.135", "title": "Classic window: skill icons look right, and the imbue list shows imbues only", "items": ["In the Classic (SBot-style) window, skill icons had white borders, a smaller size and no gold border on selected skills. They now look the same as in the normal window.", "**Weapon imbue** listed every self skill, so it looked just like the buff list. It now shows only weapon imbues and poison coatings. **Show all self skills** brings the full list back, and characters with no imbue skill still see the full list."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.134", "title": "Fix: bot stopped with \"requiredLevel is not a function\"", "items": ["Fixes 1.2.133: when a buff needed a bag weapon, the bot stopped with \"ItemRules.requiredLevel is not a function\" instead of swapping. The weapon's level requirement is now read correctly."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.133", "title": "Buffs now wear the weapon they need", "items": ["With **Swap weapons for buffs** on, a buff your current weapon cannot cast is now cast with a matching weapon from your bag, picked from the skill's own weapon requirement. No saved buff set is needed. Your combat weapon and shield come back afterward.", "The best usable bag weapon is used (highest +, not broken, within your level). Identical copies of a weapon no longer block the swap. A weapon the game refuses to equip is not tried again.", "One-handed buff weapons keep your shield on; two-handed ones take it off and put it back. Keep one bag slot free.", "The Buffs & imbue page shows what each automatic buff is waiting for, or that no usable weapon is in your bag. **Wear the weapon each buff needs** switches this off; saved sets still work for buffs you assign to one.", "Every equipment move is still confirmed before the next step or the cast. Imbues and attack skills are not swapped."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.132", "title": "Berserk has its own Giant party switch", "items": ["**Combat -> Berserk** now has a **Giant party** switch, right under Giants. Berserk on party Giants follows it; other party monsters still follow **Party monsters**, so you can save Berserk for party Giants without spending it on every party mob.", "Saved profiles keep working: until you change it, **Giant party** takes whatever **Party monsters** was set to, so nobody loses Berserk on party Giants after updating. New profiles start with it off.", "Reported by Rebraxin (PR #11)."], "note": "Tested in simulation, and a player confirmed Berserk fired on party Giants on the live server."}, {"version": "1.2.131", "title": "Type in or copy hunting spot coordinates on the Map", "items": ["The **Map** page's **Hunting area** now has **X** and **Y** fields: type the outdoor coordinates (whole metres, as shown on the map) and press **Set spot** to save that place as the hunting spot. Wrong values, dungeons and not being in the world are refused with a message.", "**Set actual position** saves where you stand, as **Set hunting spot here** did. **Get position** fills in your current coordinates and **Copy** copies them, without changing the saved spot.", "Clicking the map and pressing **Make this the hunting spot** works as before. A typed spot uses your current height, the same as a map click.", "Contributed by BigzGit (PR #3)."], "note": "Tested in simulation only; not yet confirmed on the live server."}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {

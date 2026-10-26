@@ -834,6 +834,48 @@ test('a blocked leg end is snapped to a nearby walkable tile and the walk contin
   f.advance(1000); f.WalkBack.tick();
   assert.equal(f.commands.at(-1).kind, 'move');
 });
+// An object the collision map does not know about: the character stops against it while moves are sent.
+function pillarWorld(f, pillar = { x: 270, z: 100, r: 15 }) {
+  return () => {
+    const move = [...f.commands].reverse().find(c => c.kind === 'move');
+    if (!move) return;
+    const pose = f.World.gp.pose, dx = move.destination.x - pose.x, dz = move.destination.z - pose.z, d = Math.hypot(dx, dz);
+    if (!d) return;
+    const k = Math.min(18, d) / d, next = { ...pose, x: pose.x + dx * k, z: pose.z + dz * k };
+    if (Math.hypot(next.x - pillar.x, next.z - pillar.z) >= pillar.r) f.World.gp.pose = next;
+  };
+}
+test('a walk that stops against an unmapped object sidesteps it instead of sitting', () => {
+  const f = fixture(), step = pillarWorld(f);
+  f.WalkBack.startTo({ regionId: 1, x: 600, y: 0, z: 100 }, { label: 'the test spot', stop: 12 });
+  let ticks = 0;
+  while (f.WalkBack.active && ticks++ < 120) { f.WalkBack.tick(); step(); f.advance(900); }
+  assert.equal(f.WalkBack.active, null, 'the walk ended');
+  assert.ok(f.World.gp.pose.x >= 590, 'the character got past the pillar');
+});
+test('a walk that cannot get past reports a clear message and stops after a bounded number of tries', () => {
+  const f = fixture(); let failed = '';
+  const step = pillarWorld(f, { x: 270, z: 100, r: 1e5 });
+  f.WalkBack.startTo({ regionId: 1, x: 600, y: 0, z: 100 }, { label: 'the test spot', onFail: r => { failed = r; } });
+  let ticks = 0;
+  while (f.WalkBack.active && ticks++ < 200) { f.WalkBack.tick(); step(); f.advance(900); }
+  assert.equal(f.WalkBack.active, null);
+  assert.match(failed, /blocked|obstacle/i);
+  assert.ok(ticks < 30, 'gave up within about half a minute, not after minutes of standing');
+});
+test('town and restock walking recover from an unmapped object the same way', () => {
+  let f = fixture(), step = pillarWorld(f);
+  const dest = { regionId: 1, x: 600, y: 0, z: 100 };
+  f.Town.trip = { phase: 'walk-vendor', at: f.Ticker ? 0 : 0, travel: null, lastPose: null, progressAt: 100000, movedAt: -Infinity, retryAt: 0 };
+  let ticks = 0, arrived = false;
+  while (!arrived && f.Town.trip && ticks++ < 150) { arrived = f.Town.walk(dest); step(); f.advance(900); }
+  assert.equal(arrived, true, 'town walk got past the pillar');
+  f = fixture(); step = pillarWorld(f);
+  f.Restock.trip = { phase: 'vendor', route: [{ regionId: 1, x: 100, y: 0, z: 100 }, dest], index: 1, at: 0, movedAt: 0, best: Infinity, progressAt: 100000, manualAt: f.Manual.lastAt };
+  ticks = 0; arrived = false;
+  while (!arrived && f.Restock.trip && ticks++ < 150) { arrived = f.Restock.walk(); step(); f.advance(900); }
+  assert.ok(f.Restock.trip, 'restock walk was not failed'); assert.equal(arrived, true, 'restock walk got past the pillar');
+});
 test('resume hunting walks to a far spot instead of asking for manual steps', () => {
   const f = fixture();
   f.Settings.profile.hunt.center = { regionId: 6, x: 500, y: 0, z: 100 };

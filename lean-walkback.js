@@ -215,6 +215,15 @@ const WalkBack = {
         Activity.emit({ category: 'movement', code: 'walk-leg', text: 'Walk back leg ' + a.legs + ' of about ' + a.totalLegs + '.', details: { leg: a.legs, legs: a.totalLegs } });
       }
     }
+    // Standing against something the collision map does not know: route around the spot, then give up.
+    if (!World.isSitting()) {
+      const stall = Navigation.watch(a, pose, a.sentAt, a.travel?.route[a.travel.index] || a.leg?.target || dest);
+      if (stall === 'recover') Log.info('Walk back: stuck against an obstacle; trying another way round.');
+      else if (stall === 'giveup') {
+        if (a.source === 'navdata' && (this.replan(pose) || this.useLegs())) return;
+        return this.cancel('Walk back stopped: an obstacle blocks the way and I could not walk around it.');
+      }
+    }
     const move = Navigation.next(a, a.leg ? a.leg.target : dest, a.recorded);
     if (move.error && !move.waiting) {
       if (a.source === 'navdata') {
