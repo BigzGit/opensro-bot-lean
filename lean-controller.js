@@ -232,7 +232,7 @@ const Controller = {
       AutoMastery.tick();
       StatPoints.tick();
       Potion.tick();
-      ItemRules.dropTick();
+      if (!ItemRules.dropTick()) ItemRules.balanceTick();
       Loot.checkPetFull();
       if (Town.tick()) { this.mode = 'town service'; return; }
       if (Trap.tick()) { this.mode = 'escape'; return; }

@@ -44,7 +44,9 @@ const BuffGear = {
     const gp = World.gp, level = gp?.progression?.level;
     const list = this.items().filter(i => i.slot >= (gp.equipmentSlotCount || 13) && this.weapon(i) && kinds.includes(this.kind(i)) &&
       (i.durability ?? 1) > 0 && !this.bad.has(this.key(i)) && !(level >= 0 && Town.requiredLevel(i) > level));
-    list.sort((a, b) => (b.plus ?? 0) - (a.plus ?? 0) || a.slot - b.slot);
+    // The secondary weapon chosen on the Items page comes first, then the highest plus.
+    const chosen = i => ItemRules.guarded(i) ? 1 : 0;
+    list.sort((a, b) => chosen(b) - chosen(a) || (b.plus ?? 0) - (a.plus ?? 0) || a.slot - b.slot);
     return list[0] || null;
   },
   setup() { return { weapon: this.key(this.at(6)), shield: this.key(this.at(7)), auto: true }; },

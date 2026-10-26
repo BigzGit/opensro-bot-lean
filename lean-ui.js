@@ -1124,7 +1124,15 @@ const UI = {
     table.setAttribute('role', 'table'); table.setAttribute('aria-label', 'Item rules');
     const rules = this.group('Item rules', summary, bulk, table, pager,
       el('p', 'Pick: always takes the item whatever the Loot switches say, never leaves it. A rule is for that exact item (each size or degree is its own item), so tick Only items on the ground now to find what is dropping and set the rule on those. Store puts it in the warehouse on town trips (also from your bag, except potions and scrolls the trip needs). Sell sells it from the pet at the repair merchant; your own bag is never sold. Keep never stores or sells it. Drop throws it away from your bag or the pet while hunting, and it is never picked up again. Right-click a row for the same choices.', 'muted'));
-    this.pane.append(filters, rules);
+    const gearOptions = shield => () => [['', 'None'], ...ItemRules.gearChoices(shield).map(i => [BuffGear.key(i), `${Items.name(i.refObjId)}${i.plus ? ' +' + i.plus : ''} (${i.slot < 8 ? 'worn' : 'bag ' + (i.slot - (World.gp?.equipmentSlotCount || 13) + 1)})`])];
+    const gearPick = (title, slot, shield) => this.select(title, gearOptions(shield), () => ItemRules.cfg().gear?.[slot] || '', v => ItemRules.setGear(slot, v));
+    const gear = this.group('Pet and gear',
+      this.check('Balance free slots with the pickup pet', () => ItemRules.cfg().balance, v => ItemRules.cfg().balance = v),
+      el('p', 'While hunting, items with a Sell or Store rule move to the bag or pet, whichever has more free slots. Gear picked below and supplies never move.', 'muted'),
+      gearPick('Primary weapon', 'primaryWeapon', false), gearPick('Primary shield', 'primaryShield', true),
+      gearPick('Secondary weapon', 'secondaryWeapon', false), gearPick('Secondary shield', 'secondaryShield', true),
+      el('p', 'Pick from worn gear or your bag. Chosen gear is never sold, stored, dropped or moved to the pet, and the secondary weapon is the one buff swaps wear first.', 'muted'));
+    this.pane.append(filters, gear, rules);
     const set = (ids, change, label) => { ItemRules.set(ids, change); this.toast(`${label}: ${ids.length} item${ids.length === 1 ? '' : 's'}.`); renderTable(); };
     // Bulk buttons ask for a second click when they change more than one item.
     const bulkActions = [['Pick always', { pick: 'yes' }], ['Pick never', { pick: 'no' }], ['Store', { act: 'store' }], ['Sell', { act: 'sell' }], ['Keep', { act: 'keep' }],

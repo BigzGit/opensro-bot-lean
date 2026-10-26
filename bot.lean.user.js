@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.146
+// @version      1.2.147
 // @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[NIX] Another SRO assistant is active. Disable it and reload to use NIX.');
   return;
 }
-const VERSION = '1.2.146';
+const VERSION = '1.2.147';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -186,7 +186,7 @@ const DISCORD_URL = 'https://discord.gg/Y5H5ZyfQ7u';
 const NOTES_URL = 'https://nixxane.github.io/opensro-bot-lean-site/#patch-notes';
 const CLASS_KEYS = ['normal', 'champion', 'giant', 'party', 'elite', 'unique'];
 const DEFAULT_PROFILE = {
-  items: { rules: {} },
+  items: { rules: {}, balance: false, gear: { primaryWeapon: null, primaryShield: null, secondaryWeapon: null, secondaryShield: null } },
   alchemy: { target: 3, limit: 20, elixir: 0, powder: false, use: { luck: false, steady: false, immortal: false, astral: false }, stones: { luck: 1, steady: 1, immortal: 1, astral: 1 }, stoneLimit: 0,
     // The plus from which each helper is used: a failure from +5 up can destroy the item (Steady and Immortal matter from there),
     // Luck and lucky powder help at every plus, and Astral keeps +4 on a failure.
@@ -3955,6 +3955,7 @@ const Town = {
   // alchemy (checked by bag slot, so only for items from the character bag).
   depositItem(item, fromBag = false) {
     const c = this.cfg(), act = ItemRules.get(item.refObjId)?.act;
+    if (ItemRules.guarded(item)) return false; // the chosen primary / secondary gear stays put
     // An item rule decides first. Store: any kind of item, except from the bag what the trip itself needs
     // (potions, pills, return/reverse/speed scrolls, the supplies it buys). Sell, keep or drop: never deposited.
     if (act && act !== 'store') return false;
@@ -3987,7 +3988,7 @@ const Town = {
   // Pet loot, and the character bag when "Sell items from the character bag" is on. A Sell rule sells it; keep, store and drop rules never do.
   sellable(item) {
     // itemdata CanSell 0 (quest and event items): the merchant refuses the sale with inventory code 2.
-    if (item.tooltip?.fields?.canSell === 0) return false;
+    if (item.tooltip?.fields?.canSell === 0 || ItemRules.guarded(item)) return false;
     // Pet summon scrolls and flutes (TID1 3, TID2 2): the pet itself. The merchant buys every one of them, and players
     // keep other pets' scrolls in the pickup pet, so they are never sold, not even with a Sell rule.
     if (!Number.isInteger(item.typeFlags) || (item.typeFlags & 124) === 76) return false;
@@ -4536,7 +4537,9 @@ const BuffGear = {
     const gp = World.gp, level = gp?.progression?.level;
     const list = this.items().filter(i => i.slot >= (gp.equipmentSlotCount || 13) && this.weapon(i) && kinds.includes(this.kind(i)) &&
       (i.durability ?? 1) > 0 && !this.bad.has(this.key(i)) && !(level >= 0 && Town.requiredLevel(i) > level));
-    list.sort((a, b) => (b.plus ?? 0) - (a.plus ?? 0) || a.slot - b.slot);
+    // The secondary weapon chosen on the Items page comes first, then the highest plus.
+    const chosen = i => ItemRules.guarded(i) ? 1 : 0;
+    list.sort((a, b) => chosen(b) - chosen(a) || (b.plus ?? 0) - (a.plus ?? 0) || a.slot - b.slot);
     return list[0] || null;
   },
   setup() { return { weapon: this.key(this.at(6)), shield: this.key(this.at(7)), auto: true }; },
@@ -5576,7 +5579,7 @@ const Controller = {
       AutoMastery.tick();
       StatPoints.tick();
       Potion.tick();
-      ItemRules.dropTick();
+      if (!ItemRules.dropTick()) ItemRules.balanceTick();
       Loot.checkPetFull();
       if (Town.tick()) { this.mode = 'town service'; return; }
       if (Trap.tick()) { this.mode = 'escape'; return; }
@@ -9499,7 +9502,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.146", "title": "A blocked walk to the warehouse no longer ends the town trip", "items": ["If the bot cannot walk around an obstacle on the way to the warehouse, it now skips the deposit and carries on with potions, repairs and the way back, instead of stopping in town with \"Blocked on the way to the warehouse\".", "A blocked walk to the other town services still stops the trip, as before."], "note": "Tested in simulation only. The cause of the block itself (why the character stopped moving) is not known; the bot's route from the town arrival point to the Hotan warehouse checks out against the game's collision data."}, {"version": "1.2.145", "title": "A full pet of protected items no longer strands you in town", "items": ["If the pickup pet is nearly full but everything in it is protected (nothing the trip can sell or store), the bot no longer goes to town for it, and a trip that is already under way carries on and goes back to hunting instead of stopping in town with \"pet is full of protected items\".", "A pet that holds sellable or storable items still triggers the trip as before."], "note": "Tested in simulation only; reproduced from a player's diagnostics report, not on the live server."}, {"version": "1.2.144", "title": "Lure mode for tanks, thanks to Rebraxin", "items": ["New **Lure** section (Combat → Hunt area, and the classic Training place page). A tank walks to saved pull points in turn, taunts the nearest monster, brings it back to the hunting spot, pauses on the way so it keeps up, then holds while the party takes over. It never attacks. Off by default. Setup is in the manual under \"Luring monsters to the party\".", "New setting **Stop pulling at this many monsters in the training area**: while that many monsters are already at the hunting spot, the tank waits instead of pulling more. 0 turns it off."], "note": "Lure mode was run on the live server by a player with a Warrior tank in a four-character party, who reported it works. The stop-pulling setting is tested in simulation only."}, {"version": "1.2.143", "title": "Party: accept list, party leader name and leave-if-wrong-leader", "items": ["New **Accept only these players** box on the Party page. Auto-accept then answers only applicants whose character name is on the list (comma separated, any letter case). Empty means everyone, as before. The list is saved per character.", "**Main account character name** is now **Party leader name**, and the option reads **Join the party leader's party**. Your saved name carries over.", "New option **Leave the party if its leader is someone else**: for your other accounts, the bot leaves a party whose leader is not the named character, then looks for the named leader's party as usual.", "Not included: inviting players from a list. Auto-recruit still works through the party-matching listing."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.142", "title": "Buff weapon swaps work with a full bag when no shield has to come off", "items": ["Swapping to a buff weapon exchanges places with the weapon in your bag, so it needs no free bag slot. The bot used to refuse to start with a completely full bag. It now starts whenever no shield (or arrows) has to be taken off, and only asks for one free slot when one does. The message says so (\"free bag slot to take off your shield\").", "Town trips and the rest of the nearly-full-bag handling are unchanged. If the character still gets stuck with one slot left, send the exact message the bot shows."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.141", "title": "The pet status no longer makes the panel jump", "items": ["The pet status lines (on the Loot page and in Supplies) now sit in a box of fixed height. When the text is longer than the box it scrolls inside it (hover shows the full text), so the rest of the panel stays where it is as the status changes."], "note": "Layout fix only; checked in code and tests, not yet confirmed on the live game."}, {"version": "1.2.140", "title": "Dying during a buff weapon swap no longer leaves the buff weapon on", "items": ["If your character died (or the world changed) while the bot was wearing a buff weapon, the bot used to stop hunting and leave that weapon on, so after reviving you could not attack until you pressed \"Restore combat gear\". Now hunting carries on, and the bot puts your combat weapon and shield back on by itself as soon as the character is alive again, before the return trip."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.139", "title": "Back to the hunting spot by reverse scroll, not on foot, after logging in dead", "items": ["When a character was dead at login and wakes up in town, the bot no longer tries to walk from town to the hunting spot. With town services set up it does the town trip (potions, repair, warehouse) and then uses the reverse return scroll, the same way it does after dying while hunting.", "The same applies when hunting resumes after a reconnect and the character is standing in that town.", "Outside town nothing changes: small returns inside the hunting area still walk as before."], "note": "Tested in simulation only; not yet confirmed on the live server. Needs town services saved and a reverse return scroll in the bag."}];
+const RELEASE_NOTES = [{"version": "1.2.147", "title": "Pick Pet balancing and protected primary/secondary gear", "items": ["New \"Pet and gear\" box on the Items page. Pick a primary and secondary weapon and shield from what you wear or carry. Chosen gear is never sold, stored, dropped or moved to the pet.", "Buff swaps now wear the secondary weapon first when it fits the skill.", "New switch \"Balance free slots with the pickup pet\" (off by default). While hunting, items with a Sell or Store rule move one at a time to the bag or the pet, whichever has more free slots. Needs two free slots on the side that receives."], "note": "Tested in simulation only. The pet transfer command is the one town trips already use; balancing on the live server has not been tried."}, {"version": "1.2.146", "title": "A blocked walk to the warehouse no longer ends the town trip", "items": ["If the bot cannot walk around an obstacle on the way to the warehouse, it now skips the deposit and carries on with potions, repairs and the way back, instead of stopping in town with \"Blocked on the way to the warehouse\".", "A blocked walk to the other town services still stops the trip, as before."], "note": "Tested in simulation only. The cause of the block itself (why the character stopped moving) is not known; the bot's route from the town arrival point to the Hotan warehouse checks out against the game's collision data."}, {"version": "1.2.145", "title": "A full pet of protected items no longer strands you in town", "items": ["If the pickup pet is nearly full but everything in it is protected (nothing the trip can sell or store), the bot no longer goes to town for it, and a trip that is already under way carries on and goes back to hunting instead of stopping in town with \"pet is full of protected items\".", "A pet that holds sellable or storable items still triggers the trip as before."], "note": "Tested in simulation only; reproduced from a player's diagnostics report, not on the live server."}, {"version": "1.2.144", "title": "Lure mode for tanks, thanks to Rebraxin", "items": ["New **Lure** section (Combat → Hunt area, and the classic Training place page). A tank walks to saved pull points in turn, taunts the nearest monster, brings it back to the hunting spot, pauses on the way so it keeps up, then holds while the party takes over. It never attacks. Off by default. Setup is in the manual under \"Luring monsters to the party\".", "New setting **Stop pulling at this many monsters in the training area**: while that many monsters are already at the hunting spot, the tank waits instead of pulling more. 0 turns it off."], "note": "Lure mode was run on the live server by a player with a Warrior tank in a four-character party, who reported it works. The stop-pulling setting is tested in simulation only."}, {"version": "1.2.143", "title": "Party: accept list, party leader name and leave-if-wrong-leader", "items": ["New **Accept only these players** box on the Party page. Auto-accept then answers only applicants whose character name is on the list (comma separated, any letter case). Empty means everyone, as before. The list is saved per character.", "**Main account character name** is now **Party leader name**, and the option reads **Join the party leader's party**. Your saved name carries over.", "New option **Leave the party if its leader is someone else**: for your other accounts, the bot leaves a party whose leader is not the named character, then looks for the named leader's party as usual.", "Not included: inviting players from a list. Auto-recruit still works through the party-matching listing."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.142", "title": "Buff weapon swaps work with a full bag when no shield has to come off", "items": ["Swapping to a buff weapon exchanges places with the weapon in your bag, so it needs no free bag slot. The bot used to refuse to start with a completely full bag. It now starts whenever no shield (or arrows) has to be taken off, and only asks for one free slot when one does. The message says so (\"free bag slot to take off your shield\").", "Town trips and the rest of the nearly-full-bag handling are unchanged. If the character still gets stuck with one slot left, send the exact message the bot shows."], "note": "Tested in simulation only; not yet confirmed on the live server."}, {"version": "1.2.141", "title": "The pet status no longer makes the panel jump", "items": ["The pet status lines (on the Loot page and in Supplies) now sit in a box of fixed height. When the text is longer than the box it scrolls inside it (hover shows the full text), so the rest of the panel stays where it is as the status changes."], "note": "Layout fix only; checked in code and tests, not yet confirmed on the live game."}, {"version": "1.2.140", "title": "Dying during a buff weapon swap no longer leaves the buff weapon on", "items": ["If your character died (or the world changed) while the bot was wearing a buff weapon, the bot used to stop hunting and leave that weapon on, so after reviving you could not attack until you pressed \"Restore combat gear\". Now hunting carries on, and the bot puts your combat weapon and shield back on by itself as soon as the character is alive again, before the return trip."], "note": "Tested in simulation only; not yet confirmed on the live server."}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -9979,8 +9982,10 @@ const ITEM_WEAPON = { CH: { BLADE: 'Blade', SWORD: 'Sword', TBLADE: 'Glaive', SP
   EU: { SWORD: '1HSword', TSWORD: '2HSword', AXE: 'Axe', CROSSBOW: 'X-Bow', DAGGER: 'Dagger', TSTAFF: 'Staff', DARKSTAFF: 'W-Rod', STAFF: 'C-Rod', HARP: 'Harp' } };
 const ITEM_ACCESSORY = { NECKLACE: 'Necklace', EARRING: 'Earring', RING: 'Ring' };
 const ITEM_DROP_CONFIRM_MS = 5000;
+const ITEM_BALANCE_CONFIRM_MS = 5000;
+const ITEM_GEAR_SLOTS = ['primaryWeapon', 'primaryShield', 'secondaryWeapon', 'secondaryShield'];
 const ItemRules = {
-  infos: new Map(), dropping: null, dropBan: new Map(), message: '',
+  infos: new Map(), dropping: null, dropBan: new Map(), message: '', balancing: null, balanceBan: new Map(),
   cfg() { return Settings.profile.items; },
   get(id) { return this.cfg().rules[id] || null; },
   // change: { pick: 'yes' | 'no' | null, act: 'store' | 'sell' | 'keep' | 'drop' | null }; null clears that part.
@@ -9995,6 +10000,20 @@ const ItemRules = {
     Settings.saveProfile();
   },
   count() { return Object.keys(this.cfg().rules).length; },
+  // The primary and secondary weapon / shield picked on the Items page, as BuffGear item keys. Identical copies share a key,
+  // so every copy is protected. Protected gear is never sold, stored, dropped or moved to the pet.
+  gearKeys() { const g = this.cfg().gear || {}; return ITEM_GEAR_SLOTS.map(k => g[k]).filter(Boolean); },
+  guarded(item) { const keys = this.gearKeys(); return !!item && keys.length > 0 && keys.includes(BuffGear.key(item)); },
+  // Weapons and shields the character can choose from: worn first, then the bag.
+  gearChoices(shield) {
+    return World.items().filter(i => shield ? BuffGear.shield(i) : BuffGear.weapon(i))
+      .sort((a, b) => (a.slot > 7) - (b.slot > 7) || a.slot - b.slot);
+  },
+  setGear(slot, key) {
+    if (!ITEM_GEAR_SLOTS.includes(slot)) return;
+    (this.cfg().gear ||= {})[slot] = key || null;
+    Settings.saveProfile();
+  },
   // What the codename says about an item, for the filters and the table. Cached per item.
   info(id) {
     if (this.infos.has(id)) return this.infos.get(id);
@@ -10038,6 +10057,34 @@ const ItemRules = {
     }
     return out.sort((a, b) => a.id - b.id);
   },
+  // Keep free slots even between the bag and the pickup pet by moving items that have a Sell or Store rule to the side with
+  // more room, one at a time, while hunting and outside town service and open windows. Needs two free slots on the side
+  // that receives, so loot keeps flowing. Protected gear, supplies the trip needs and worn gear never move.
+  balanceTick() {
+    const gp = World.gp, pet = Loot.pet();
+    if (!this.cfg().balance || !pet || !Hunt.running || Town.trip || !World.inWorld() || World.isDead() || !gp || gp.inventoryPending || gp.storage || gp.exchange?.open || Restock.activeShop()) return false;
+    const t = now(), b = this.balancing, equipped = gp.equipmentSlotCount || 13;
+    if (b) {
+      const moved = (b.toPet ? Loot.items(pet) : World.items()).some(i => i.slot === b.destination && i.refObjId === b.ref);
+      if (moved) { this.balancing = null; Log.info('Moved ' + Items.name(b.ref) + (b.toPet ? ' to the pet' : ' to the bag') + ' (balance).'); }
+      else if (t - b.at < ITEM_BALANCE_CONFIRM_MS) return false;
+      else { this.balancing = null; this.balanceBan.set(b.key, t + 30000); this.message = Items.name(b.ref) + ' was not moved; trying again in 30 s.'; Log.warn(this.message); }
+    }
+    const petInv = pet.rec.inventory || [], petFree = pet.rec.status - petInv.length, bagFree = World.freeBagSlots();
+    const toPet = bagFree - petFree <= -2 && petFree >= 2, toBag = petFree - bagFree <= -2 && bagFree >= 2;
+    if (!toPet && !toBag) return false;
+    const key = i => (toPet ? 0 : pet.rec.gid) + ':' + i.slot + ':' + i.refObjId;
+    const movable = i => ['store', 'sell'].includes(this.get(i.refObjId)?.act) && !this.guarded(i) && !(toPet && (Town.needed(i) || Alchemy.selected && Alchemy.selected.slot === i.slot)) &&
+      (this.balanceBan.get(key(i)) || 0) <= t;
+    const item = (toPet ? World.items().filter(i => i.slot >= equipped) : petInv).find(movable);
+    if (!item) return false;
+    const destination = toPet ? Town.free(petInv, 0, pet.rec.status) : Town.free(gp.inventory, equipped, gp.inventorySlotCount);
+    if (destination === null) return false;
+    const command = { kind: 'cos-transfer', gid: pet.rec.gid, toCos: toPet, source: item.slot, destination };
+    if (!Cmd.spaced(command.kind) || !Cmd.raw(command, 'Balance: move ' + Items.name(item.refObjId))) return false;
+    this.balancing = { key: key(item), toPet, ref: item.refObjId, destination, at: t };
+    return true;
+  },
   // Drop items with a Drop rule from the character bag (never worn gear) or the pickup pet, one at a time, while
   // hunting and outside town service and open windows. A drop counts once the item has left that slot.
   dropTick() {
@@ -10054,7 +10101,7 @@ const ItemRules = {
     const equipped = gp.equipmentSlotCount || 13, pet = Loot.pet();
     const sources = [[0, World.items().filter(i => i.slot >= equipped)], ...(pet ? [[pet.rec.gid, pet.rec.inventory || []]] : [])];
     for (const [petGid, items] of sources) for (const item of items) {
-      if (this.get(item.refObjId)?.act !== 'drop') continue;
+      if (this.get(item.refObjId)?.act !== 'drop' || this.guarded(item)) continue;
       const key = petGid + ':' + item.slot + ':' + item.refObjId;
       if ((this.dropBan.get(key) || 0) > t) continue;
       const command = petGid ? { kind: 'cos-drop', gid: petGid, slot: item.slot } : { kind: 'item-drop', slot: item.slot };
@@ -11522,7 +11569,15 @@ const UI = {
     table.setAttribute('role', 'table'); table.setAttribute('aria-label', 'Item rules');
     const rules = this.group('Item rules', summary, bulk, table, pager,
       el('p', 'Pick: always takes the item whatever the Loot switches say, never leaves it. A rule is for that exact item (each size or degree is its own item), so tick Only items on the ground now to find what is dropping and set the rule on those. Store puts it in the warehouse on town trips (also from your bag, except potions and scrolls the trip needs). Sell sells it from the pet at the repair merchant; your own bag is never sold. Keep never stores or sells it. Drop throws it away from your bag or the pet while hunting, and it is never picked up again. Right-click a row for the same choices.', 'muted'));
-    this.pane.append(filters, rules);
+    const gearOptions = shield => () => [['', 'None'], ...ItemRules.gearChoices(shield).map(i => [BuffGear.key(i), `${Items.name(i.refObjId)}${i.plus ? ' +' + i.plus : ''} (${i.slot < 8 ? 'worn' : 'bag ' + (i.slot - (World.gp?.equipmentSlotCount || 13) + 1)})`])];
+    const gearPick = (title, slot, shield) => this.select(title, gearOptions(shield), () => ItemRules.cfg().gear?.[slot] || '', v => ItemRules.setGear(slot, v));
+    const gear = this.group('Pet and gear',
+      this.check('Balance free slots with the pickup pet', () => ItemRules.cfg().balance, v => ItemRules.cfg().balance = v),
+      el('p', 'While hunting, items with a Sell or Store rule move to the bag or pet, whichever has more free slots. Gear picked below and supplies never move.', 'muted'),
+      gearPick('Primary weapon', 'primaryWeapon', false), gearPick('Primary shield', 'primaryShield', true),
+      gearPick('Secondary weapon', 'secondaryWeapon', false), gearPick('Secondary shield', 'secondaryShield', true),
+      el('p', 'Pick from worn gear or your bag. Chosen gear is never sold, stored, dropped or moved to the pet, and the secondary weapon is the one buff swaps wear first.', 'muted'));
+    this.pane.append(filters, gear, rules);
     const set = (ids, change, label) => { ItemRules.set(ids, change); this.toast(`${label}: ${ids.length} item${ids.length === 1 ? '' : 's'}.`); renderTable(); };
     // Bulk buttons ask for a second click when they change more than one item.
     const bulkActions = [['Pick always', { pick: 'yes' }], ['Pick never', { pick: 'no' }], ['Store', { act: 'store' }], ['Sell', { act: 'sell' }], ['Keep', { act: 'keep' }],

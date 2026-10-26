@@ -673,6 +673,31 @@ test('item rules decide what the town trip stores and sells', () => {
   f.World.gp.inventory.push({ slot: 20, refObjId: 1003, typeFlags: 108, quantity: 1, name: 'Other item' });
   assert.equal(f.Town.depositItem(f.World.gp.inventory.at(-1), true), true, 'other bag items with a store rule are deposited');
 });
+test('chosen primary and secondary gear is protected and balance moves rule items between bag and pet', () => {
+  const f = townFixture(), gp = f.World.gp, pet = f.pet;
+  const spare = { slot: 20, refObjId: 1003, typeFlags: 108, quantity: 1 };
+  gp.inventory.push(spare);
+  const key = f.BuffGear.key(spare);
+  f.ItemRules.set([1003], { act: 'sell' });
+  assert.equal(f.Town.sellableBag(spare), true, 'a Sell rule sells it');
+  f.ItemRules.setGear('secondaryWeapon', key);
+  assert.deepEqual([f.Town.sellableBag(spare), f.Town.sellable(spare), f.Town.depositItem(spare, true)], [false, false, false], 'chosen gear is never sold or stored');
+  f.ItemRules.set([1003], { act: 'drop' }); f.ItemRules.dropTick();
+  assert.equal(f.commands.some(c => c.kind === 'item-drop' && c.slot === 20), false, 'nor dropped');
+  f.ItemRules.set([1003], { act: 'store' }); f.ItemRules.setGear('secondaryWeapon', null);
+  // balance: off by default, then moves a rule item toward the side with more room
+  pet.status = pet.inventory.length + 10; const n = f.commands.length;
+  f.ItemRules.balanceTick(); assert.equal(f.commands.length, n, 'off by default');
+  f.ItemRules.cfg().balance = true; f.ItemRules.setGear('secondaryWeapon', key); f.ItemRules.balanceTick();
+  assert.equal(f.commands.slice(n).some(c => c.kind === 'cos-transfer'), false, 'chosen gear does not move');
+  f.ItemRules.setGear('secondaryWeapon', null);
+  const free = f.World.freeBagSlots();
+  for (let s = 21; s < gp.inventorySlotCount && f.World.freeBagSlots() > 0; s++) gp.inventory.push({ slot: s, refObjId: 2000 + s, typeFlags: 108, quantity: 1 });
+  f.ItemRules.balanceTick();
+  const cmd = f.commands.at(-1);
+  assert.equal(cmd.kind, 'cos-transfer'); assert.equal(cmd.toCos, true); assert.equal(cmd.source, 20, 'the rule item goes to the roomier pet');
+  assert.ok(free >= 0);
+});
 test('item rules drop from the bag and the pet, one at a time, never worn gear', () => {
   const f = townFixture(), gp = f.World.gp;
   gp.inventory.push({ slot: 20, refObjId: 1003, typeFlags: 108, quantity: 1 });

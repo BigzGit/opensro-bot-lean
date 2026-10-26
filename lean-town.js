@@ -213,6 +213,7 @@ const Town = {
   // alchemy (checked by bag slot, so only for items from the character bag).
   depositItem(item, fromBag = false) {
     const c = this.cfg(), act = ItemRules.get(item.refObjId)?.act;
+    if (ItemRules.guarded(item)) return false; // the chosen primary / secondary gear stays put
     // An item rule decides first. Store: any kind of item, except from the bag what the trip itself needs
     // (potions, pills, return/reverse/speed scrolls, the supplies it buys). Sell, keep or drop: never deposited.
     if (act && act !== 'store') return false;
@@ -245,7 +246,7 @@ const Town = {
   // Pet loot, and the character bag when "Sell items from the character bag" is on. A Sell rule sells it; keep, store and drop rules never do.
   sellable(item) {
     // itemdata CanSell 0 (quest and event items): the merchant refuses the sale with inventory code 2.
-    if (item.tooltip?.fields?.canSell === 0) return false;
+    if (item.tooltip?.fields?.canSell === 0 || ItemRules.guarded(item)) return false;
     // Pet summon scrolls and flutes (TID1 3, TID2 2): the pet itself. The merchant buys every one of them, and players
     // keep other pets' scrolls in the pickup pet, so they are never sold, not even with a Sell rule.
     if (!Number.isInteger(item.typeFlags) || (item.typeFlags & 124) === 76) return false;

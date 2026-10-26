@@ -17,6 +17,7 @@ The **Setup** page checks all this for you and fixes the next missing thing.
 
 - Combat rotation, buffs with weapon swapping, imbue, party heal/buff, resurrection
 - Pet and character looting with per-item rules (pick, store, sell, keep, drop)
+- Optional pickup-pet slot balancing, and a primary/secondary weapon and shield that are never sold, stored or dropped
 - Town trips by return scroll: potions, repair, warehouse, selling, reverse back
 - Optional selling of ordinary gear from the character bag on town trips (off by default)
 - Item alchemy, auto mastery and skills, stat points
