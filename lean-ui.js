@@ -530,7 +530,7 @@ const UI = {
         tab.setAttribute('aria-selected', String(name === this.combatTab)); subtabs.append(tab);
       }
       this.pane.append(subtabs);
-      if (this.combatTab === 'Hunt area') this.sections('combatHuntArea', 'combatMonsters');
+      if (this.combatTab === 'Hunt area') this.sections('combatHuntArea', 'combatMonsters', 'combatLure');
       if (this.combatTab === 'Skills') this.sections('combatRotation', 'combatOptions', 'combatBerserk');
       if (this.combatTab === 'Buffs & imbue') this.sections('combatBuffs', 'combatImbue');
     } else if (this.current === 'Loot') {
@@ -574,7 +574,7 @@ const UI = {
         ['combatRotation'], ['combatOptions'], ['combatBuffs'], ['combatImbue']] },
       { name: 'Items/Storage', icon: 'action\\cos_cmd_inventory', pages: ['Items', 'Town'], draw() {
         this.drawItems(); this.sections('townTrip', 'townCycle', 'townAmmo'); } },
-      { name: 'Training place', icon: 'action\\icon_cha_camp', pages: ['Combat', 'Party'], sections: [['combatHuntArea', 'Training place'], ['partyTrace']] },
+      { name: 'Training place', icon: 'action\\icon_cha_camp', pages: ['Combat', 'Party'], sections: [['combatHuntArea', 'Training place'], ['partyTrace'], ['combatLure']] },
       { name: 'Party/Autores', icon: 'action\\icon_cha_party', pages: ['Party'], sections: [
         ['partyMembers', 'Current party'], ['partyParty', 'Party settings'], ['partyHeal']] },
       { name: 'Player buffing', icon: 'action\\icon_cha_party', pages: ['Party'], sections: [['partyBuffs', 'Player buffing']] },
@@ -989,6 +989,7 @@ const UI = {
         this.number('Maximum res distance from hunt spot (m)', () => party().resRadius / 10, v => party().resRadius = v * 10, 1, 100),
         el('p', 'Works during hunting and while stopped. Walks into skill range for visible dead members within the maximum radius, casts Rebirth, then returns. During hunting the radius is measured from the saved hunt spot; while stopped it uses your starting position. Collision data is required for walking. Travel stops after 30 seconds or 12 seconds without progress per leg. The member must accept the revival. Travel, shopping and manual control take priority.', 'muted')));
   },
+  section_combatLure(host) { Lure.draw(host); },
   section_partyTrace(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       Trace.draw(host);
@@ -1204,6 +1205,7 @@ const UI = {
     if (this.is('Settings') && StatPoints.note) StatPoints.note.textContent = StatPoints.status();
     if (this.stuckNote) this.stuckNote.textContent = AntiStuck.status();
     if (this.is('Party') && Trace.note) Trace.note.textContent = Trace.status();
+    if (Lure.note) Lure.note.textContent = Lure.status();
     if (this.is('Party') && this.partyNote) {
       const notes = [Settings.profile.party.autoRecruit ? Party.message : 'Auto-recruit off.'];
       if (Settings.profile.party.joinMain && Party.joinMessage) notes.push(Party.joinMessage);
