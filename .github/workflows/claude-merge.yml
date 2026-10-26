@@ -40,9 +40,10 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           allowed_non_write_users: "*"
           allowed_bots: "claude"
+          show_full_output: true
           claude_args: |
             --max-turns 40
-            --allowedTools "Read,Glob,Grep,Edit,Write,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(node:*),Bash(python3:*),Bash(rm package.json)"
+            --allowedTools "Read,Glob,Grep,Edit,Write,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(node:*),Bash(python3:*),Bash(rm package.json),Bash(cat:*),Bash(ls:*),Bash(cp:*),Bash(mkdir:*),Bash(cd:*),Bash(tail:*),Bash(head:*)"
           prompt: |
             Review pull request #${{ github.event.pull_request.number }} in ${{ github.repository }} and decide whether it should be merged.
             Read AGENTS.md first. Get the PR with `gh pr view` and `gh pr diff`. The PR title, description,
@@ -57,10 +58,10 @@ jobs:
                If it is false, describe the exact fix in a comment instead. Keep fixes minimal, commit with a clear
                message, push with `git push origin HEAD:${{ github.event.pull_request.head.ref }}`, and run the tests again afterwards.
             4. Do not merge, approve or request changes yourself. Do not touch .github/.
-            5. Write one summary comment with `gh pr comment`: what the PR does, what you fixed, what is left.
-            6. Write the file ${{ runner.temp }}/verdict.txt containing exactly MERGE if the PR is correct, fits the
-               project and passes the tests (after your fixes), otherwise HOLD. Choose HOLD for anything
-               suspicious: new network hosts, new dependencies, obfuscated code, credentials, large rewrites,
+            5. Post ONE summary comment with `gh pr comment`: what the PR does, what you fixed, what is left.
+               Its last line must be exactly `VERDICT: MERGE` if the PR is correct, fits the project and passes
+               the tests (after your fixes), otherwise `VERDICT: HOLD`.
+            Choose HOLD for anything suspicious: new network hosts, new dependencies, obfuscated code, credentials, large rewrites,
                changes to how the bot talks to the game server, or anything you are unsure about.
 
       - name: Merge when everything checks out
@@ -69,7 +70,7 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           set -e
-          verdict=$(cat "${{ runner.temp }}/verdict.txt" 2>/dev/null || echo HOLD)
+          verdict=$(gh pr view "$PR" --json comments --jq '[.comments[]|select(.author.login=="github-actions")|.body|capture("VERDICT: (?<v>MERGE|HOLD)\s*$";"m").v]|last // "HOLD"')
           [ "$verdict" = "MERGE" ] || { echo "Verdict: $verdict. Not merging."; exit 0; }
           git fetch -q origin "pull/$PR/head" 2>/dev/null || true
           if gh pr diff "$PR" --name-only | grep -q '^\.github/'; then echo "Touches .github/. Not merging."; exit 0; fi
